@@ -8,7 +8,7 @@ from heavden.agent.sql_guard import MAX_ROWS, SqlRejected, check_sql
 from heavden_api.app import create_app
 from heavden_api.chat import sandbox as sandbox_module
 from heavden_api.chat.agent import LLMReply, ToolCall, run_agent, system_prompt
-from heavden_api.chat.limits import RateLimiter
+from heavden_api.chat.limits import DailyBudget, RateLimiter, client_address
 from heavden_api.chat.recorded import Recordings, normalise
 from heavden_api.chat.sandbox import SqlSandbox
 from heavden_api.config import Settings
@@ -264,3 +264,65 @@ def test_rate_limiter_counts_per_client():
 
 def test_recording_lookup_ignores_case_and_punctuation():
     assert normalise("What's NEWS2?") == normalise("whats news2")
+
+
+# --- Limits (who is the visitor, and how much can they spend?) -------------------------------
+
+
+@pytest.mark.parametrize(
+    "header,hops,expected",
+    [
+        ("6.6.6.6", 0, "peer"),  # local: the header is ignored entirely
+        ("6.6.6.6, 203.0.113.7", 1, "203.0.113.7"),  # Render added the last entry
+        ("6.6.6.6, 198.51.100.9, 203.0.113.7", 2, "198.51.100.9"),  # Vercel -> Render
+        ("203.0.113.7", 2, "peer"),  # a proxy is missing: don't trust a lone entry
+        (None, 1, "peer"),
+    ],
+)
+def test_client_address_counts_trusted_hops_from_the_right(header, hops, expected):
+    assert client_address(header, "peer", hops) == expected
+
+
+def test_forged_addresses_do_not_bypass_the_limit(demo_snapshot):
+    with _client(demo_snapshot, chat_requests_per_hour=2, trusted_proxy_hops=1) as client:
+        codes = [
+            client.post(
+                "/chat",
+                json={"message": "hello there"},
+                headers={"X-Forwarded-For": f"10.0.0.{i}, 203.0.113.7"},  # forged first entry
+            ).status_code
+            for i in range(3)
+        ]
+    assert codes == [200, 200, 429]
+
+
+def test_daily_budget_caps_live_answers_then_replays(demo_snapshot):
+    llm = ScriptedLLM([LLMReply("live answer", [])] * 3)
+    with _client(demo_snapshot, llm, chat_live_answers_per_day=1) as client:
+        first = client.post("/chat", json={"message": "question one"}).json()
+        second = client.post("/chat", json={"message": "question two"}).json()
+    assert first["mode"] == "live" and second["mode"] == "recorded"
+    assert "budget" in second["notice"] and len(llm.calls) == 1
+
+
+def test_daily_budget_resets_each_day():
+    from datetime import UTC, datetime
+
+    now = [datetime(2026, 11, 14, 23, 0, tzinfo=UTC)]
+    budget = DailyBudget(1, clock=lambda: now[0])
+    assert budget.allow() and not budget.allow()
+    now[0] = datetime(2026, 11, 15, 0, 1, tzinfo=UTC)
+    assert budget.allow()
+
+
+def test_rate_limiter_forgets_idle_clients(monkeypatch):
+    from heavden_api.chat import limits
+
+    monkeypatch.setattr(limits, "MAX_TRACKED_CLIENTS", 2)
+    now = [0.0]
+    limiter = RateLimiter(5, window_seconds=60, clock=lambda: now[0])
+    for client in "abc":
+        limiter.allow(client)
+    now[0] = 120.0  # a, b and c are now idle for longer than the window
+    limiter.allow("d")
+    assert set(limiter.seen) == {"d"}
