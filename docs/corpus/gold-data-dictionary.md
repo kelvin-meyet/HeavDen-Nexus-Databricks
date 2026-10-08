@@ -1,0 +1,96 @@
+---
+doc_id: HD-DATA-001
+title: Gold Data Dictionary
+version: "1.0"
+status: current
+effective_date: 2026-11-01
+owner: HeavDen Data Engineering
+audience: analysts, ML team, AI assistant (Genie space)
+---
+
+# Gold Data Dictionary
+
+> **Synthetic data.** Tables live in the Unity Catalog schema `gold` of `heavden_dev`, `heavden_staging` and `heavden_prod`. All times are UTC.
+
+## 1. Layers in one paragraph
+
+**Bronze** holds raw data as landed (device JSON, copies of the Azure SQL tables). **Silver** holds cleaned, de-duplicated, typed data with history (patients, encounters, vitals, outcomes). **Gold** holds tables ready for dashboards, the model and the AI assistant. Analysts and the assistant should query **gold** only.
+
+## 2. `gold.patient_hour_features`
+
+One row per patient per hour in hospital: the model's input.
+
+| Column | Meaning |
+|---|---|
+| `encounter_id`, `patient_id` | the hospital stay and the patient |
+| `prediction_ts` | the hour the row describes; features use only data up to this time |
+| `site_id`, `unit_id`, `unit_type` | where the patient was at `prediction_ts` |
+| `<vital>_mean_1h`, `_median_1h`, `_min_1h`, `_max_1h` | summary of the last hour of readings; `<vital>` is `heart_rate`, `resp_rate`, `spo2`, `temp_c`, `sbp` or `dbp` |
+| `<vital>_mean_3h`, `<vital>_mean_6h` | averages over the last 3 and 6 hours |
+| `<vital>_trend_3h` | change across the last 3 hours (last hour's mean minus the mean of the hour two hours before it) |
+| `readings_1h`, `missing_1h`, `missing_6h` | number of readings received, and expected readings missing (dropouts, battery) |
+| `hours_since_admission` | time since the stay began |
+| `age`, `sex` | at admission |
+| `copd`, `heart_failure`, `diabetes`, `ckd`, `hypertension`, `atrial_fibrillation`, `on_beta_blocker`, `n_conditions` | long-term conditions and medication flags |
+| `on_oxygen`, `o2_flow_lpm`, `new_confusion`, `hours_since_obs` | from the most recent nurse observation before `prediction_ts` |
+| `news2_*`, `news2_total` | the seven NEWS2 component scores and total (see the *NEWS2 Reference Card*) |
+| `label` | 1 if escalated in the next 6 hours, 0 if not, null while the 6-hour window is still open |
+| `label_known_at` | when the label became known (`prediction_ts` + 6 hours) |
+
+## 3. `gold.risk_scores`
+
+One row per patient per hour, written by the hourly batch scoring job.
+
+| Column | Meaning |
+|---|---|
+| `encounter_id`, `patient_id`, `site_id`, `unit_id`, `prediction_ts` | as above |
+| `risk` | calibrated probability of escalation within 6 hours |
+| `risk_band` | `Low`, `Medium` or `High` (see the *Model Card*, section 3) |
+| `top_factors` | array of the 3 main reasons: factor, direction, size, driving reading |
+| `news2_total` | NEWS2 at the same hour, for comparison |
+| `model_version` | registered model version that produced the score |
+
+## 4. `gold.site_kpis_hourly`
+
+One row per unit per hour.
+
+| Column | Meaning |
+|---|---|
+| `site_id`, `unit_id`, `hour_ts` | where and when |
+| `census` | patients on the unit during the hour |
+| `n_low`, `n_medium`, `n_high` | patients in each risk band |
+| `alerts_raised` | new High alerts |
+| `escalations` | rapid response calls and ICU transfers that happened |
+| `mean_news2` | average NEWS2 |
+
+## 5. `gold.alerts_fact`
+
+One row per High alert.
+
+| Column | Meaning |
+|---|---|
+| `alert_id`, `encounter_id`, `patient_id`, `site_id`, `unit_id` | identifiers |
+| `alert_ts` | when the patient entered the High band |
+| `risk`, `news2_total`, `top_factors` | the score and reasons at alert time |
+| `escalated_within_6h` | whether an escalation followed (null until known) |
+| `hours_to_escalation` | warning time, if escalated |
+
+## 6. `gold.device_health_daily`
+
+One row per device per day.
+
+| Column | Meaning |
+|---|---|
+| `device_id`, `site_id`, `date` | identifiers |
+| `messages_received`, `messages_expected`, `uptime_pct` | completeness |
+| `stuck_minutes`, `battery_outages`, `min_battery_pct` | fault indicators |
+| `firmware` | firmware version(s) reported that day |
+| `mean_spo2` | daily mean SpO2 across patients on the device; a drop at one site can reveal a sensor fault |
+
+## 7. Common questions and where to look
+
+- *How many high-risk patients are at a site now?* `gold.risk_scores`, latest `prediction_ts`, `risk_band = 'High'`.
+- *How many alerts did a unit raise yesterday?* `gold.alerts_fact` or `gold.site_kpis_hourly`.
+- *Did alerts lead to escalations?* `gold.alerts_fact.escalated_within_6h`.
+- *Are devices at Site B healthy?* `gold.device_health_daily`.
+- *Why is a patient high risk?* `top_factors` in `gold.risk_scores`, or ask the assistant to explain the patient.
