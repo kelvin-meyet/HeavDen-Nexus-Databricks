@@ -183,7 +183,9 @@ def test_agent_stops_after_max_rounds(state):
 def test_system_prompt_pins_now_and_bands():
     text = system_prompt("2026-11-14T23:00:00+00:00", {"high": 0.0167}, "gold.x")
     assert "TIMESTAMPTZ '2026-11-14T23:00:00+00:00'" in text and "0.0167" in text
-    assert "SITE_B = HeavDen" in text and "never invent" in text
+    assert "SITE_B -> Northshore" in text and "never invent" in text
+    assert "never the codes" in text
+    assert "never by encounter_id" in text
 
 
 # --- /chat endpoint --------------------------------------------------------------------------
