@@ -33,8 +33,23 @@ The snapshot builder needs the Synthea output (notebook 01), the champion in the
 | `GET /risk/patients/{encounter_id}?hours=24` | one stay: header, hourly risk and vitals, past alerts |
 | `POST /risk/score` | what-if: `{"encounter_id": "...", "changes": {"spo2": 88, "acvpu": "C"}}` gives risk, band and NEWS2 before and after, plus reasons |
 | `GET /documents/search?q=&k=4&mode=hybrid&as_of=` | passages with citations; `covered: false` when the documents probably don't answer |
+| `GET /chat/examples` | suggested questions, and whether live answers are on |
+| `POST /chat` | the assistant: `{"message": "...", "history": [...]}` gives the answer, the tool steps (SQL with results, document searches, patient lookups) and numbered citations |
 
-`/chat` (the assistant) comes next.
+## The assistant (`/chat`)
+
+One tool-calling agent with three tools, mirroring the Databricks design (Plan.md §11):
+
+| Tool | Demo mode | Live mode (Phase 4-5) |
+|---|---|---|
+| `query_gold` | LLM-written SQL in a locked DuckDB sandbox | Genie space |
+| `search_documents` | FAISS + BM25 over the snapshot's document chunks | Vector Search |
+| `explain_patient` | latest risk, band, reasons and alerts | UC function `explain_patient_risk` |
+
+- **LLM:** OpenAI (`LLM_MODEL`, default `gpt-5.5`), only when `OPENAI_API_KEY` is set. Without a key, or if the LLM call fails, `/chat` replays **recorded** answers (`heavden_api/chat/recordings.json`) and suggests the recorded questions. Re-record with `uv run python backend/scripts/record_chats.py` and **review the answers before committing**.
+- **SQL safety, two independent layers:** `heavden.agent.sql_guard` parses the SQL and allows only one SELECT over allow-listed `gold` tables (no table functions, no file or environment functions); the sandbox (`chat/sandbox.py`) holds in-memory copies of the gold tables without internal ids, with external access disabled and configuration locked, and stops queries after 5 s. Rows are capped at 200.
+- **Abuse and cost limits:** messages up to 1,000 characters, 10 history turns, and `CHAT_REQUESTS_PER_HOUR` per client (default 30). Also set a monthly spending limit on the OpenAI key.
+- **Model choice:** `gpt-5.4-mini` was tested first and made reasoning mistakes (wrong arithmetic, accepting false premises, inventing its own metrics); `gpt-5.5` answered all ten example questions correctly. With Chat Completions, function tools require `reasoning_effort="none"` for these models.
 
 ## Configuration
 
@@ -44,6 +59,9 @@ The snapshot builder needs the Synthea output (notebook 01), the champion in the
 | `SNAPSHOT_DIR` | `data/demo_snapshot` | snapshot to serve in demo mode |
 | `EMBED_CACHE_DIR` | `data/models` | where the embedding model is cached |
 | `ALLOWED_ORIGINS` | `http://localhost:3000` | comma-separated origins for CORS (local dev; in production Vercel proxies `/api/*`) |
+| `OPENAI_API_KEY` | unset | enables live assistant answers. Locally from `.env` (git-ignored); on Render, set it in the dashboard, never in git |
+| `LLM_MODEL` | `gpt-5.5` | OpenAI model for the assistant |
+| `CHAT_REQUESTS_PER_HOUR` | `30` | per-client limit on `/chat` |
 
 ## Snapshot layout
 
