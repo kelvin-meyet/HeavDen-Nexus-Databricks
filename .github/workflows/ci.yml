@@ -32,7 +32,7 @@ jobs:
       # --locked fails if uv.lock is out of date with pyproject.toml.
       # The notebooks group (Jupyter, matplotlib) isn't needed to lint or test.
       - name: Install dependencies
-        run: uv sync --locked --group dev --group rag
+        run: uv sync --locked --group dev --group rag --group backend
 
       - name: Lint
         run: uv run ruff check .
