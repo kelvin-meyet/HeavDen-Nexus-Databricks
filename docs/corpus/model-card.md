@@ -16,7 +16,7 @@ audience: clinicians, clinical safety officer, ML and data teams
 
 Every hour, for every monitored adult ward patient, the model estimates the **probability that the patient will be escalated in the next 6 hours**: a rapid response call or a transfer to intensive care. It returns:
 - a **risk** (a calibrated probability),
-- a **band** (Low, Medium, High), and
+- a **band** (Low or High; High is an alert), and
 - the **top reasons**, from SHAP explanations grouped into clinical factors such as breathing rate or oxygen saturation.
 
 **Intended use:** to help ward nurses notice deteriorating patients earlier, alongside NEWS2 and clinical judgement. **Not intended** for diagnosis, treatment decisions, intensive care, children, or any patient group not represented in training.
@@ -42,8 +42,9 @@ An **alert** fires when a patient **enters** the High band. The same patient doe
 | Band | Definition (fixed on validation) | Current risk cut-off | What it means |
 |---|---|---|---|
 | High (alert) | the alert threshold; about 8% of patient-hours | risk ≥ about 1.7% | per hour: escalation about **8 times** more likely than average (about 1 in 14 High hours is followed by one) |
-| Medium | up to the top 10% of patient-hours; about 3% of hours | risk about 0.7-1.7% | close to average in the test data; watch the trend |
-| Low | the rest, about 90% | risk below about 0.7% | routine monitoring |
+| Low | everything else, about 92% | risk below about 1.7% | routine monitoring; the ward board still shows the risk and its 6-hour change |
+
+**Why there is no Medium band.** Several definitions of a middle band were tested: the top 10% of risk, risk doubling within 6 hours, recently High, and NEWS2 of 3 or more. None of them was followed by an escalation more often than an average patient-hour (0.5 to 1.1 times the average rate). The model's signal is concentrated above the alert threshold: deteriorating patients cross it. A Medium band would add colour without information, so the ward board shows each patient's risk and its 6-hour change instead.
 
 Responses to each band are set by the escalation protocol (HD-CLIN-001).
 

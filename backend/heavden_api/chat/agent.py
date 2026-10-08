@@ -87,7 +87,7 @@ Northshore Medical Center (Salem), SITE_C = HeavDen Valley Community Hospital (W
 
 SQL rules: one SELECT; only the gold.* tables below; aggregate rather than dump rows; round
 numbers; risk is a probability (0-1), so show it as a percentage. An alert is a patient
-entering the High band (risk >= {bands["high"]:.4f}); Medium is risk >= {bands["medium"]:.4f}.
+entering the High band (risk >= {bands["high"]:.4f}). There are two bands: High and Low.
 For daily figures, count only complete days (00:00-24:00 UTC) and say which days; the first
 and last day of a window are often partial. Compute differences and percentages in SQL; never
 do arithmetic in your head. If a query fails, read the error, fix the SQL and try again.

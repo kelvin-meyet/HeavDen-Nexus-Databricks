@@ -26,7 +26,7 @@ CHAT_TABLES = {
     "escalations_fact": "one row per escalation (rapid_response or icu_transfer): where, when, and "
     "whether the patient was flagged High in the 6 h before",
     "risk_scores": "one row per patient per hour: risk (probability of escalation within 6 h), "
-    "risk_band (Low/Medium/High), NEWS2 total",
+    "risk_band (Low or High; High = alert threshold), NEWS2 total",
     "encounters": "one row per hospital stay: patient_label (e.g. P-1042), age, sex, conditions, "
     "site, unit, bed, admit and discharge times",
     "device_health_daily": "one row per wearable device per day: uptime, outages, stuck-sensor "
