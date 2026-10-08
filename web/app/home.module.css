@@ -1,0 +1,79 @@
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  gap: 40px;
+  align-items: start;
+  padding: 16px 0 36px;
+}
+
+.heroText {
+  display: grid;
+  gap: 18px;
+  padding-top: 8px;
+}
+
+.heroChart {
+  display: grid;
+  gap: 10px;
+}
+
+.chartCaption {
+  font-size: var(--step--1);
+  color: var(--graphite-soft);
+}
+
+.chartPair {
+  display: grid;
+  gap: 10px;
+}
+
+/* The four ways in, laid out like rows on a ward whiteboard, not as a grid of cards. */
+.board {
+  border-top: 1.5px solid var(--graphite);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 6px 24px;
+  align-items: baseline;
+  padding: 18px 8px;
+  border-bottom: 1px solid var(--rule);
+  color: var(--graphite);
+  text-decoration: none;
+}
+
+.row:hover,
+.row:focus-visible {
+  background: var(--sheet);
+}
+
+.row:hover .rowName {
+  text-decoration: underline;
+}
+
+.rowName {
+  font-size: var(--step-1);
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.rowFigure strong {
+  color: var(--ink);
+  font-size: var(--step-1);
+}
+
+.rowWhat {
+  color: var(--graphite-soft);
+}
+
+@media (max-width: 900px) {
+  .hero {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+
+  .row {
+    grid-template-columns: 1fr;
+  }
+}

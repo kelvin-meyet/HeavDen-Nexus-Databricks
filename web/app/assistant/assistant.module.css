@@ -1,0 +1,161 @@
+.thread {
+  display: grid;
+  gap: 28px;
+  max-width: 860px;
+}
+
+.turn {
+  display: grid;
+  gap: 12px;
+}
+
+.question {
+  justify-self: end;
+  max-width: 80%;
+  background: var(--ink);
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+}
+
+.answer {
+  display: grid;
+  gap: 10px;
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-left: 4px solid var(--ink);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+}
+
+.source {
+  font-size: var(--step--1);
+  color: var(--graphite-soft);
+}
+
+.markdown {
+  max-width: var(--measure);
+  line-height: 1.55;
+}
+
+.markdown p + p,
+.markdown ul,
+.markdown ol,
+.markdown table {
+  margin-top: 8px;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 20px;
+  margin-bottom: 0;
+}
+
+.markdown table {
+  border-collapse: collapse;
+}
+
+.markdown th,
+.markdown td {
+  border-bottom: 1px solid var(--rule);
+  padding: 4px 10px 4px 0;
+  text-align: left;
+}
+
+.markdown th {
+  border-bottom: 1.5px solid var(--graphite);
+}
+
+.markdown strong {
+  color: var(--graphite);
+}
+
+.working summary,
+.sources summary {
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.steps {
+  margin: 10px 0 0;
+  padding-left: 22px;
+  display: grid;
+  gap: 12px;
+}
+
+.step {
+  display: grid;
+  gap: 6px;
+}
+
+.sql {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  overflow-x: auto;
+  font-size: var(--step--1);
+  white-space: pre-wrap;
+}
+
+.sourcesTitle {
+  font-size: var(--step-0);
+  margin-top: 14px;
+}
+
+.sources {
+  margin: 6px 0 0;
+  padding-left: 22px;
+  display: grid;
+  gap: 6px;
+}
+
+.tryTitle {
+  font-size: var(--step-1);
+}
+
+.examples {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.example {
+  appearance: none;
+  border: 1.5px solid var(--rule);
+  background: var(--sheet);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.example:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.ask {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 10px;
+  align-items: end;
+  max-width: 860px;
+  margin-top: 28px;
+  padding: 12px 0;
+  background: var(--paper);
+}
+
+.input {
+  flex: 1;
+  border: 1.5px solid var(--graphite-soft);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  background: var(--sheet);
+  resize: vertical;
+}

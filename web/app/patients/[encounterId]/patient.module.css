@@ -1,0 +1,58 @@
+.head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+  align-items: end;
+  padding-bottom: 20px;
+  margin-bottom: 24px;
+  border-bottom: 1.5px solid var(--graphite);
+}
+
+.head h1 {
+  margin: 4px 0 8px;
+}
+
+.riskNow {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  text-align: right;
+}
+
+.riskValue {
+  font-size: var(--step-4);
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr);
+  gap: 32px;
+  align-items: start;
+}
+
+.side {
+  display: grid;
+  gap: 8px;
+}
+
+.alerts {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+@media (max-width: 900px) {
+  .head,
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .riskNow {
+    justify-items: start;
+    text-align: left;
+  }
+}
