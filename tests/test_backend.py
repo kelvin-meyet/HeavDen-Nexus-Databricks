@@ -34,7 +34,7 @@ def test_summary_counts_the_ward_now(client):
     all_sites = client.get("/analytics/summary").json()
     site_a = client.get("/analytics/summary", params={"site_id": "SITE_A"}).json()
     assert all_sites["census"] == 40 and 0 < site_a["census"] < 40
-    assert all_sites["high_risk"] + all_sites["medium_risk"] <= all_sites["census"]
+    assert 0 <= all_sites["high_risk"] <= all_sites["census"]
     assert client.get("/analytics/summary", params={"site_id": "SITE_Z"}).status_code == 422
 
 

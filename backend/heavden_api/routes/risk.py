@@ -16,7 +16,7 @@ from heavden_api.snapshot import to_records
 
 router = APIRouter(prefix="/risk", tags=["risk"])
 
-Band = Literal["Low", "Medium", "High"]
+Band = Literal["Low", "High"]
 
 
 def _with_factors(rows: list[dict]) -> list[dict]:

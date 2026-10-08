@@ -117,7 +117,6 @@ def site_kpis_hourly(
     out = r.groupby(keys).agg(
         census=("encounter_id", "nunique"),
         n_low=("risk_band", lambda s: int((s == "Low").sum())),
-        n_medium=("risk_band", lambda s: int((s == "Medium").sum())),
         n_high=("risk_band", lambda s: int((s == "High").sum())),
         mean_news2=("news2_total", "mean"),
     )

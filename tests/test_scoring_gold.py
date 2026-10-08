@@ -74,12 +74,12 @@ def test_risk_bands_follow_the_alert_budget(fitted):
     budget = evaluate.AlertBudget()
     alerts = evaluate.alert_onsets(va, p >= bands.high).sum()
     assert budget.per_nurse_shift(alerts, len(va)) <= budget.alerts_per_nurse_per_shift
-    assert bands.medium <= bands.high
+    assert set(bands.band([0.0, 1.0])) == set(scoring.BANDS)
 
 
 def test_bands_classify_by_cut_off():
-    bands = scoring.RiskBands(medium=0.01, high=0.05)
-    assert list(bands.band([0.05, 0.01, 0.009])) == ["High", "Medium", "Low"]
+    bands = scoring.RiskBands(high=0.05)
+    assert list(bands.band([0.05, 0.049, 0.9])) == ["High", "Low", "High"]
 
 
 def test_vectorised_top_factors_match_the_single_row_version(fitted):
@@ -156,14 +156,14 @@ def test_alerts_fire_on_entering_high_and_suppress_repeats():
 
 
 def test_site_kpis_count_bands_alerts_and_escalations():
-    risk = pd.concat([_risk_rows(["Low", "High"], "E1"), _risk_rows(["Medium", "Medium"], "E2")])
+    risk = pd.concat([_risk_rows(["Low", "High"], "E1"), _risk_rows(["Low", "Low"], "E2")])
     outcomes = pd.DataFrame(
         {"encounter_id": ["E2"], "event_ts": [T0 + pd.Timedelta(hours=1, minutes=20)]}
     )
     alerts = gold.alerts_fact(risk, outcomes, as_of=T0 + pd.Timedelta(hours=1))
     kpis = gold.site_kpis_hourly(risk, alerts, outcomes).set_index("hour_ts")
     second = kpis.loc[T0 + pd.Timedelta(hours=1)]
-    assert (second["census"], second["n_high"], second["n_medium"]) == (2, 1, 1)
+    assert (second["census"], second["n_high"], second["n_low"]) == (2, 1, 1)
     assert second["alerts_raised"] == 1 and second["escalations"] == 1
 
 
