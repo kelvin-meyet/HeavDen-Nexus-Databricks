@@ -1,0 +1,30 @@
+# Drift scenarios for HeavDen-Nexus episodes (Plan.md §6).
+# Times are simulated hours from the start of the episode, not calendar dates.
+
+scenarios:
+  spo2_sensor_bias:          # data drift (gradual): a firmware bug makes SpO2 read low
+    type: measurement
+    site: SITE_B
+    start_after_hours: 12
+    spo2_offset_per_day: -1.5   # fast enough to be obvious within a 48 h episode
+    max_offset: -3.0
+    # Correct response: fix the sensors, do NOT retrain.
+
+  respiratory_outbreak:      # abrupt drift: a new kind of patient arrives
+    type: population
+    start_after_hours: 12
+    admit_share_pneumonia: 0.6
+
+  protocol_change:           # concept drift: same vitals, different outcomes
+    type: concept
+    start_after_hours: 12
+    new_escalation_threshold: 0.7   # staff escalate at 70% of a trajectory instead of 100%
+    review_prob_per_hour: 0.10      # ...and review stable patients with abnormal vitals
+    review_warning_score: 1.0
+
+  firmware_schema_change:    # schema drift: devices start sending a different payload
+    type: schema
+    start_after_hours: 6
+    firmware: "3.2.0"
+    add_fields: [etco2]
+    drop_fields: [motion]
