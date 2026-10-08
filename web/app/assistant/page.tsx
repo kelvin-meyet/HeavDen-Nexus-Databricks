@@ -5,15 +5,71 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { ErrorBox } from "@/components/bits";
-import { postJson, useApi } from "@/lib/api";
+import { useApi } from "@/lib/api";
+import { type ChatEvent, streamChat } from "@/lib/stream";
 import type { ChatReply, ChatStep } from "@/lib/types";
 
 import styles from "./assistant.module.css";
 
+/** A reply as it builds up from streamed events. `pending` names a tool that is running. */
+interface LiveReply extends ChatReply {
+  streaming: boolean;
+  pending: string | null;
+  guardrail?: string;
+}
+
 interface Turn {
   question: string;
-  reply?: ChatReply;
+  reply?: LiveReply;
   error?: string;
+}
+
+const PENDING: Record<string, string> = {
+  query_gold: "Querying the data",
+  search_documents: "Searching the documents",
+  explain_patient: "Looking up the patient",
+};
+
+function applyEvent(reply: LiveReply | undefined, event: ChatEvent): LiveReply {
+  const r: LiveReply = reply ?? {
+    mode: "live",
+    model: null,
+    answer: "",
+    steps: [],
+    citations: [],
+    streaming: true,
+    pending: null,
+  };
+  switch (event.type) {
+    case "meta":
+      return { ...r, mode: event.mode as ChatReply["mode"], model: event.model, notice: event.notice, guardrail: event.guardrail };
+    case "step_start":
+      return { ...r, pending: event.tool };
+    case "step": {
+      const steps = [...r.steps];
+      steps[event.index] = event.step;
+      return { ...r, steps, pending: null };
+    }
+    case "delta":
+      return { ...r, answer: r.answer + event.text, pending: null };
+    case "reset":
+      return { ...r, answer: "" };
+    case "redact":
+      return { ...r, answer: event.answer, guardrail: "leak" };
+    case "done":
+      return {
+        ...r,
+        answer: event.answer,
+        steps: event.steps,
+        citations: event.citations,
+        suggestions: event.suggestions,
+        guardrail: event.guardrail ?? r.guardrail,
+        streaming: false,
+        pending: null,
+      };
+    case "error":
+      return { ...r, streaming: false, pending: null, notice: event.message };
+  }
 }
 
 export default function AssistantPage() {
@@ -21,31 +77,30 @@ export default function AssistantPage() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  // The server remembers the conversation; we only hold its id (see backend chat/memory.py).
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [turns]);
+  }, [turns.length]);
 
   async function ask(question: string) {
     const text = question.trim();
     if (text.length < 2 || busy) return;
     setDraft("");
     setBusy(true);
-    const history = turns
-      .filter((t) => t.reply)
-      .slice(-5)
-      .flatMap((t) => [
-        { role: "user", content: t.question },
-        { role: "assistant", content: t.reply!.answer },
-      ]);
     setTurns((all) => [...all, { question: text }]);
+    const update = (fn: (t: Turn) => Turn) =>
+      setTurns((all) => all.map((t, i) => (i === all.length - 1 ? fn(t) : t)));
     try {
-      const reply = await postJson<ChatReply>("/chat", { message: text, history });
-      setTurns((all) => all.map((t, i) => (i === all.length - 1 ? { ...t, reply } : t)));
+      for await (const event of streamChat({ message: text, conversation_id: conversationId })) {
+        if (event.type === "meta" && event.conversation_id) setConversationId(event.conversation_id);
+        update((t) => ({ ...t, reply: applyEvent(t.reply, event) }));
+      }
+      update((t) => (t.reply ? { ...t, reply: { ...t.reply, streaming: false, pending: null } } : t));
     } catch (e) {
-      const error = (e as Error).message;
-      setTurns((all) => all.map((t, i) => (i === all.length - 1 ? { ...t, error } : t)));
+      update((t) => ({ ...t, error: (e as Error).message }));
     } finally {
       setBusy(false);
     }
@@ -104,6 +159,26 @@ export default function AssistantPage() {
         </section>
       )}
 
+      {turns.length > 0 && (
+        <p className={styles.newChat}>
+          <button
+            className="buttonQuiet"
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setTurns([]);
+              setConversationId(null);
+            }}
+          >
+            New conversation
+          </button>{" "}
+          <span className="muted small">
+            Follow-up questions build on this conversation, for example &ldquo;and at Northshore?&rdquo; or
+            &ldquo;why is that patient flagged?&rdquo;
+          </span>
+        </p>
+      )}
+
       <form
         className={styles.ask}
         onSubmit={(e) => {
@@ -137,16 +212,31 @@ export default function AssistantPage() {
   );
 }
 
-function Answer({ reply, onAsk }: { reply: ChatReply; onAsk: (q: string) => void }) {
+function Answer({ reply, onAsk }: { reply: LiveReply; onAsk: (q: string) => void }) {
+  const source =
+    reply.mode === "guardrail" || reply.guardrail
+      ? "Not answered: this is outside what the assistant can share"
+      : reply.mode === "live"
+        ? `Live answer${reply.model ? ` from ${reply.model}` : ""}`
+        : "Recorded answer";
   return (
-    <div className={styles.answer}>
+    <div className={styles.answer} aria-busy={reply.streaming}>
       <p className={styles.source}>
-        {reply.mode === "live" ? `Live answer${reply.model ? ` from ${reply.model}` : ""}` : "Recorded answer"}
+        {source}
         {reply.notice ? `. ${reply.notice}` : ""}
       </p>
-      <div className={styles.markdown}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{reply.answer}</ReactMarkdown>
-      </div>
+      {reply.pending && (
+        <p className={styles.pending} aria-live="polite">
+          {PENDING[reply.pending] ?? "Working"}&hellip;
+        </p>
+      )}
+      {reply.answer ? (
+        <div className={styles.markdown}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{reply.answer}</ReactMarkdown>
+        </div>
+      ) : (
+        !reply.pending && reply.streaming && <p className="muted">Thinking&hellip;</p>
+      )}
 
       {reply.suggestions && reply.suggestions.length > 0 && (
         <ul className={styles.examples}>
@@ -160,14 +250,14 @@ function Answer({ reply, onAsk }: { reply: ChatReply; onAsk: (q: string) => void
         </ul>
       )}
 
-      {(reply.steps.length > 0 || reply.citations.length > 0) && (
+      {!reply.streaming && (reply.steps.length > 0 || reply.citations.length > 0) && (
         <details className={styles.working}>
           <summary>
             How this answer was found ({reply.steps.length} {reply.steps.length === 1 ? "step" : "steps"}
             {reply.citations.length ? `, ${reply.citations.length} sources` : ""})
           </summary>
           <ol className={styles.steps}>
-            {reply.steps.map((step, i) => (
+            {reply.steps.filter(Boolean).map((step, i) => (
               <li key={i}>
                 <Step step={step} />
               </li>
