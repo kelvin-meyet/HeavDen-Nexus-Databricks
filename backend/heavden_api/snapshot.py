@@ -32,6 +32,7 @@ GOLD_TABLES = (
     "patient_hour_features",
     "risk_scores",
     "alerts_fact",
+    "escalations_fact",
     "site_kpis_hourly",
     "device_health_daily",
     "encounters",
@@ -131,6 +132,7 @@ def build_snapshot(
         "patient_hour_features": table,
         "risk_scores": risk,
         "alerts_fact": alerts,
+        "escalations_fact": gold.escalations_fact(risk, outcomes, as_of),
         "site_kpis_hourly": gold.site_kpis_hourly(risk, alerts, outcomes),
         "device_health_daily": gold.device_health_daily(
             readings, activity.device_assignments, activity.start, activity.end

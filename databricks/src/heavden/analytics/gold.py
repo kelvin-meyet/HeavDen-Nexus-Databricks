@@ -6,6 +6,9 @@ these tables from a snapshot. Column meanings are documented for users in
 
 * `alerts_fact`: one row per High alert (a stay *entering* the High band), with re-alerts for
   the same stay suppressed for 6 hours, as ward alerting systems do to limit alarm fatigue.
+  Same rule as `heavden.ml.evaluate.alert_onsets`, so model metrics and dashboards agree.
+* `escalations_fact`: one row per escalation, with whether the patient was flagged High in the
+  6 hours before and how early.
 * `site_kpis_hourly`: census, risk bands, alerts and escalations per unit and hour.
 * `device_health_daily`: completeness and fault indicators per device and day.
 """
@@ -15,6 +18,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from heavden.ml.evaluate import SUPPRESS, alert_onsets
+
 HORIZON = pd.Timedelta(hours=6)
 STEP = pd.Timedelta(minutes=5)  # one VitalBand reading every 5 minutes
 OUTAGE_GAP = pd.Timedelta(minutes=25)  # a gap this long between messages = an outage
@@ -22,7 +27,6 @@ STUCK_RUN = 6  # the same value 6+ readings in a row (30 min) = a frozen sensor
 # Only these vary enough reading to reading for a 30-minute repeat to mean a fault: SpO2,
 # temperature and breathing rate drift slowly and naturally repeat (2-12% of readings).
 STUCK_VITALS = ("heart_rate", "sbp", "dbp")
-SUPPRESS = pd.Timedelta(hours=6)  # no repeat alert for the same stay within this time
 
 
 def _utc(series: pd.Series) -> pd.Series:
@@ -37,16 +41,7 @@ def alerts_fact(risk_scores: pd.DataFrame, outcomes: pd.DataFrame, as_of) -> pd.
     already happened), else null. `hours_to_escalation` is the warning time when escalated.
     """
     as_of = pd.Timestamp(as_of)
-    r = risk_scores.sort_values(["encounter_id", "prediction_ts"])
-    high = r["risk_band"].eq("High")
-    previous_high = high.groupby(r["encounter_id"]).shift(fill_value=False)
-    entries = r[high & ~previous_high]
-    keep, last_alert = [], {}
-    for idx, enc, ts in entries[["encounter_id", "prediction_ts"]].itertuples():
-        if enc not in last_alert or ts - last_alert[enc] >= SUPPRESS:
-            keep.append(idx)
-            last_alert[enc] = ts
-    alerts = entries.loc[keep].copy()
+    alerts = risk_scores[alert_onsets(risk_scores, risk_scores["risk_band"].eq("High"), SUPPRESS)]
 
     event = _utc(alerts["encounter_id"].map(outcomes.set_index("encounter_id")["event_ts"]))
     alert_ts = _utc(alerts["prediction_ts"])
@@ -70,6 +65,47 @@ def alerts_fact(risk_scores: pd.DataFrame, outcomes: pd.DataFrame, as_of) -> pd.
         }
     )
     return out.sort_values("alert_ts", ignore_index=True)
+
+
+def escalations_fact(risk_scores: pd.DataFrame, outcomes: pd.DataFrame, as_of) -> pd.DataFrame:
+    """One row per escalation up to `as_of`: where it happened, and whether the patient was in
+    the High band at any hour in the 6 hours before (`flagged_6h_before`), first flagged how
+    many hours ahead (`hours_flagged_before`)."""
+    ev = outcomes.assign(event_ts=_utc(outcomes["event_ts"])).dropna(subset=["event_ts"])
+    ev = ev[ev["event_ts"] <= pd.Timestamp(as_of)]
+    r = risk_scores.assign(prediction_ts=_utc(risk_scores["prediction_ts"]))
+    rows = []
+    by_stay = dict(tuple(r.groupby("encounter_id")))
+    for e in ev.itertuples():
+        stay = by_stay.get(e.encounter_id)
+        if stay is None:
+            continue
+        before = stay[stay["prediction_ts"] < e.event_ts]
+        if before.empty:
+            continue
+        window = before[before["prediction_ts"] >= e.event_ts - HORIZON]
+        flagged = window.loc[window["risk_band"] == "High", "prediction_ts"]
+        last = before.iloc[-1]
+        rows.append(
+            {
+                "encounter_id": e.encounter_id,
+                "patient_id": last["patient_id"],
+                "site_id": last["site_id"],
+                "unit_id": last["unit_id"],
+                "event_ts": e.event_ts,
+                "event_type": e.event_type,
+                "risk_before": last["risk"],
+                "flagged_6h_before": not flagged.empty,
+                "hours_flagged_before": (e.event_ts - flagged.min()) / pd.Timedelta(hours=1)
+                if not flagged.empty
+                else np.nan,
+            }
+        )
+    columns = [
+        "encounter_id", "patient_id", "site_id", "unit_id", "event_ts", "event_type",
+        "risk_before", "flagged_6h_before", "hours_flagged_before",
+    ]  # fmt: skip
+    return pd.DataFrame(rows, columns=columns).sort_values("event_ts", ignore_index=True)
 
 
 def site_kpis_hourly(

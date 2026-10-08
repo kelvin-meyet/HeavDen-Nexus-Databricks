@@ -4,7 +4,8 @@ Rules learned in Phase 0 (Plan.md §8, NEWS2 fairness check):
 * split by **time**, with a 6-hour gap between blocks so look-ahead labels can't straddle them;
 * keep class weighting **modest**, and stop LightGBM on **average precision**, not log-loss;
 * pick the champion on **validation**, whichever candidate wins, simple or not;
-* a candidate must beat NEWS2 on validation AUPRC **and** precision at the alert budget.
+* a candidate must beat NEWS2 on validation AUPRC **and** flag at least as many escalations when
+  both raise alerts within the same alert budget (alerts per nurse per shift).
 """
 
 from __future__ import annotations
@@ -171,12 +172,11 @@ def train_candidates(
     """Fit and calibrate the candidates; score them and NEWS2 on validation."""
     budget = budget or evaluate.AlertBudget()
     columns = model_columns(train)
-    y = valid["label"].to_numpy(int)
 
     baseline_scores = news2_scores(valid)
-    baseline = evaluate.evaluate(
-        y, baseline_scores, evaluate.threshold_for_budget(baseline_scores, budget), False
-    )
+    baseline_threshold = evaluate.threshold_for_alert_budget(valid, baseline_scores, budget)
+    baseline = evaluate.evaluate(valid, baseline_scores, baseline_threshold, False, budget)
+    baseline["threshold"] = baseline_threshold
 
     specs = {
         "logistic_regression": (fit_logistic(train, columns), {"C": 0.1}),
@@ -186,7 +186,8 @@ def train_candidates(
     for name, (base, params) in specs.items():
         model = calibrate(base, valid, columns)
         p = model.predict_proba(valid)[:, 1]
-        metrics = evaluate.evaluate(y, p, evaluate.threshold_for_budget(p, budget))
+        threshold = evaluate.threshold_for_alert_budget(valid, p, budget)
+        metrics = evaluate.evaluate(valid, p, threshold, budget=budget) | {"threshold": threshold}
         if name == "lightgbm":
             params = params | {"best_iteration": int(base.best_iteration_ or 0)}
         results.append(CandidateResult(name, model, metrics, params))
@@ -194,10 +195,11 @@ def train_candidates(
 
 
 def passes_gates(metrics: dict[str, float], baseline: dict[str, float]) -> bool:
-    """A model must beat NEWS2 on validation AUPRC and on precision at the alert budget."""
+    """A model must beat NEWS2 on validation AUPRC and flag at least as many escalations within
+    the same alert budget."""
     return (
         metrics["auprc"] > baseline["auprc"]
-        and metrics["precision_at_budget"] > baseline["precision_at_budget"]
+        and metrics["escalations_flagged"] >= baseline["escalations_flagged"]
     )
 
 

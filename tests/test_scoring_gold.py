@@ -53,7 +53,7 @@ def fitted():
     va = table[(table["prediction_ts"] >= cut1) & (table["prediction_ts"] < cut2)]
     results, _ = train.train_candidates(tr, va)
     model = next(r for r in results if r.name == "logistic_regression").model
-    bands = scoring.RiskBands.fit(model.predict_proba(va)[:, 1])
+    bands = scoring.RiskBands.fit(va, model.predict_proba(va)[:, 1])
     return table, tr, model, bands
 
 
@@ -66,13 +66,20 @@ def test_calibrated_probabilities_never_reach_0_or_1(fitted):
     assert 0 < p.min() and p.max() < 1
 
 
-def test_risk_bands_follow_the_alert_budget():
-    scores = np.random.default_rng(0).random(10_000)
-    bands = scoring.RiskBands.fit(scores)
-    shares = pd.Series(bands.band(scores)).value_counts(normalize=True)
-    assert shares["High"] == pytest.approx(evaluate.AlertBudget().fraction, abs=0.002)
-    assert shares["High"] + shares["Medium"] == pytest.approx(scoring.MEDIUM_FRACTION, abs=0.002)
-    assert list(bands.band([bands.high, bands.medium, 0.0])) == ["High", "Medium", "Low"]
+def test_risk_bands_follow_the_alert_budget(fitted):
+    table, _, model, bands = fitted
+    va = table[(table["prediction_ts"] >= T0 + pd.Timedelta(days=3))]
+    va = va[va["prediction_ts"] < T0 + pd.Timedelta(days=5)]
+    p = model.predict_proba(va)[:, 1]
+    budget = evaluate.AlertBudget()
+    alerts = evaluate.alert_onsets(va, p >= bands.high).sum()
+    assert budget.per_nurse_shift(alerts, len(va)) <= budget.alerts_per_nurse_per_shift
+    assert bands.medium <= bands.high
+
+
+def test_bands_classify_by_cut_off():
+    bands = scoring.RiskBands(medium=0.01, high=0.05)
+    assert list(bands.band([0.05, 0.01, 0.009])) == ["High", "Medium", "Low"]
 
 
 def test_vectorised_top_factors_match_the_single_row_version(fitted):
@@ -184,3 +191,26 @@ def test_device_health_counts_outages_and_stuck_sensors():
     assert day["messages_received"] == 278 and day["battery_outages"] == 1
     assert day["uptime_pct"] == pytest.approx(100 * 278 / 288)
     assert day["stuck_minutes"] == 40
+
+
+def test_escalations_fact_records_whether_the_patient_was_flagged():
+    risk = pd.concat(
+        [
+            _risk_rows(["Low", "Low", "High", "High"], "E1"),  # flagged 2 h before the event
+            _risk_rows(["Low", "Low", "Low", "Low"], "E2"),  # never flagged
+        ]
+    )
+    event = T0 + pd.Timedelta(hours=4)
+    outcomes = pd.DataFrame(
+        {
+            "encounter_id": ["E1", "E2", "E3"],  # E3 has no scores: skipped
+            "event_ts": [event, event, event],
+            "event_type": ["rapid_response", "icu_transfer", "rapid_response"],
+        }
+    )
+    esc = gold.escalations_fact(risk, outcomes, as_of=event).set_index("encounter_id")
+    assert list(esc.index) == ["E1", "E2"]
+    assert esc.loc["E1", "flagged_6h_before"] and esc.loc["E1", "hours_flagged_before"] == 2
+    assert not esc.loc["E2", "flagged_6h_before"] and np.isnan(
+        esc.loc["E2", "hours_flagged_before"]
+    )

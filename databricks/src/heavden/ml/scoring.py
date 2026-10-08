@@ -1,7 +1,8 @@
 """Batch scoring, risk bands and what-if scoring (Plan.md §9; Model Card §3).
 
-* `RiskBands`: cut-offs fixed on validation from the alert budget: **High** = the top 3.3% of
-  patient-hours (the alert budget), **Medium** = up to the top 10%, **Low** = the rest.
+* `RiskBands`: cut-offs fixed on validation. **High** = the alert threshold: entering High
+  raises an alert, and the threshold keeps alerts within the budget of about 2 per nurse per
+  shift. **Medium** = up to the top 10% of patient-hours. **Low** = the rest.
 * `score_table`: the gold `risk_scores` rows: risk, band and the top grouped SHAP factors.
 * `what_if`: re-score one patient-hour with some vitals or nurse observations changed, for the
   app's what-if sliders. Only the latest hour changes; longer windows and trends shift
@@ -31,15 +32,15 @@ class RiskBands:
     @classmethod
     def fit(
         cls,
+        valid: pd.DataFrame,
         valid_scores: np.ndarray,
         budget: evaluate.AlertBudget | None = None,
         medium_fraction: float = MEDIUM_FRACTION,
     ) -> RiskBands:
-        budget = budget or evaluate.AlertBudget()
-        return cls(
-            medium=evaluate.threshold_for_budget(valid_scores, medium_fraction),
-            high=evaluate.threshold_for_budget(valid_scores, budget),
-        )
+        """`valid` holds the validation rows (`encounter_id`, `prediction_ts`, `label`)."""
+        high = evaluate.threshold_for_alert_budget(valid, valid_scores, budget)
+        medium = evaluate.threshold_for_fraction(valid_scores, medium_fraction)
+        return cls(medium=min(medium, high), high=high)
 
     def band(self, risk) -> np.ndarray:
         risk = np.asarray(risk, dtype=float)
