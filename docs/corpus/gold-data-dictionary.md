@@ -46,7 +46,7 @@ One row per patient per hour, written by the hourly batch scoring job.
 | `encounter_id`, `patient_id`, `site_id`, `unit_id`, `prediction_ts` | as above |
 | `risk` | calibrated probability of escalation within 6 hours |
 | `risk_band` | `Low`, `Medium` or `High` (see the *Model Card*, section 3) |
-| `top_factors` | array of the 3 main reasons: factor, direction, size, driving reading |
+| `top_factors` | the 3 main reasons as a JSON array: factor (e.g. "breathing rate"), direction (raises or lowers risk), size in log-odds, and the reading that drove it |
 | `news2_total` | NEWS2 at the same hour, for comparison |
 | `model_version` | registered model version that produced the score |
 
@@ -65,7 +65,7 @@ One row per unit per hour.
 
 ## 5. `gold.alerts_fact`
 
-One row per High alert.
+One row per High alert. An alert fires when a patient **enters** the High band. To limit alarm fatigue, a patient who already alerted in the previous **6 hours** does not alert again, even if they leave and re-enter the High band.
 
 | Column | Meaning |
 |---|---|
@@ -87,7 +87,18 @@ One row per device per day.
 | `firmware` | firmware version(s) reported that day |
 | `mean_spo2` | daily mean SpO2 across patients on the device; a drop at one site can reveal a sensor fault |
 
-## 7. Common questions and where to look
+## 7. `gold.encounters`
+
+One row per hospital stay, for display. Names and dates of birth are never included.
+
+| Column | Meaning |
+|---|---|
+| `encounter_id`, `patient_label` | the stay, and a short display id for the patient (e.g. `P-1042`) |
+| `age`, `sex`, `conditions` | at admission; conditions as a readable list |
+| `site_id`, `unit_id`, `bed_id` | current (or last) location |
+| `admit_ts`, `discharge_ts` | stay start and end (end is null while still in hospital) |
+
+## 8. Common questions and where to look
 
 - *How many high-risk patients are at a site now?* `gold.risk_scores`, latest `prediction_ts`, `risk_band = 'High'`.
 - *How many alerts did a unit raise yesterday?* `gold.alerts_fact` or `gold.site_kpis_hourly`.
