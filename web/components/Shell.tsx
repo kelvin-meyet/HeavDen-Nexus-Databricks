@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { useApi } from "@/lib/api";
-import { when } from "@/lib/format";
+import { whenFull } from "@/lib/format";
 import type { Health } from "@/lib/types";
 
 import styles from "./Shell.module.css";
@@ -67,11 +67,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <>
               <p className={styles.live}>
                 <span className={styles.liveDot} aria-hidden="true" />
-                Ward time
+                Simulated ward time
               </p>
-              <p className={styles.time}>{when(health.data.as_of)}</p>
+              <p className={styles.time}>{whenFull(health.data.as_of)}</p>
               <p className={styles.statusNote}>
-                {health.data.mode === "demo" ? "From a saved snapshot." : "Live from the data platform."}
+                {health.data.mode === "demo"
+                  ? "The wards are a 14-day simulation, paused at this hour. Every date here is simulated."
+                  : "The wards run on a simulated clock, moved forward by each simulation run."}
               </p>
             </>
           ) : health.error ? (
