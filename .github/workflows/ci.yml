@@ -1,0 +1,47 @@
+# Lint and unit tests on every pull request and on main (Plan.md §16, Phase 0).
+# Later phases add jobs here: `databricks bundle validate` and a dev deploy on PRs (Phase 1),
+# the staging deploy, integration tests and the agent eval gate on main (Phases 1-4).
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      # --locked fails if uv.lock is out of date with pyproject.toml.
+      # The notebooks group (Jupyter, matplotlib) isn't needed to lint or test.
+      - name: Install dependencies
+        run: uv sync --locked --group dev --group rag
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Check notebooks are committed without outputs
+        run: uv run nbstripout --verify notebooks/**/*.ipynb
+
+      - name: Unit tests
+        run: uv run pytest -q
