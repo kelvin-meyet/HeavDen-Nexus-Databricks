@@ -73,7 +73,7 @@ def client(tmp_path_factory):
     va = table[(table["prediction_ts"] >= cut1) & (table["prediction_ts"] < cut2)]
     results, _ = train.train_candidates(tr, va)
     model = next(r for r in results if r.name == "logistic_regression").model
-    bands = scoring.RiskBands.fit(model.predict_proba(va)[:, 1])
+    bands = scoring.RiskBands.fit(va, model.predict_proba(va)[:, 1])
     activity = _activity(table)
     outcomes = pd.DataFrame(
         {
@@ -211,3 +211,11 @@ def test_missing_snapshot_explains_how_to_build_one(tmp_path):
     with pytest.raises(FileNotFoundError, match="build_demo_snapshot"):
         with fastapi_testclient.TestClient(create_app(Settings(snapshot_dir=tmp_path))):
             pass
+
+
+def test_summary_labels_alert_and_escalation_metrics(client):
+    body = client.get("/analytics/summary").json()
+    for key in ("alerts_per_nurse_shift_24h", "alert_precision_7d", "escalations_flagged_7d"):
+        assert key in body and key in body["definitions"]
+    assert "enters the High band" in body["definitions"]["alerts_24h"]
+    assert body["alert_budget_per_nurse_shift"] == 2.0

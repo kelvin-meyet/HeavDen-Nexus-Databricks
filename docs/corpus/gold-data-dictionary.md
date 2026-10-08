@@ -75,7 +75,19 @@ One row per High alert. An alert fires when a patient **enters** the High band. 
 | `escalated_within_6h` | whether an escalation followed (null until known) |
 | `hours_to_escalation` | warning time, if escalated |
 
-## 6. `gold.device_health_daily`
+## 6. `gold.escalations_fact`
+
+One row per escalation (rapid response call or ICU transfer).
+
+| Column | Meaning |
+|---|---|
+| `encounter_id`, `patient_id`, `site_id`, `unit_id` | the stay, and where the patient was just before |
+| `event_ts`, `event_type` | when, and `rapid_response` or `icu_transfer` |
+| `risk_before` | the last risk score before the event |
+| `flagged_6h_before` | whether the patient was in the High band at any hour in the 6 hours before |
+| `hours_flagged_before` | how many hours before the event they were first flagged High |
+
+## 7. `gold.device_health_daily`
 
 One row per device per day.
 
@@ -87,7 +99,7 @@ One row per device per day.
 | `firmware` | firmware version(s) reported that day |
 | `mean_spo2` | daily mean SpO2 across patients on the device; a drop at one site can reveal a sensor fault |
 
-## 7. `gold.encounters`
+## 8. `gold.encounters`
 
 One row per hospital stay, for display. Names and dates of birth are never included.
 
@@ -98,10 +110,11 @@ One row per hospital stay, for display. Names and dates of birth are never inclu
 | `site_id`, `unit_id`, `bed_id` | current (or last) location |
 | `admit_ts`, `discharge_ts` | stay start and end (end is null while still in hospital) |
 
-## 8. Common questions and where to look
+## 9. Common questions and where to look
 
 - *How many high-risk patients are at a site now?* `gold.risk_scores`, latest `prediction_ts`, `risk_band = 'High'`.
 - *How many alerts did a unit raise yesterday?* `gold.alerts_fact` or `gold.site_kpis_hourly`.
 - *Did alerts lead to escalations?* `gold.alerts_fact.escalated_within_6h`.
+- *Were escalations flagged in advance?* `gold.escalations_fact.flagged_6h_before`.
 - *Are devices at Site B healthy?* `gold.device_health_daily`.
 - *Why is a patient high risk?* `top_factors` in `gold.risk_scores`, or ask the assistant to explain the patient.

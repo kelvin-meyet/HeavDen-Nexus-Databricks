@@ -61,7 +61,7 @@ def main() -> None:
     version = mlflow.MlflowClient().get_model_version_by_alias(name, "champion").version
     model = mlflow.sklearn.load_model(f"models:/{name}@champion")
     tr, va, _ = train.time_split(table)
-    bands = scoring.RiskBands.fit(model.predict_proba(va)[:, 1])
+    bands = scoring.RiskBands.fit(va, model.predict_proba(va)[:, 1])
 
     rag = args.rag if args.rag.exists() else None
     if rag is None:

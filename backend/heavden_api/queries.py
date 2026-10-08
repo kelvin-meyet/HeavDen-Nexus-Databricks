@@ -12,23 +12,32 @@ WITH now AS (
     SELECT risk_band FROM gold.risk_scores
     WHERE prediction_ts = :as_of AND {SITE_FILTER}
 ),
+last_day AS (
+    SELECT * FROM gold.site_kpis_hourly
+    WHERE hour_ts > :as_of - INTERVAL 24 HOURS AND hour_ts <= :as_of AND {SITE_FILTER}
+),
 recent_alerts AS (
     SELECT * FROM gold.alerts_fact
     WHERE alert_ts > :as_of - INTERVAL 7 DAYS AND alert_ts <= :as_of AND {SITE_FILTER}
 ),
-last_day AS (
-    SELECT * FROM gold.site_kpis_hourly
-    WHERE hour_ts > :as_of - INTERVAL 24 HOURS AND hour_ts <= :as_of AND {SITE_FILTER}
+recent_escalations AS (
+    SELECT * FROM gold.escalations_fact
+    WHERE event_ts > :as_of - INTERVAL 7 DAYS AND event_ts <= :as_of AND {SITE_FILTER}
 )
 SELECT
     (SELECT count(*) FROM now) AS census,
     (SELECT count(*) FROM now WHERE risk_band = 'High') AS high_risk,
     (SELECT count(*) FROM now WHERE risk_band = 'Medium') AS medium_risk,
     (SELECT COALESCE(sum(alerts_raised), 0) FROM last_day) AS alerts_24h,
+    (SELECT sum(alerts_raised) * :patients_per_nurse * :shift_hours / sum(census)
+       FROM last_day) AS alerts_per_nurse_shift_24h,
     (SELECT COALESCE(sum(escalations), 0) FROM last_day) AS escalations_24h,
     (SELECT avg(escalated_within_6h) FROM recent_alerts) AS alert_precision_7d,
     (SELECT count(escalated_within_6h) FROM recent_alerts) AS alerts_with_outcome_7d,
-    (SELECT median(hours_to_escalation) FROM recent_alerts) AS median_warning_hours_7d
+    (SELECT count(*) FROM recent_escalations) AS escalations_7d,
+    (SELECT avg(CASE WHEN flagged_6h_before THEN 1.0 ELSE 0.0 END)
+       FROM recent_escalations) AS escalations_flagged_7d,
+    (SELECT median(hours_flagged_before) FROM recent_escalations) AS median_hours_flagged_before_7d
 """
 
 CENSUS_HOURLY = f"""

@@ -12,28 +12,50 @@ def test_top_k_alerts_exactly_k_rows():
     assert evaluate.top_k_metrics(y, s, 0.2) == {"precision_at_k": 0.5, "recall_at_k": 0.5}
 
 
-def test_cluster_bootstrap_brackets_the_point_estimate():
-    rng = np.random.default_rng(0)
-    groups = np.repeat(np.arange(200), 20)
-    y = (rng.random(len(groups)) < 0.05).astype(int)
-    good = y + rng.normal(0, 0.8, len(y))
+def _ward(n_stays=200, hours=20, seed=0):
+    """Stays with one escalation each in ~15% of them; a good and a weak score."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    for e in range(n_stays):
+        t = pd.date_range(T0, periods=hours, freq="h")
+        label = np.zeros(hours)
+        if rng.random() < 0.15:
+            label[-6:] = 1  # escalation in the hour after the last row
+        rows.append(pd.DataFrame({"encounter_id": f"E{e}", "prediction_ts": t, "label": label}))
+    df = pd.concat(rows, ignore_index=True)
+    y = df["label"].to_numpy()
+    good = y + rng.normal(0, 0.6, len(y))
     weak = y + rng.normal(0, 3, len(y))
-    reps = evaluate.cluster_bootstrap(
-        y, {"good": good, "weak": weak}, {"good": 0.5, "weak": 0.5}, groups, n_boot=200
-    )
+    return df, good, weak
+
+
+def test_cluster_bootstrap_brackets_the_point_estimate():
+    df, good, weak = _ward()
+    thresholds = {
+        "good": evaluate.threshold_for_alert_budget(df, good),
+        "weak": evaluate.threshold_for_alert_budget(df, weak),
+    }
+    reps = evaluate.cluster_bootstrap(df, {"good": good, "weak": weak}, thresholds, n_boot=200)
     ci = evaluate.confidence_intervals(reps)
-    point = evaluate.ranking_metrics(y, good)["auprc"]
-    assert ci.loc["good", ("low", "auprc")] < point < ci.loc["good", ("high", "auprc")]
+    point = evaluate.evaluate(df, good, thresholds["good"], probabilities=False)
+    for metric in ("auprc", "alert_precision", "escalations_flagged"):
+        assert ci.loc["good", ("low", metric)] <= point[metric] <= ci.loc["good", ("high", metric)]
     diff = evaluate.paired_difference(reps, "good", "weak")
     assert diff.loc["auprc", "low"] > 0 and diff.loc["auprc", "share_model_better"] == 1
 
 
-def test_slices_use_one_threshold_and_tolerate_single_class_slices():
-    y = np.array([1, 0, 0, 0, 0, 0])
-    s = np.array([0.9, 0.8, 0.1, 0.9, 0.2, 0.1])
-    out = evaluate.slice_metrics(y, s, 0.5, pd.Series(list("AAABBB")))
-    assert out.loc["A", "alert_rate"] == pytest.approx(2 / 3)
-    assert np.isnan(out.loc["B", "auroc"]) and out.loc["B", "precision_at_budget"] == 0
+def test_slices_use_one_threshold():
+    df, good, _ = _ward(n_stays=40)
+    by = pd.Series(np.where(df["encounter_id"].str[1:].astype(int) < 20, "A", "B"))
+    thr = evaluate.threshold_for_alert_budget(df, good)
+    out = evaluate.slice_metrics(df, good, thr, by)
+    whole = evaluate.alert_metrics(df, good, thr)
+    assert out["patient_hours"].sum() == len(df)
+    assert out["escalations"].sum() == whole["escalations"]
+    weights = out["patient_hours"] / len(df)
+    assert (out["alerts_per_nurse_shift"] * weights).sum() == pytest.approx(
+        whole["alerts_per_nurse_shift"]
+    )
 
 
 def test_age_bands():
