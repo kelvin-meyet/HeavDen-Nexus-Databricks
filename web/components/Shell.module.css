@@ -1,0 +1,87 @@
+.skip {
+  position: absolute;
+  left: -9999px;
+}
+
+.skip:focus {
+  left: 16px;
+  top: 8px;
+  z-index: 10;
+  background: var(--sheet);
+  padding: 8px 12px;
+}
+
+.header {
+  background: var(--sheet);
+  border-bottom: 1.5px solid var(--graphite);
+}
+
+.bar {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 14px var(--gutter) 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 32px;
+}
+
+.brand {
+  font-size: var(--step-2);
+  font-weight: 700;
+  color: var(--graphite);
+  text-decoration: none;
+  letter-spacing: -0.01em;
+}
+
+.brandProduct {
+  color: var(--ink);
+}
+
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+}
+
+.navLink {
+  color: var(--graphite);
+  text-decoration: none;
+  padding: 4px 0;
+  border-bottom: 2.5px solid transparent;
+}
+
+.navLink:hover {
+  color: var(--ink);
+}
+
+.navLink[aria-current="page"] {
+  color: var(--ink);
+  font-weight: 700;
+  border-bottom-color: var(--ink);
+}
+
+.status {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 6px var(--gutter) 10px;
+  font-size: var(--step--1);
+  color: var(--graphite-soft);
+}
+
+.status strong {
+  color: var(--graphite);
+}
+
+.offline {
+  color: var(--alert);
+}
+
+.footer {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px var(--gutter) 40px;
+  border-top: 1px solid var(--rule);
+  color: var(--graphite-soft);
+  font-size: var(--step--1);
+}

@@ -1,0 +1,334 @@
+/* HeavDen Nexus: the visual language of a paper NEWS2 observation chart.
+   Biro-blue ink on cool chart paper; NEWS2 zone tints appear only where they mean a score. */
+
+:root {
+  --paper: #f5f8fa;
+  --sheet: #ffffff;
+  --ink: #1d3b8b; /* the ballpoint nurses plot with: data, links */
+  --ink-soft: #5b6fa8;
+  --graphite: #26323d; /* text */
+  --graphite-soft: #5a6773;
+  --rule: #d6dee6;
+  --grid: #e3eaf0;
+  --zone-1: #fbf0b9;
+  --zone-2: #f7cb95;
+  --zone-3: #ee9c9c;
+  --alert: #b3261e;
+  --alert-tint: #fbe4e2;
+  --ok: #2f6b4f;
+
+  --step--1: 0.8rem;
+  --step-0: 1rem;
+  --step-1: 1.25rem;
+  --step-2: 1.563rem;
+  --step-3: 1.953rem;
+  --step-4: 2.441rem;
+
+  --gutter: clamp(16px, 4vw, 40px);
+  --measure: 70ch;
+  --radius: 6px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--graphite);
+}
+
+body {
+  font-family: var(--font-body), system-ui, sans-serif;
+  font-size: var(--step-0);
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--ink);
+  text-underline-offset: 3px;
+}
+
+h1,
+h2,
+h3 {
+  color: var(--graphite);
+  line-height: 1.2;
+  margin: 0;
+}
+
+h1 {
+  font-size: var(--step-4);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+h2 {
+  font-size: var(--step-2);
+  font-weight: 700;
+}
+
+h3 {
+  font-size: var(--step-1);
+  font-weight: 700;
+}
+
+p {
+  margin: 0;
+  max-width: var(--measure);
+}
+
+:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---------- Page frame ---------- */
+
+.page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px var(--gutter) 64px;
+}
+
+.pageHead {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 28px;
+}
+
+.lede {
+  color: var(--graphite-soft);
+  font-size: var(--step-1);
+  line-height: 1.45;
+}
+
+.muted {
+  color: var(--graphite-soft);
+}
+
+.small {
+  font-size: var(--step--1);
+}
+
+.section {
+  margin-top: 40px;
+  display: grid;
+  gap: 14px;
+}
+
+/* ---------- Controls ---------- */
+
+.button {
+  appearance: none;
+  border: 1.5px solid var(--ink);
+  background: var(--ink);
+  color: #fff;
+  border-radius: var(--radius);
+  padding: 8px 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.buttonQuiet {
+  appearance: none;
+  border: 1.5px solid var(--rule);
+  background: var(--sheet);
+  color: var(--graphite);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.buttonQuiet[aria-pressed="true"] {
+  border-color: var(--ink);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.select {
+  border: 1.5px solid var(--rule);
+  background: var(--sheet);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ---------- Status ---------- */
+
+.notice {
+  border-left: 4px solid var(--ink-soft);
+  background: var(--sheet);
+  padding: 12px 16px;
+  max-width: var(--measure);
+}
+
+.errorBox {
+  border-left: 4px solid var(--alert);
+  background: var(--alert-tint);
+  padding: 12px 16px;
+  max-width: var(--measure);
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--grid), #eef2f6, var(--grid));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+  border-radius: var(--radius);
+  min-height: 1.2em;
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.bandHigh {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--alert);
+  color: #fff;
+  font-weight: 700;
+  font-size: var(--step--1);
+}
+
+.bandLow {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--rule);
+  color: var(--graphite-soft);
+  font-size: var(--step--1);
+}
+
+.trendUp {
+  color: var(--alert);
+  font-weight: 700;
+}
+
+.trendDown {
+  color: var(--ok);
+}
+
+/* ---------- Tables ---------- */
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--sheet);
+}
+
+.table th {
+  text-align: left;
+  font-weight: 700;
+  font-size: var(--step--1);
+  color: var(--graphite-soft);
+  border-bottom: 1.5px solid var(--graphite);
+  padding: 8px 10px;
+}
+
+.table td,
+.table tbody th {
+  border-bottom: 1px solid var(--rule);
+  padding: 9px 10px;
+  vertical-align: top;
+  text-align: left;
+  font-size: var(--step-0);
+  color: var(--graphite);
+}
+
+.table .num {
+  text-align: right;
+}
+
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+/* ---------- Observation chart (the signature) ---------- */
+
+.obsChart {
+  background-color: var(--sheet);
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 16px 16px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 10px 12px 4px;
+}
+
+.obsTitle {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-weight: 700;
+  margin: 0 4px 4px;
+}
+
+.obsLatest {
+  color: var(--ink);
+  font-size: var(--step-1);
+}
+
+.zoneKey {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: var(--step--1);
+  color: var(--graphite-soft);
+}
+
+.zoneKey span::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  vertical-align: -1px;
+  border-radius: 2px;
+  background: var(--swatch);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}

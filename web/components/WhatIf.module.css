@@ -1,0 +1,68 @@
+.form {
+  display: grid;
+  gap: 12px;
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.slider {
+  display: grid;
+  gap: 2px;
+}
+
+.sliderHead {
+  display: flex;
+  justify-content: space-between;
+}
+
+.slider input[type="range"] {
+  width: 100%;
+  accent-color: var(--ink);
+}
+
+.moved {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.check input {
+  accent-color: var(--ink);
+  width: 18px;
+  height: 18px;
+}
+
+.result {
+  display: grid;
+  gap: 12px;
+  border-top: 1.5px solid var(--graphite);
+  padding-top: 14px;
+}
+
+.compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.compare > div {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+
+.compare strong {
+  font-size: var(--step-3);
+  line-height: 1.1;
+}
+
+.after {
+  color: var(--ink);
+}

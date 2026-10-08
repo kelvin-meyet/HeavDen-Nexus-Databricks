@@ -9,7 +9,9 @@ from fastapi import Request
 
 from heavden.agent.retrieval import Embedder, FastEmbedder, Retriever
 from heavden_api.chat.agent import LLM, OpenAILLM
+from heavden_api.chat.guardrails import LeakDetector
 from heavden_api.chat.limits import DailyBudget, RateLimiter
+from heavden_api.chat.memory import ConversationStore
 from heavden_api.chat.recorded import Recordings
 from heavden_api.chat.sandbox import SqlSandbox
 from heavden_api.config import Settings
@@ -26,6 +28,8 @@ class AppState:
     recordings: Recordings
     rate_limiter: RateLimiter
     live_budget: DailyBudget
+    leak_detector: LeakDetector
+    conversations: ConversationStore
     llm: LLM | None = None  # None: /chat replays recordings
     embedder: Embedder | None = None  # loaded on the first document search
     _retriever: Retriever | None = field(default=None, repr=False)
@@ -65,6 +69,8 @@ def build_state(
         recordings=Recordings.load(),
         rate_limiter=RateLimiter(settings.chat_requests_per_hour),
         live_budget=DailyBudget(settings.chat_live_answers_per_day),
+        leak_detector=LeakDetector.create(),
+        conversations=ConversationStore(),
         llm=llm,
         embedder=embedder,
     )
