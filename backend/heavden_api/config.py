@@ -53,6 +53,15 @@ class Settings:
     chat_requests_per_hour: int = field(
         default_factory=lambda: int(os.environ.get("CHAT_REQUESTS_PER_HOUR", "30"))
     )
+    # live (LLM) answers per UTC day across all visitors; past it, recordings are replayed
+    chat_live_answers_per_day: int = field(
+        default_factory=lambda: int(os.environ.get("CHAT_LIVE_ANSWERS_PER_DAY", "300"))
+    )
+    # proxies we control in front of the API: 0 local, 1 Render, 2 Vercel -> Render.
+    # The visitor's address is that many entries from the right of X-Forwarded-For.
+    trusted_proxy_hops: int = field(
+        default_factory=lambda: int(os.environ.get("TRUSTED_PROXY_HOPS", "0"))
+    )
 
     def __post_init__(self):
         if self.mode not in ("demo", "live"):

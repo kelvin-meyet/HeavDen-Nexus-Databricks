@@ -48,7 +48,8 @@ One tool-calling agent with three tools, mirroring the Databricks design (Plan.m
 
 - **LLM:** OpenAI (`LLM_MODEL`, default `gpt-5.5`), only when `OPENAI_API_KEY` is set. Without a key, or if the LLM call fails, `/chat` replays **recorded** answers (`heavden_api/chat/recordings.json`) and suggests the recorded questions. Re-record with `uv run python backend/scripts/record_chats.py` and **review the answers before committing**.
 - **SQL safety, two independent layers:** `heavden.agent.sql_guard` parses the SQL and allows only one SELECT over allow-listed `gold` tables (no table functions, no file or environment functions); the sandbox (`chat/sandbox.py`) holds in-memory copies of the gold tables without internal ids, with external access disabled and configuration locked, and stops queries after 5 s. Rows are capped at 200.
-- **Abuse and cost limits:** messages up to 1,000 characters, 10 history turns, and `CHAT_REQUESTS_PER_HOUR` per client (default 30). Also set a monthly spending limit on the OpenAI key.
+- **Abuse and cost limits** (`chat/limits.py`): messages up to 1,000 characters and 10 history turns; `CHAT_REQUESTS_PER_HOUR` per visitor (default 30); `CHAT_LIVE_ANSWERS_PER_DAY` live LLM answers across **all** visitors (default 300, then recordings are replayed); and a **monthly spending cap on the OpenAI key** as the backstop, since in-memory counters reset when the server restarts.
+- **Who is the visitor?** `X-Forwarded-For` is appended to by each proxy, so only entries added by our own proxies can be trusted; anything to their left can be forged by the caller. The visitor is the entry `TRUSTED_PROXY_HOPS` places from the right: 0 locally (header ignored), 1 on Render alone, **2 when Vercel proxies `/api/*` to Render**.
 - **Model choice:** `gpt-5.4-mini` was tested first and made reasoning mistakes (wrong arithmetic, accepting false premises, inventing its own metrics); `gpt-5.5` answered all ten example questions correctly. With Chat Completions, function tools require `reasoning_effort="none"` for these models.
 
 ## Configuration
@@ -61,7 +62,9 @@ One tool-calling agent with three tools, mirroring the Databricks design (Plan.m
 | `ALLOWED_ORIGINS` | `http://localhost:3000` | comma-separated origins for CORS (local dev; in production Vercel proxies `/api/*`) |
 | `OPENAI_API_KEY` | unset | enables live assistant answers. Locally from `.env` (git-ignored); on Render, set it in the dashboard, never in git |
 | `LLM_MODEL` | `gpt-5.5` | OpenAI model for the assistant |
-| `CHAT_REQUESTS_PER_HOUR` | `30` | per-client limit on `/chat` |
+| `CHAT_REQUESTS_PER_HOUR` | `30` | per-visitor limit on `/chat` |
+| `CHAT_LIVE_ANSWERS_PER_DAY` | `300` | live LLM answers per UTC day across all visitors; then recordings |
+| `TRUSTED_PROXY_HOPS` | `0` | proxies we control in front of the API (0 local, 1 Render, 2 Vercel → Render) |
 
 ## Snapshot layout
 
