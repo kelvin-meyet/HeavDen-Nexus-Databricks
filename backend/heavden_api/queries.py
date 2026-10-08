@@ -27,7 +27,6 @@ recent_escalations AS (
 SELECT
     (SELECT count(*) FROM now) AS census,
     (SELECT count(*) FROM now WHERE risk_band = 'High') AS high_risk,
-    (SELECT count(*) FROM now WHERE risk_band = 'Medium') AS medium_risk,
     (SELECT COALESCE(sum(alerts_raised), 0) FROM last_day) AS alerts_24h,
     (SELECT sum(alerts_raised) * :patients_per_nurse * :shift_hours / sum(census)
        FROM last_day) AS alerts_per_nurse_shift_24h,
@@ -42,8 +41,8 @@ SELECT
 
 CENSUS_HOURLY = f"""
 SELECT hour_ts, site_id,
-       sum(census) AS census, sum(n_low) AS n_low, sum(n_medium) AS n_medium,
-       sum(n_high) AS n_high, sum(alerts_raised) AS alerts, sum(escalations) AS escalations
+       sum(census) AS census, sum(n_low) AS n_low, sum(n_high) AS n_high,
+       sum(alerts_raised) AS alerts, sum(escalations) AS escalations
 FROM gold.site_kpis_hourly
 WHERE hour_ts > :as_of - :hours * INTERVAL 1 HOUR AND hour_ts <= :as_of AND {SITE_FILTER}
 GROUP BY hour_ts, site_id
@@ -51,7 +50,7 @@ ORDER BY hour_ts, site_id
 """
 
 UNITS_NOW = f"""
-SELECT site_id, unit_id, census, n_low, n_medium, n_high, round(mean_news2, 2) AS mean_news2
+SELECT site_id, unit_id, census, n_low, n_high, round(mean_news2, 2) AS mean_news2
 FROM gold.site_kpis_hourly
 WHERE hour_ts = :as_of AND {SITE_FILTER}
 ORDER BY site_id, unit_id

@@ -45,7 +45,7 @@ One row per patient per hour, written by the hourly batch scoring job.
 |---|---|
 | `encounter_id`, `patient_id`, `site_id`, `unit_id`, `prediction_ts` | as above |
 | `risk` | calibrated probability of escalation within 6 hours |
-| `risk_band` | `Low`, `Medium` or `High` (see the *Model Card*, section 3) |
+| `risk_band` | `Low` or `High` (High = at or above the alert threshold; see the *Model Card*, section 3) |
 | `top_factors` | the 3 main reasons as a JSON array: factor (e.g. "breathing rate"), direction (raises or lowers risk), size in log-odds, and the reading that drove it |
 | `news2_total` | NEWS2 at the same hour, for comparison |
 | `model_version` | registered model version that produced the score |
@@ -58,7 +58,7 @@ One row per unit per hour.
 |---|---|
 | `site_id`, `unit_id`, `hour_ts` | where and when |
 | `census` | patients on the unit during the hour |
-| `n_low`, `n_medium`, `n_high` | patients in each risk band |
+| `n_low`, `n_high` | patients in each risk band |
 | `alerts_raised` | new High alerts |
 | `escalations` | rapid response calls and ICU transfers that happened |
 | `mean_news2` | average NEWS2 |

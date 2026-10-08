@@ -42,8 +42,7 @@ As v1.0: adult inpatients on general, step-down and respiratory wards at HeavDen
 
 | Band | Response |
 |---|---|
-| Low | routine care |
-| Medium | included in the proactive review round; nurse reviews the trend each observation round |
+| Low | routine care; patients whose risk is rising over 6 hours are included in the proactive review round |
 | High (alert) | **outreach nurse review within 30 minutes**; repeat full observations and NEWS2; call the RRT if NEWS2 is 5 or more or there is clinical concern |
 
 The model's alert budget is unchanged: about 2 High alerts per nurse per 12-hour shift. If alerts consistently exceed that, report it to the ML platform team (see the *Drift Incident Runbook*).

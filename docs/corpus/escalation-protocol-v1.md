@@ -26,7 +26,7 @@ Escalation means asking for a more senior or more specialised review: the ward d
 Staff use two complementary signals:
 
 1. **NEWS2 score.** Calculated from every full set of observations (see the *NEWS2 Reference*, HD-CLIN-002). It is the primary trigger.
-2. **Deterioration risk score.** The predicted probability that the patient will need escalation in the next 6 hours, shown on the ward board with a band (Low, Medium, High) and the main reasons. It is produced hourly by the `deterioration_risk` model (see the *Model Card*, HD-ML-001).
+2. **Deterioration risk score.** The predicted probability that the patient will need escalation in the next 6 hours, shown on the ward board with a band (Low or High), its change over the last 6 hours and the main reasons. It is produced hourly by the `deterioration_risk` model (see the *Model Card*, HD-ML-001).
 
 The risk score **supports** clinical judgement and NEWS2. It never replaces them. A patient who worries the nurse is escalated whatever the scores say.
 
@@ -44,8 +44,7 @@ The risk score **supports** clinical judgement and NEWS2. It never replaces them
 
 | Band | Response |
 |---|---|
-| Low | routine care; no action from the score alone |
-| Medium | nurse reviews the trend at the next observation round |
+| Low | routine care; no action from the score alone. A risk that is rising over 6 hours is a prompt for clinical judgement at the next observation round, not an alert |
 | High (alert) | nurse reviews the patient **within 60 minutes**, repeats a full set of observations and recalculates NEWS2; escalate if NEWS2 or clinical concern warrants it |
 
 A High risk alert on its own does **not** trigger a rapid response call in v1.0. It triggers a bedside review.

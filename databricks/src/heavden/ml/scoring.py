@@ -1,8 +1,11 @@
 """Batch scoring, risk bands and what-if scoring (Plan.md §9; Model Card §3).
 
-* `RiskBands`: cut-offs fixed on validation. **High** = the alert threshold: entering High
-  raises an alert, and the threshold keeps alerts within the budget of about 2 per nurse per
-  shift. **Medium** = up to the top 10% of patient-hours. **Low** = the rest.
+* `RiskBands`: two bands, with the cut-off fixed on validation. **High** = the alert
+  threshold: entering High raises an alert, and the threshold keeps alerts within the budget of
+  about 2 per nurse per shift. **Low** = everything else. There is deliberately no Medium band:
+  in Phase 0 no definition below the alert threshold (top 10% of risk, risk rising, recently
+  High, NEWS2 >= 3) escalated more often than average, so a middle tier would show colour
+  without information. The app shows each patient's risk and its 6-hour change instead.
 * `score_table`: the gold `risk_scores` rows: risk, band and the top grouped SHAP factors.
 * `what_if`: re-score one patient-hour with some vitals or nurse observations changed, for the
   app's what-if sliders. Only the latest hour changes; longer windows and trends shift
@@ -20,13 +23,11 @@ import pandas as pd
 from heavden.ml import evaluate, explain, news2
 from heavden.ml.train import CalibratedModel, to_matrix
 
-BANDS = ("Low", "Medium", "High")
-MEDIUM_FRACTION = 0.10  # Medium = patient-hours in the top 10% (High included)
+BANDS = ("Low", "High")
 
 
 @dataclass(frozen=True)
 class RiskBands:
-    medium: float  # risk at or above this is at least Medium
     high: float  # risk at or above this is High (= alert)
 
     @classmethod
@@ -35,16 +36,13 @@ class RiskBands:
         valid: pd.DataFrame,
         valid_scores: np.ndarray,
         budget: evaluate.AlertBudget | None = None,
-        medium_fraction: float = MEDIUM_FRACTION,
     ) -> RiskBands:
         """`valid` holds the validation rows (`encounter_id`, `prediction_ts`, `label`)."""
-        high = evaluate.threshold_for_alert_budget(valid, valid_scores, budget)
-        medium = evaluate.threshold_for_fraction(valid_scores, medium_fraction)
-        return cls(medium=min(medium, high), high=high)
+        return cls(high=evaluate.threshold_for_alert_budget(valid, valid_scores, budget))
 
     def band(self, risk) -> np.ndarray:
         risk = np.asarray(risk, dtype=float)
-        return np.select([risk >= self.high, risk >= self.medium], ["High", "Medium"], "Low")
+        return np.where(risk >= self.high, "High", "Low")
 
     def to_dict(self) -> dict[str, float]:
         return asdict(self)
