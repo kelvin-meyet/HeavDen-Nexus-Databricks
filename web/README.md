@@ -31,9 +31,17 @@ CI runs both on every pull request.
 
 ## Design
 
-The visual language is a paper **NEWS2 observation chart**: values plotted as dots joined by ink-blue lines on chart paper, over the NEWS2 scoring zones (pale yellow, amber, red), which appear only where they mean a score. One typeface, **Atkinson Hyperlegible**, designed so characters can't be confused (0/O, 1/l): useful when a number is a vital sign. Red is reserved for the High band and the alert threshold.
+The visual language is a **NEWS2 observation chart**, made lively: values plotted as ink-blue dots on chart paper over the NEWS2 scoring zones (yellow, amber, red), which appear only where they mean a score.
 
+- **Layout:** an app shell with a deep-ink sidebar (brand, navigation, live ward time) and content that fills the rest of the screen; on phones the sidebar becomes a top bar.
+- **Colour carries meaning:** ink blue for data, red only for the High band and the alert threshold, amber for alert load, green for things going well (escalations flagged in advance). Headline figures carry the colour of what they measure.
+- **Type:** Bricolage Grotesque for headings and figures; Atkinson Hyperlegible for text and numbers, designed so characters can't be confused (0/O, 1/l), which matters when a number is a vital sign.
+- **Motion:** used once, with purpose: the hero charts draw themselves in, and a live dot pulses beside the ward time. Everything respects "reduce motion".
+
+Code:
+
+- `components/Shell.tsx`: the sidebar app shell
 - `components/ObsChart.tsx`: the observation chart used for every time series
 - `components/SizedChart.tsx`: measures its own width, so charts size reliably in any layout
 - `lib/news2.ts`: the NEWS2 zones per vital sign
-- `lib/api.ts`: `useApi` / `postJson` against `/api/*`
+- `lib/api.ts`, `lib/stream.ts`: `/api/*` calls and the assistant's streamed answers

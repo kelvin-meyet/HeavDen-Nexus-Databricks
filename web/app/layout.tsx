@@ -1,16 +1,24 @@
 import type { Metadata } from "next";
-import { Atkinson_Hyperlegible } from "next/font/google";
+import { Atkinson_Hyperlegible, Bricolage_Grotesque } from "next/font/google";
 
 import { Shell } from "@/components/Shell";
 
 import "./globals.css";
 
-// Atkinson Hyperlegible: designed for low-vision readers, so every character is unambiguous,
-// which suits a tool where 1 vs 7 or 8 vs 3 on a vital sign matters.
+// Body and numbers: Atkinson Hyperlegible, designed so characters can't be confused
+// (1/7, 8/3, 0/O), which matters when a number is a vital sign.
 const body = Atkinson_Hyperlegible({
   subsets: ["latin"],
   weight: ["400", "700"],
   variable: "--font-body",
+  display: "swap",
+});
+
+// Headings: Bricolage Grotesque, a lively grotesque with character, for titles and figures.
+const display = Bricolage_Grotesque({
+  subsets: ["latin"],
+  weight: ["500", "700", "800"],
+  variable: "--font-display",
   display: "swap",
 });
 
@@ -22,7 +30,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={body.variable}>
+    <html lang="en" className={`${body.variable} ${display.variable}`}>
       <body>
         <Shell>{children}</Shell>
       </body>

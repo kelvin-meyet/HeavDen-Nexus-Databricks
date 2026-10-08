@@ -22,8 +22,8 @@ import styles from "./analytics.module.css";
 
 const SITE_STROKE: Record<SiteId, string> = {
   SITE_A: "var(--ink)",
-  SITE_B: "#7a8fd0",
-  SITE_C: "#26323d",
+  SITE_B: "var(--amber)",
+  SITE_C: "#0e9aa7",
 };
 const SITE_DASH: Record<SiteId, string | undefined> = { SITE_A: undefined, SITE_B: "6 3", SITE_C: "2 3" };
 
@@ -65,21 +65,24 @@ export default function AnalyticsPage() {
         {s && (
           <dl className={styles.figures}>
             <Figure value={num(s.census)} label="patients on the ward" def={s.definitions.census} />
-            <Figure value={num(s.high_risk)} label="in the High band (alerting)" def={s.definitions.high_risk} />
+            <Figure value={num(s.high_risk)} label="in the High band (alerting)" def={s.definitions.high_risk} tone="alert" />
             <Figure
               value={num(s.alerts_per_nurse_shift_24h, 1)}
               label={`alerts per nurse per shift, last 24 h (budget ${s.alert_budget_per_nurse_shift})`}
               def={s.definitions.alerts_per_nurse_shift_24h}
+              tone="amber"
             />
             <Figure
               value={pct(s.escalations_flagged_7d)}
               label={`of ${num(s.escalations_7d)} escalations flagged in advance, last 7 days`}
               def={s.definitions.escalations_flagged_7d}
+              tone="ok"
             />
             <Figure
               value={s.median_hours_flagged_before_7d != null ? `${num(s.median_hours_flagged_before_7d, 1)} h` : "–"}
               label="typical warning before an escalation"
               def={s.definitions.median_hours_flagged_before_7d}
+              tone="ok"
             />
             <Figure
               value={
@@ -96,6 +99,7 @@ export default function AnalyticsPage() {
         </p>
       </section>
 
+      <div className={styles.charts}>
       <section className="section" aria-labelledby="high-title">
         <h2 id="high-title">Patients in the High band, last 72 hours</h2>
         {census.error && <ErrorBox what="the census" message={census.error} />}
@@ -114,6 +118,8 @@ export default function AnalyticsPage() {
         </p>
       </section>
 
+      </div>
+
       <section className="section" aria-labelledby="devices-title">
         <h2 id="devices-title">Wearable monitors</h2>
         {devices.error && <ErrorBox what="device health" message={devices.error} />}
@@ -124,9 +130,11 @@ export default function AnalyticsPage() {
   );
 }
 
-function Figure({ value, label, def }: { value: string; label: string; def?: string }) {
+type Tone = "ink" | "alert" | "amber" | "ok";
+
+function Figure({ value, label, def, tone = "ink" }: { value: string; label: string; def?: string; tone?: Tone }) {
   return (
-    <div className={styles.figure}>
+    <div className={styles.figure} data-tone={tone}>
       <dt className={styles.figureLabel}>{label}</dt>
       <dd className={styles.figureValue}>{value}</dd>
       {def && (
@@ -208,8 +216,8 @@ function AlertsChart({ rows }: { rows: AlertsDayRow[] }) {
             <Tooltip labelFormatter={(t) => dayLabel(String(t))} contentStyle={{ borderRadius: 6 }} />
             <Legend formatter={legendText} />
             <Bar dataKey="escalated" name="Escalation followed" stackId="a" fill="var(--alert)" isAnimationActive={false} />
-            <Bar dataKey="none" name="No escalation" stackId="a" fill="#b8c4d6" isAnimationActive={false} />
-            <Bar dataKey="pending" name="Too soon to tell" stackId="a" fill="var(--zone-1)" isAnimationActive={false} />
+            <Bar dataKey="none" name="No escalation" stackId="a" fill="#aebcf2" isAnimationActive={false} />
+            <Bar dataKey="pending" name="Too soon to tell" stackId="a" fill="var(--zone-2)" radius={[6, 6, 0, 0]} isAnimationActive={false} />
           </BarChart>
         )}
       </SizedChart>

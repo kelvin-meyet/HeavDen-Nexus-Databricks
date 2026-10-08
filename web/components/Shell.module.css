@@ -1,3 +1,9 @@
+.app {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
 .skip {
   position: absolute;
   left: -9999px;
@@ -11,77 +17,193 @@
   padding: 8px 12px;
 }
 
-.header {
-  background: var(--sheet);
-  border-bottom: 1.5px solid var(--graphite);
-}
-
-.bar {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 14px var(--gutter) 10px;
+/* Deep ink with a faint chart-paper grid: the observation chart, at night. */
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px 32px;
+  flex-direction: column;
+  gap: 28px;
+  padding: 24px 18px;
+  color: #e8edff;
+  background-color: var(--night);
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(180deg, var(--night) 0%, var(--night-2) 100%);
+  background-size: 18px 18px, 18px 18px, 100% 100%;
 }
 
 .brand {
-  font-size: var(--step-2);
-  font-weight: 700;
-  color: var(--graphite);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-display), sans-serif;
+  font-size: var(--step-1);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #fff;
   text-decoration: none;
-  letter-spacing: -0.01em;
+}
+
+.brandMark {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--ink);
+  color: var(--zone-1);
+  box-shadow: 0 6px 18px -6px rgba(35, 64, 200, 0.9);
 }
 
 .brandProduct {
-  color: var(--ink);
+  color: var(--zone-2);
 }
 
 .nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 20px;
+  display: grid;
+  gap: 4px;
 }
 
 .navLink {
-  color: var(--graphite);
+  display: block;
+  padding: 10px 14px;
+  border-radius: 10px;
+  color: #c7d0f5;
   text-decoration: none;
-  padding: 4px 0;
-  border-bottom: 2.5px solid transparent;
+  font-weight: 700;
+  transition: background 0.15s, color 0.15s;
 }
 
 .navLink:hover {
-  color: var(--ink);
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
 }
 
 .navLink[aria-current="page"] {
-  color: var(--ink);
-  font-weight: 700;
-  border-bottom-color: var(--ink);
+  background: #fff;
+  color: var(--night);
 }
 
 .status {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 6px var(--gutter) 10px;
-  font-size: var(--step--1);
-  color: var(--graphite-soft);
+  margin-top: auto;
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.status strong {
-  color: var(--graphite);
+.live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--step--1);
+  color: #aab6ea;
+}
+
+.liveDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #38e09a;
+  box-shadow: 0 0 0 0 rgba(56, 224, 154, 0.7);
+  animation: livePulse 2.4s ease-out infinite;
+}
+
+@keyframes livePulse {
+  70% {
+    box-shadow: 0 0 0 8px rgba(56, 224, 154, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(56, 224, 154, 0);
+  }
+}
+
+.time {
+  margin-top: 4px;
+  font-family: var(--font-display), sans-serif;
+  font-size: var(--step-1);
+  font-weight: 700;
+  color: #fff;
+}
+
+.statusNote,
+.offline {
+  margin-top: 2px;
+  font-size: var(--step--1);
+  color: #aab6ea;
 }
 
 .offline {
-  color: var(--alert);
+  color: var(--zone-3);
+}
+
+.synthetic {
+  font-size: var(--step--1);
+  color: #aab6ea;
+}
+
+.synthetic strong {
+  color: #fff;
+}
+
+.content {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.content main {
+  flex: 1;
 }
 
 .footer {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 24px var(--gutter) 40px;
+  padding: 20px var(--gutter) 32px;
   border-top: 1px solid var(--rule);
   color: var(--graphite-soft);
   font-size: var(--step--1);
+}
+
+/* Narrow screens: the sidebar becomes a top bar. */
+@media (max-width: 900px) {
+  .app {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: static;
+    height: auto;
+    gap: 12px;
+    padding: 14px var(--gutter);
+  }
+
+  .nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .navLink {
+    padding: 6px 12px;
+  }
+
+  .status {
+    margin-top: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 10px;
+    padding: 8px 12px;
+  }
+
+  .time {
+    margin: 0;
+    font-size: var(--step-0);
+  }
+
+  .synthetic {
+    display: none;
+  }
 }

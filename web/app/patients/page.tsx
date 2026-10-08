@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 
 import { BandTag, ErrorBox, Loading, RiskWithTrend } from "@/components/bits";
 import { useApi } from "@/lib/api";
@@ -9,8 +10,17 @@ import { conditions, num, SITE_IDS, SITES, unitName, when } from "@/lib/format";
 import type { Band, Board, SiteId } from "@/lib/types";
 
 export default function PatientsPage() {
+  return (
+    <Suspense fallback={<div className="page"><Loading lines={8} /></div>}>
+      <PatientsList />
+    </Suspense>
+  );
+}
+
+function PatientsList() {
+  const initialBand = useSearchParams().get("band");
   const [site, setSite] = useState<SiteId | "">("");
-  const [band, setBand] = useState<Band | "">("");
+  const [band, setBand] = useState<Band | "">(initialBand === "High" || initialBand === "Low" ? initialBand : "");
   const [limit, setLimit] = useState(40);
   const query = new URLSearchParams({ limit: String(limit) });
   if (site) query.set("site_id", site);

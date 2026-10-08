@@ -111,7 +111,22 @@ export default function AssistantPage() {
   return (
     <div className="page">
       <header className="pageHead">
-        <h1>Assistant</h1>
+        <div className={styles.titleRow}>
+          <h1>Assistant</h1>
+          {turns.length > 0 && (
+            <button
+              className="buttonQuiet"
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setTurns([]);
+                setConversationId(null);
+              }}
+            >
+              New conversation
+            </button>
+          )}
+        </div>
         <p className="lede">
           Ask about the wards&rsquo; numbers, the hospital&rsquo;s protocols and documents, or why a patient is
           flagged. Each answer shows the queries and sources behind it.
@@ -157,26 +172,6 @@ export default function AssistantPage() {
             ))}
           </ul>
         </section>
-      )}
-
-      {turns.length > 0 && (
-        <p className={styles.newChat}>
-          <button
-            className="buttonQuiet"
-            type="button"
-            disabled={busy}
-            onClick={() => {
-              setTurns([]);
-              setConversationId(null);
-            }}
-          >
-            New conversation
-          </button>{" "}
-          <span className="muted small">
-            Follow-up questions build on this conversation, for example &ldquo;and at Northshore?&rdquo; or
-            &ldquo;why is that patient flagged?&rdquo;
-          </span>
-        </p>
       )}
 
       <form
