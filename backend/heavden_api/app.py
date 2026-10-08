@@ -13,17 +13,20 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from heavden.agent.retrieval import Embedder
-from heavden_api.config import Settings
+from heavden_api.chat.agent import LLM
+from heavden_api.config import Settings, load_dotenv
 from heavden_api.deps import build_state
-from heavden_api.routes import analytics, documents, health, risk
+from heavden_api.routes import analytics, chat, documents, health, risk
 
 
-def create_app(settings: Settings | None = None, embedder: Embedder | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None, embedder: Embedder | None = None, llm: LLM | None = None
+) -> FastAPI:
     settings = settings or Settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        app.state.heavden = build_state(settings, embedder)
+        app.state.heavden = build_state(settings, embedder, llm)
         yield
 
     app = FastAPI(
@@ -39,9 +42,10 @@ def create_app(settings: Settings | None = None, embedder: Embedder | None = Non
         allow_headers=["*"],
     )
 
-    for module in (health, analytics, risk, documents):
+    for module in (health, analytics, risk, documents, chat):
         app.include_router(module.router)
     return app
 
 
+load_dotenv()  # local development: OPENAI_API_KEY etc. from .env
 app = create_app()

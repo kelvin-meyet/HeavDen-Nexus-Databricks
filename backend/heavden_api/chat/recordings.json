@@ -1,0 +1,571 @@
+{
+ "model": "gpt-5.5",
+ "as_of": "2026-11-14T23:00:00+00:00",
+ "recorded_at": "2026-10-08T15:59:10+00:00",
+ "conversations": [
+  {
+   "question": "How many patients are in the High risk band at each site right now?",
+   "answer": "Right now (2026-11-14 23:00 UTC), High risk patients by site:\n\n- SITE_A — HeavDen General Hospital: 8\n- SITE_B — HeavDen Northshore Medical Center: 8\n- SITE_C — HeavDen Valley Community Hospital: 6",
+   "steps": [
+    {
+     "tool": "query_gold",
+     "purpose": "Count patients in the High risk band at each site at the current timestamp.",
+     "sql": "SELECT site_id, SUM(n_high) AS high_risk_patients\nFROM gold.site_kpis_hourly\nWHERE hour_ts = TIMESTAMPTZ '2026-11-14T23:00:00+00:00'\nGROUP BY site_id\nORDER BY site_id",
+     "columns": [
+      "site_id",
+      "high_risk_patients"
+     ],
+     "rows": [
+      [
+       "SITE_A",
+       8.0
+      ],
+      [
+       "SITE_B",
+       8.0
+      ],
+      [
+       "SITE_C",
+       6.0
+      ]
+     ],
+     "row_count": 3
+    }
+   ],
+   "citations": []
+  },
+  {
+   "question": "Which unit raised the most alerts in the last 24 hours?",
+   "answer": "SITE_A-GENERAL raised the most alerts in the last 24 hours, with 58 alerts.",
+   "steps": [
+    {
+     "tool": "query_gold",
+     "purpose": "Find the unit with the most new High-band alerts in the last 24 hours ending at the fixed current timestamp.",
+     "sql": "SELECT site_id, unit_id, SUM(alerts_raised) AS alerts_raised\nFROM gold.site_kpis_hourly\nWHERE hour_ts >= TIMESTAMPTZ '2026-11-14T23:00:00+00:00' - INTERVAL '24 hours'\n  AND hour_ts < TIMESTAMPTZ '2026-11-14T23:00:00+00:00'\nGROUP BY site_id, unit_id\nORDER BY alerts_raised DESC, site_id, unit_id\nLIMIT 1",
+     "columns": [
+      "site_id",
+      "unit_id",
+      "alerts_raised"
+     ],
+     "rows": [
+      [
+       "SITE_A",
+       "SITE_A-GENERAL",
+       58.0
+      ]
+     ],
+     "row_count": 1
+    }
+   ],
+   "citations": []
+  },
+  {
+   "question": "What share of escalations in the last 7 days were flagged in advance, by site?",
+   "answer": "For the last 7 complete days, 2026-11-07 through 2026-11-13 UTC:\n\n| Site | Escalations | Flagged in advance | Share flagged |\n|---|---:|---:|---:|\n| SITE_A | 31 | 28 | 90.3% |\n| SITE_B | 23 | 21 | 91.3% |\n| SITE_C | 12 | 10 | 83.3% |",
+   "steps": [
+    {
+     "tool": "query_gold",
+     "purpose": "Share of escalations in the last 7 complete days that were flagged in the prior 6 hours, by site.",
+     "sql": "SELECT\n  site_id,\n  COUNT(*) AS escalations,\n  SUM(CASE WHEN flagged_6h_before THEN 1 ELSE 0 END) AS flagged_in_advance,\n  ROUND(100.0 * SUM(CASE WHEN flagged_6h_before THEN 1 ELSE 0 END) / COUNT(*), 1) AS flagged_share_pct\nFROM gold.escalations_fact\nWHERE event_ts >= TIMESTAMPTZ '2026-11-07T00:00:00+00:00'\n  AND event_ts < TIMESTAMPTZ '2026-11-14T00:00:00+00:00'\nGROUP BY site_id\nORDER BY site_id",
+     "columns": [
+      "site_id",
+      "escalations",
+      "flagged_in_advance",
+      "flagged_share_pct"
+     ],
+     "rows": [
+      [
+       "SITE_A",
+       31,
+       28.0,
+       90.3
+      ],
+      [
+       "SITE_B",
+       23,
+       21.0,
+       91.3
+      ],
+      [
+       "SITE_C",
+       12,
+       10.0,
+       83.3
+      ]
+     ],
+     "row_count": 3
+    }
+   ],
+   "citations": []
+  },
+  {
+   "question": "How did daily alerts change over the last week?",
+   "answer": "Daily alerts over the last complete 7 UTC days, 2026-11-08 through 2026-11-14:\n\n| Day | Alerts | Change vs prior day |\n|---|---:|---:|\n| 2026-11-08 | 213 | — |\n| 2026-11-09 | 206 | -7 (-3.3%) |\n| 2026-11-10 | 212 | +6 (+2.9%) |\n| 2026-11-11 | 198 | -14 (-6.6%) |\n| 2026-11-12 | 221 | +23 (+11.6%) |\n| 2026-11-13 | 228 | +7 (+3.2%) |\n| 2026-11-14 | 225 | -3 (-1.3%) |\n\nOverall, alerts dipped midweek to 198 on 2026-11-11, then rose to a high of 228 on 2026-11-13, ending slightly lower at 225 on 2026-11-14.",
+   "steps": [
+    {
+     "tool": "query_gold",
+     "purpose": "Daily alert counts for complete UTC days in the last week before now, with day-over-day changes.",
+     "sql": "SELECT\n  CAST(alert_ts AS DATE) AS day_utc,\n  COUNT(*) AS alerts,\n  COUNT(*) - LAG(COUNT(*)) OVER (ORDER BY CAST(alert_ts AS DATE)) AS change_vs_prior_day,\n  ROUND(100.0 * (COUNT(*) - LAG(COUNT(*)) OVER (ORDER BY CAST(alert_ts AS DATE))) / NULLIF(LAG(COUNT(*)) OVER (ORDER BY CAST(alert_ts AS DATE)), 0), 1) AS pct_change_vs_prior_day\nFROM gold.alerts_fact\nWHERE alert_ts >= TIMESTAMPTZ '2026-11-08T00:00:00+00:00'\n  AND alert_ts < TIMESTAMPTZ '2026-11-15T00:00:00+00:00'\nGROUP BY CAST(alert_ts AS DATE)\nORDER BY day_utc",
+     "columns": [
+      "day_utc",
+      "alerts",
+      "change_vs_prior_day",
+      "pct_change_vs_prior_day"
+     ],
+     "rows": [
+      [
+       "2026-11-08T00:00:00",
+       213,
+       null,
+       null
+      ],
+      [
+       "2026-11-09T00:00:00",
+       206,
+       -7,
+       -3.3
+      ],
+      [
+       "2026-11-10T00:00:00",
+       212,
+       6,
+       2.9
+      ],
+      [
+       "2026-11-11T00:00:00",
+       198,
+       -14,
+       -6.6
+      ],
+      [
+       "2026-11-12T00:00:00",
+       221,
+       23,
+       11.6
+      ],
+      [
+       "2026-11-13T00:00:00",
+       228,
+       7,
+       3.2
+      ],
+      [
+       "2026-11-14T00:00:00",
+       225,
+       -3,
+       -1.3
+      ]
+     ],
+     "row_count": 7
+    }
+   ],
+   "citations": []
+  },
+  {
+   "question": "What should a nurse do when a patient's risk band turns High?",
+   "answer": "When a patient’s risk band turns **High**:\n\n- Arrange an **outreach nurse review within 30 minutes**.\n- **Repeat full observations and NEWS2**.\n- **Call the Rapid Response Team** if **NEWS2 is 5 or more** or there is **clinical concern**. [1]\n\nA High band means the patient has entered the model’s alert threshold; the protocol response is the outreach review, not automatic RRT unless NEWS2/clinical concern triggers it. [1][2]",
+   "steps": [
+    {
+     "tool": "search_documents",
+     "query": "protocol nurse action when patient risk band turns High alert escalation",
+     "as_of": null,
+     "refs": [
+      1,
+      2,
+      3,
+      4
+     ]
+    }
+   ],
+   "citations": [
+    {
+     "ref": 1,
+     "chunk_id": "HD-CLIN-001@2.0#4-escalation-by-risk-band-4",
+     "citation": "Deteriorating Patient Escalation Protocol v2.0 > 4. Escalation by risk band",
+     "doc_id": "HD-CLIN-001",
+     "version": "2.0",
+     "text": "| Band | Response |\n|---|---|\n| Low | routine care |\n| Medium | included in the proactive review round; nurse reviews the trend each observation round |\n| High (alert) | **outreach nurse review within 30 minutes**; repeat full observations and NEWS2; call the RRT if NEWS2 is 5 or more or there is clinical concern |\n\nThe model's alert budget is unchanged: about 2 High alerts per nurse per 12-hour shift. If alerts consistently exceed that, report it to the ML platform team (see the *Drift Incident Runbook*)."
+    },
+    {
+     "ref": 2,
+     "chunk_id": "HD-ML-001@1.0#3-risk-bands-2",
+     "citation": "Model Card: deterioration_risk v1.0 > 3. Risk bands",
+     "doc_id": "HD-ML-001",
+     "version": "1.0",
+     "text": "Escalation within 6 hours is rare: about **0.9%** of patient-hours. Calibrated probabilities are therefore small numbers, and the bands are set from the **alert budget** rather than round percentages.\n\nAn **alert** fires when a patient **enters** the High band. The same patient does not alert again for 6 hours, even if they leave and re-enter High. The High cut-off is the lowest one that keeps alerts within about **2 per nurse per 12-hour shift** (1 nurse per 5 patients), fixed on validation.\n\n| Band | Definition (fixed on validation) | Current risk cut-off | What it means |\n|---|---|---|---|\n| High (alert) | the alert threshold; about 8% of patient-hours | risk ≥ about 1.7% | per hour: escalation about **8 times** more likely than average (about 1 in 14 High hours is followed by one) |\n| Medium | up to the top 10% of patient-hours; about 3% of hours | risk about 0.7-1.7% | close to average in the test data; watch the trend |\n| Low | the rest, about 90% | risk below about 0.7% | routine monitoring |\n\nResponses to each band are set by the escalation protocol (HD-CLIN-001)."
+    },
+    {
+     "ref": 3,
+     "chunk_id": "HD-CLIN-001@2.0#1-what-changed-from-v1-0-0",
+     "citation": "Deteriorating Patient Escalation Protocol v2.0 > 1. What changed from v1.0",
+     "doc_id": "HD-CLIN-001",
+     "version": "2.0",
+     "text": "Version 2.0 takes effect on **2026-11-09** at all three sites. An audit of 2026 found that deteriorating patients were often escalated late, after several hours of worsening observations. Version 2.0 therefore asks staff to **escalate earlier**:\n\n1. **Lower trigger for an urgent response.** A NEWS2 of **5 or more** (previously 7) now triggers a call to the rapid response team.\n2. **Earlier action on a single red score.** A score of 3 in any single parameter now triggers a review by the outreach nurse within 30 minutes (previously the ward doctor within 60 minutes).\n3. **Proactive review rounds.** The outreach nurse visits every ward each shift and reviews any patient with a NEWS2 of 1 or more whose observations are trending the wrong way, even if they look stable.\n4. **High risk alerts get a senior review.** A High band on the deterioration risk score now triggers a review by the outreach nurse within 30 minutes."
+    },
+    {
+     "ref": 4,
+     "chunk_id": "HD-DATA-001@1.0#5-gold-alerts-fact-4",
+     "citation": "Gold Data Dictionary v1.0 > 5. `gold.alerts_fact`",
+     "doc_id": "HD-DATA-001",
+     "version": "1.0",
+     "text": "One row per High alert. An alert fires when a patient **enters** the High band. To limit alarm fatigue, a patient who already alerted in the previous **6 hours** does not alert again, even if they leave and re-enter the High band.\n\n| Column | Meaning |\n|---|---|\n| `alert_id`, `encounter_id`, `patient_id`, `site_id`, `unit_id` | identifiers |\n| `alert_ts` | when the patient entered the High band |\n| `risk`, `news2_total`, `top_factors` | the score and reasons at alert time |\n| `escalated_within_6h` | whether an escalation followed (null until known) |\n| `hours_to_escalation` | warning time, if escalated |"
+    }
+   ]
+  },
+  {
+   "question": "What NEWS2 score triggers a rapid response call, and how did that change in November?",
+   "answer": "A **NEWS2 score of 5 or more** now triggers a **rapid response team call**. NEWS2 **7 or more** is treated as an emergency: RRT immediately and consider ICU referral [2].\n\nThis changed on **2026-11-09**: before then, the RRT trigger was **NEWS2 7**; from v2.0 onward it was lowered to **NEWS2 5+** to escalate earlier [3].",
+   "steps": [
+    {
+     "tool": "search_documents",
+     "query": "NEWS2 rapid response call trigger change November",
+     "as_of": null,
+     "refs": [
+      1,
+      2,
+      3,
+      4
+     ]
+    }
+   ],
+   "citations": [
+    {
+     "ref": 1,
+     "chunk_id": "HD-CLIN-001@2.0#5-how-to-call-the-rapid-response-team-5",
+     "citation": "Deteriorating Patient Escalation Protocol v2.0 > 5. How to call the rapid response team",
+     "doc_id": "HD-CLIN-001",
+     "version": "2.0",
+     "text": "Unchanged from v1.0: dial the site RRT extension (*Site and Unit Handbook*, HD-OPS-001), use **SBAR**, state the NEWS2 score, risk band and top reasons. The RRT aims to attend within **15 minutes**."
+    },
+    {
+     "ref": 2,
+     "chunk_id": "HD-CLIN-001@2.0#3-escalation-by-news2-score-3",
+     "citation": "Deteriorating Patient Escalation Protocol v2.0 > 3. Escalation by NEWS2 score",
+     "doc_id": "HD-CLIN-001",
+     "version": "2.0",
+     "text": "| NEWS2 | Observation frequency | Response |\n|---|---|---|\n| 0 | at least every 12 hours | routine care |\n| 1-4 | at least every 4 hours | nurse in charge informed; included in the proactive review round if trending up |\n| 3 in any single parameter | at least hourly | **outreach nurse review within 30 minutes** |\n| 5-6 | at least hourly | **call the rapid response team** |\n| 7 or more | continuous monitoring | **emergency**: rapid response team immediately, consider ICU referral |"
+    },
+    {
+     "ref": 3,
+     "chunk_id": "HD-CLIN-001@2.0#1-what-changed-from-v1-0-0",
+     "citation": "Deteriorating Patient Escalation Protocol v2.0 > 1. What changed from v1.0",
+     "doc_id": "HD-CLIN-001",
+     "version": "2.0",
+     "text": "Version 2.0 takes effect on **2026-11-09** at all three sites. An audit of 2026 found that deteriorating patients were often escalated late, after several hours of worsening observations. Version 2.0 therefore asks staff to **escalate earlier**:\n\n1. **Lower trigger for an urgent response.** A NEWS2 of **5 or more** (previously 7) now triggers a call to the rapid response team.\n2. **Earlier action on a single red score.** A score of 3 in any single parameter now triggers a review by the outreach nurse within 30 minutes (previously the ward doctor within 60 minutes).\n3. **Proactive review rounds.** The outreach nurse visits every ward each shift and reviews any patient with a NEWS2 of 1 or more whose observations are trending the wrong way, even if they look stable.\n4. **High risk alerts get a senior review.** A High band on the deterioration risk score now triggers a review by the outreach nurse within 30 minutes."
+    },
+    {
+     "ref": 4,
+     "chunk_id": "HD-DATA-001@1.0#6-gold-escalations-fact-5",
+     "citation": "Gold Data Dictionary v1.0 > 6. `gold.escalations_fact`",
+     "doc_id": "HD-DATA-001",
+     "version": "1.0",
+     "text": "One row per escalation (rapid response call or ICU transfer).\n\n| Column | Meaning |\n|---|---|\n| `encounter_id`, `patient_id`, `site_id`, `unit_id` | the stay, and where the patient was just before |\n| `event_ts`, `event_type` | when, and `rapid_response` or `icu_transfer` |\n| `risk_before` | the last risk score before the event |\n| `flagged_6h_before` | whether the patient was in the High band at any hour in the 6 hours before |\n| `hours_flagged_before` | how many hours before the event they were first flagged High |"
+    }
+   ]
+  },
+  {
+   "question": "If SpO2 readings drift down at one site only, should we retrain the model?",
+   "answer": "No. If SpO2 is drifting down at **one site only**, the runbook says this points to a local device or practice issue, not necessarily a changed patient population [2].\n\nFor the specific one-site SpO2 drift scenario, the correct response is **do not retrain**: the measurements are likely wrong, and retraining would teach the model to accept faulty readings [1]. Instead:\n\n- Ask Clinical Engineering to check/fix the devices.\n- Add a temporary ward-board note.\n- Reject the retrain request with reference to the safety notice/runbook.\n- Consider excluding affected readings from future training data [1].",
+   "steps": [
+    {
+     "tool": "search_documents",
+     "query": "SpO2 readings drift down at one site only should we retrain model drift runbook model retraining site-specific sensor drift",
+     "as_of": null,
+     "refs": [
+      1,
+      2,
+      3,
+      4
+     ]
+    }
+   ],
+   "citations": [
+    {
+     "ref": 1,
+     "chunk_id": "HD-OPS-002@1.0#5-1-spo2-sensor-bias-data-drift-gradual-4",
+     "citation": "Drift Incident Runbook v1.0 > 5. Scenarios and correct responses > 5.1 SpO2 sensor bias (data drift, gradual)",
+     "doc_id": "HD-OPS-002",
+     "version": "1.0",
+     "text": "- **Symptoms:** PSI on `spo2_*` features rises at **one site** (Site B), growing day by day. Other vitals unchanged. Alert load at that site rises. Calibration worsens there.\n- **Cause:** a device fault (see device manual, FSN-2026-11): SpO2 reads up to 3 points low.\n- **Correct response:** **do not retrain.** The patients haven't changed; the measurements are wrong. Retraining would teach the model to accept the faulty readings. Ask Clinical Engineering to fix the devices, add a temporary note on the ward board, and **reject** the retrain request with a reference to the notice. Consider excluding affected readings from future training data."
+    },
+    {
+     "ref": 2,
+     "chunk_id": "HD-OPS-002@1.0#4-triage-checklist-3",
+     "citation": "Drift Incident Runbook v1.0 > 4. Triage checklist",
+     "doc_id": "HD-OPS-002",
+     "version": "1.0",
+     "text": "1. Open the *Model and Drift* dashboard. Which signal fired: features, predictions, performance, or data quality?\n2. Is it **one site** or **all sites**? One site points to devices or local practice. All sites points to patients or protocol.\n3. Which **features** moved? Only SpO2? All respiratory features? None (only outcomes)?\n4. Check the pipeline event log and `_rescued_data` for schema problems.\n5. Check the document library for recent **field safety notices** and **protocol changes**.\n6. Decide using section 5, record the decision in `ml.ops_audit`, and approve or reject the retrain request on GitHub with a comment."
+    },
+    {
+     "ref": 3,
+     "chunk_id": "HD-ML-002@1.0#5-drift-scenarios-4",
+     "citation": "Data Card: HeavDen synthetic inpatient data v1.0 > 5. Drift scenarios",
+     "doc_id": "HD-ML-002",
+     "version": "1.0",
+     "text": "The generator can switch on four controlled changes, used to test monitoring (see the *Drift Incident Runbook*):\n- SpO2 sensor bias at Site B (data drift)\n- respiratory outbreak (population drift)\n- escalation protocol change (concept drift)\n- firmware schema change (schema drift)"
+    },
+    {
+     "ref": 4,
+     "chunk_id": "HD-OPS-002@1.0#1-purpose-0",
+     "citation": "Drift Incident Runbook v1.0 > 1. Purpose",
+     "doc_id": "HD-OPS-002",
+     "version": "1.0",
+     "text": "The deterioration risk model was trained on past data. When the data or the world changes, its predictions can quietly get worse. This runbook says how a drift alert is raised, how to diagnose it, and what the correct response is for each kind of drift. **Retraining is not always the right answer.**"
+    }
+   ]
+  },
+  {
+   "question": "How much better than NEWS2 is the model, and what are its limitations?",
+   "answer": "On the model card test block, the model is **better than NEWS2 mainly in earlier detection**, not in alert precision:\n\n- **Escalations flagged in advance:** model **25/28 (89%)** vs NEWS2 **21/28 (75%)** — **+14 percentage points**, or **4 more deteriorating patients** flagged in advance. The 95% interval for the difference was **+3 to +28 points** [3].\n- **Flagged at least 3 hours ahead:** model **19** vs NEWS2 **12** [3].\n- **Alerts followed by escalation within 6h:** model **2.9%** vs NEWS2 **3.1%** — essentially similar; about **1 in 30 alerts** led to escalation for either score [3].\n- **AUPRC:** model **0.40** vs NEWS2 **0.22** [3].\n- **AUROC:** model **0.79** vs NEWS2 **0.74**, with interval crossing zero difference [3].\n- Test evidence is limited: only **28 escalations over 2 days**, so intervals are wide [2].\n\nMain limitations:\n\n- Data are **synthetic**, and real-world gains over NEWS2 would likely be smaller [1].\n- Alert load is uneven by age: older-patient wards get most alerts, mostly false alarms; younger patients rarely alert, so a Low band should not reassure if the patient looks unwell [1].\n- It cannot predict **sudden events** without gradual vital-sign changes [1].\n- It depends on monitor accuracy; faulty sensors can produce wrong risks [1].\n- It learned escalation behavior under protocol v1.0 and may **under-predict after protocol v2.0** until retrained [1].\n- Alert load was **2.1 alerts per nurse per shift** against a budget of 2, so it needs continuous monitoring [1].",
+   "steps": [
+    {
+     "tool": "search_documents",
+     "query": "model card evaluation compared with NEWS2 limitations performance",
+     "as_of": null,
+     "refs": [
+      1,
+      2,
+      3,
+      4
+     ]
+    }
+   ],
+   "citations": [
+    {
+     "ref": 1,
+     "chunk_id": "HD-ML-001@1.0#7-known-limitations-7",
+     "citation": "Model Card: deterioration_risk v1.0 > 7. Known limitations",
+     "doc_id": "HD-ML-001",
+     "version": "1.0",
+     "text": "- **Synthetic data.** Simulated deteriorations are smoother than real ones, so real-world gains over NEWS2 would likely be smaller.\n- **Uneven alert load by age.** Wards with very old patients carry most of the alerts, mostly false alarms; younger patients rarely alert (section 5). Clinicians should not be reassured by a Low band in a young patient who looks unwell.\n- **Sudden events.** Escalations without a gradual change in vital signs beforehand cannot be predicted.\n- **Measurement faults.** The model trusts the monitor. Faulty sensors (e.g. FSN-2026-11, SpO2 under-reading at Site B) produce wrong risks.\n- **Protocol dependence.** The model learned when staff escalated under protocol v1.0. After protocol v2.0 (2026-11-09) it under-predicts escalation until retrained (see the *Drift Incident Runbook*, scenario 5.3).\n- **Alert-load drift.** On the test block the model raised 2.1 alerts per nurse per shift against a budget of 2. The alert load needs no outcomes, so it is monitored continuously."
+    },
+    {
+     "ref": 2,
+     "chunk_id": "HD-ML-001@1.0#4-performance-test-block-2-days-28-escalations-4",
+     "citation": "Model Card: deterioration_risk v1.0 > 4. Performance (test block, 2 days, 28 escalations)",
+     "doc_id": "HD-ML-001",
+     "version": "1.0",
+     "text": "Intervals come from a bootstrap that resamples whole hospital stays. The test block holds only 28 escalations, so every interval is wide."
+    },
+    {
+     "ref": 3,
+     "chunk_id": "HD-ML-001@1.0#4-performance-test-block-2-days-28-escalations-3",
+     "citation": "Model Card: deterioration_risk v1.0 > 4. Performance (test block, 2 days, 28 escalations)",
+     "doc_id": "HD-ML-001",
+     "version": "1.0",
+     "text": "Each score uses its own alert threshold, fixed on validation for at most 2 alerts per nurse per shift.\n\n| Metric | Level | Champion | NEWS2 | 95% interval of the difference |\n|---|---|---|---|---|\n| **Escalations flagged in advance** (High in the 6 h before) | per escalation | **25 of 28 (89%)** | 21 of 28 (75%) | +3 to +28 points |\n| Flagged at least 3 hours ahead | per escalation | 19 | 12 | |\n| Alerts followed by an escalation within 6 h | per alert | 2.9% (about 1 in 34) | 3.1% | -1 to +1 points |\n| Alert load on test | per nurse per shift | 2.1 | 1.8 | |\n| AUPRC (ranking) | per hour | 0.40 | 0.22 | +0.08 to +0.26 |\n| AUROC (ranking) | per hour | 0.79 | 0.74 | -0.01 to +0.13 |\n\n**Reading it:** within the same alert budget, the model flags **14 percentage points more** deteriorating patients in advance (89% vs 75%: 4 more of the 28); both scores are followed by an escalation after about 1 in 30 alerts. Most alerts are not followed by an escalation within 6 hours, for either score. NEWS2's whole-number scores can't use the budget exactly, so it raises slightly fewer alerts."
+    },
+    {
+     "ref": 4,
+     "chunk_id": "HD-ML-001@1.0#8-monitoring-and-updates-8",
+     "citation": "Model Card: deterioration_risk v1.0 > 8. Monitoring and updates",
+     "doc_id": "HD-ML-001",
+     "version": "1.0",
+     "text": "Monitored hourly for feature drift (PSI), prediction drift (Jensen-Shannon), performance once outcomes arrive (6-hour delay), calibration and alert load. Retraining and promotion each need a human approval on GitHub. See the *Drift Incident Runbook*, HD-OPS-002."
+    }
+   ]
+  },
+  {
+   "question": "Why is the highest-risk patient flagged right now, and what does the protocol say to do?",
+   "answer": "The highest-risk patient right now is **P-1735** at **SITE_C-GENERAL**, risk **4.00%**, **High** band, NEWS2 **1**.\n\n**Why flagged:** the main factors raising risk are:\n- **Lower oxygen saturation trend/level**: 6-hour average SpO₂ **94.42**\n- **Blood pressure factor**: 6-hour average diastolic BP **88.0**\n- **Patient background**: age **76**, with diabetes, CKD, and hypertension\n\nRisk was already near the High threshold 6 hours earlier (**~1.67%**) and is now **4.00%**.\n\n**Protocol action:** for a **High alert**, the protocol says:\n- **Outreach nurse review within 30 minutes**\n- **Repeat full observations and NEWS2**\n- **Call the RRT if NEWS2 is 5 or more or there is clinical concern** [1]\n\nBecause this patient’s NEWS2 is **1**, the protocol does **not** require RRT solely by NEWS2, but clinical concern can still trigger it [1].",
+   "steps": [
+    {
+     "tool": "query_gold",
+     "purpose": "Find the current highest-risk patient at the latest timestamp.",
+     "sql": "SELECT e.patient_label, r.encounter_id, ROUND(r.risk * 100, 2) AS risk_pct, r.risk_band, r.news2_total\nFROM gold.risk_scores r\nJOIN gold.encounters e ON e.encounter_id = r.encounter_id\nWHERE r.prediction_ts = TIMESTAMPTZ '2026-11-14T23:00:00+00:00'\nORDER BY r.risk DESC\nLIMIT 1",
+     "columns": [
+      "patient_label",
+      "encounter_id",
+      "risk_pct",
+      "risk_band",
+      "news2_total"
+     ],
+     "rows": [
+      [
+       "P-1735",
+       "E-100941",
+       4.0,
+       "High",
+       1.0
+      ]
+     ],
+     "row_count": 1
+    },
+    {
+     "tool": "explain_patient",
+     "patient": "P-1735",
+     "result": {
+      "encounter_id": "E-100941",
+      "patient_label": "P-1735",
+      "age": 76,
+      "sex": "M",
+      "conditions": "diabetes, ckd, hypertension",
+      "site_id": "SITE_C",
+      "unit_id": "SITE_C-GENERAL",
+      "bed_id": "SITE_C-GENERAL-033",
+      "admit_ts": "2026-11-11T21:24:00+00:00",
+      "discharge_ts": "2026-11-14T23:35:00+00:00",
+      "prediction_ts": "2026-11-14T23:00:00+00:00",
+      "risk": 0.04000006498904721,
+      "risk_band": "High",
+      "news2_total": 1.0,
+      "top_factors": [
+       {
+        "factor": "oxygen saturation",
+        "direction": "raises risk",
+        "log_odds": 1.273,
+        "driver": "SpO2 (average, last 6 h)",
+        "driver_value": 94.42
+       },
+       {
+        "factor": "blood pressure",
+        "direction": "raises risk",
+        "log_odds": 0.923,
+        "driver": "diastolic BP (average, last 6 h)",
+        "driver_value": 88.0
+       },
+       {
+        "factor": "patient background",
+        "direction": "raises risk",
+        "log_odds": 0.773,
+        "driver": "age",
+        "driver_value": 76.0
+       }
+      ],
+      "risk_6h_before": 0.01674278724869056,
+      "on_ward_now": true,
+      "recent_alerts_48h": [
+       {
+        "alert_ts": "2026-11-13T06:00:00+00:00",
+        "risk": 0.04,
+        "escalated_within_6h": 0.0
+       },
+       {
+        "alert_ts": "2026-11-14T00:00:00+00:00",
+        "risk": 0.0167,
+        "escalated_within_6h": 0.0
+       },
+       {
+        "alert_ts": "2026-11-14T06:00:00+00:00",
+        "risk": 0.0167,
+        "escalated_within_6h": 0.0
+       },
+       {
+        "alert_ts": "2026-11-14T16:00:00+00:00",
+        "risk": 0.0167,
+        "escalated_within_6h": 0.0
+       },
+       {
+        "alert_ts": "2026-11-14T22:00:00+00:00",
+        "risk": 0.0167,
+        "escalated_within_6h": null
+       }
+      ],
+      "risk_bands": {
+       "medium": 0.0068995355761325,
+       "high": 0.01674278339042864
+      }
+     }
+    },
+    {
+     "tool": "search_documents",
+     "query": "protocol for High deterioration risk alert escalation actions NEWS2",
+     "as_of": "2026-11-14",
+     "refs": [
+      1,
+      2,
+      3,
+      4
+     ]
+    }
+   ],
+   "citations": [
+    {
+     "ref": 1,
+     "chunk_id": "HD-CLIN-001@2.0#4-escalation-by-risk-band-4",
+     "citation": "Deteriorating Patient Escalation Protocol v2.0 > 4. Escalation by risk band",
+     "doc_id": "HD-CLIN-001",
+     "version": "2.0",
+     "text": "| Band | Response |\n|---|---|\n| Low | routine care |\n| Medium | included in the proactive review round; nurse reviews the trend each observation round |\n| High (alert) | **outreach nurse review within 30 minutes**; repeat full observations and NEWS2; call the RRT if NEWS2 is 5 or more or there is clinical concern |\n\nThe model's alert budget is unchanged: about 2 High alerts per nurse per 12-hour shift. If alerts consistently exceed that, report it to the ML platform team (see the *Drift Incident Runbook*)."
+    },
+    {
+     "ref": 2,
+     "chunk_id": "HD-CLIN-001@2.0#1-what-changed-from-v1-0-1",
+     "citation": "Deteriorating Patient Escalation Protocol v2.0 > 1. What changed from v1.0",
+     "doc_id": "HD-CLIN-001",
+     "version": "2.0",
+     "text": "**What this means for the data.** Patients are now escalated earlier in a deterioration, and some patients who would previously have stayed on the ward are escalated during proactive rounds. The *same* observations are therefore followed by escalation more often than before. For the deterioration risk model this is **concept drift**: the relationship between vital signs and the outcome has changed. See the *Drift Incident Runbook*, HD-OPS-002, scenario \"protocol change\"."
+    },
+    {
+     "ref": 3,
+     "chunk_id": "HD-ML-001@1.0#3-risk-bands-2",
+     "citation": "Model Card: deterioration_risk v1.0 > 3. Risk bands",
+     "doc_id": "HD-ML-001",
+     "version": "1.0",
+     "text": "Escalation within 6 hours is rare: about **0.9%** of patient-hours. Calibrated probabilities are therefore small numbers, and the bands are set from the **alert budget** rather than round percentages.\n\nAn **alert** fires when a patient **enters** the High band. The same patient does not alert again for 6 hours, even if they leave and re-enter High. The High cut-off is the lowest one that keeps alerts within about **2 per nurse per 12-hour shift** (1 nurse per 5 patients), fixed on validation.\n\n| Band | Definition (fixed on validation) | Current risk cut-off | What it means |\n|---|---|---|---|\n| High (alert) | the alert threshold; about 8% of patient-hours | risk ≥ about 1.7% | per hour: escalation about **8 times** more likely than average (about 1 in 14 High hours is followed by one) |\n| Medium | up to the top 10% of patient-hours; about 3% of hours | risk about 0.7-1.7% | close to average in the test data; watch the trend |\n| Low | the rest, about 90% | risk below about 0.7% | routine monitoring |\n\nResponses to each band are set by the escalation protocol (HD-CLIN-001)."
+    },
+    {
+     "ref": 4,
+     "chunk_id": "HD-CLIN-001@2.0#1-what-changed-from-v1-0-0",
+     "citation": "Deteriorating Patient Escalation Protocol v2.0 > 1. What changed from v1.0",
+     "doc_id": "HD-CLIN-001",
+     "version": "2.0",
+     "text": "Version 2.0 takes effect on **2026-11-09** at all three sites. An audit of 2026 found that deteriorating patients were often escalated late, after several hours of worsening observations. Version 2.0 therefore asks staff to **escalate earlier**:\n\n1. **Lower trigger for an urgent response.** A NEWS2 of **5 or more** (previously 7) now triggers a call to the rapid response team.\n2. **Earlier action on a single red score.** A score of 3 in any single parameter now triggers a review by the outreach nurse within 30 minutes (previously the ward doctor within 60 minutes).\n3. **Proactive review rounds.** The outreach nurse visits every ward each shift and reviews any patient with a NEWS2 of 1 or more whose observations are trending the wrong way, even if they look stable.\n4. **High risk alerts get a senior review.** A High band on the deterioration risk score now triggers a review by the outreach nurse within 30 minutes."
+    }
+   ]
+  },
+  {
+   "question": "Is device uptime at Site B different from the other sites this week?",
+   "answer": "For complete days this week (2026-11-09 through 2026-11-13 UTC), Site B is not meaningfully different from the others.\n\n- SITE_B average uptime: 97.14% across 429 device-days\n- SITE_A: 96.92%\n- SITE_C: 96.94%\n- Site B vs the other sites combined: +0.21 percentage points\n\nSo Site B is very slightly higher, but uptime looks broadly comparable across sites.",
+   "steps": [
+    {
+     "tool": "query_gold",
+     "purpose": "Compare complete-day device uptime at Site B versus other sites for this week to date.",
+     "sql": "SELECT site_id, COUNT(*) AS device_days, ROUND(AVG(uptime_pct), 2) AS avg_uptime_pct, ROUND(MIN(uptime_pct), 2) AS min_uptime_pct, ROUND(MAX(uptime_pct), 2) AS max_uptime_pct, ROUND(AVG(uptime_pct) - AVG(CASE WHEN site_id <> 'SITE_B' THEN uptime_pct END) OVER (), 2) AS diff_vs_other_sites_pct_points\nFROM gold.device_health_daily\nWHERE date >= TIMESTAMPTZ '2026-11-09T00:00:00+00:00'\n  AND date < TIMESTAMPTZ '2026-11-14T00:00:00+00:00'\nGROUP BY site_id\nORDER BY site_id",
+     "error": "query failed: Binder Error: column \"uptime_pct\" must appear in the GROUP BY clause or must be part of an aggregate function."
+    },
+    {
+     "tool": "query_gold",
+     "purpose": "Compare complete-day device uptime at Site B versus other sites for this week to date.",
+     "sql": "WITH site AS (\n  SELECT site_id, COUNT(*) AS device_days, AVG(uptime_pct) AS avg_uptime_pct, MIN(uptime_pct) AS min_uptime_pct, MAX(uptime_pct) AS max_uptime_pct\n  FROM gold.device_health_daily\n  WHERE date >= TIMESTAMPTZ '2026-11-09T00:00:00+00:00'\n    AND date < TIMESTAMPTZ '2026-11-14T00:00:00+00:00'\n  GROUP BY site_id\n), others AS (\n  SELECT AVG(uptime_pct) AS other_avg_uptime_pct\n  FROM gold.device_health_daily\n  WHERE date >= TIMESTAMPTZ '2026-11-09T00:00:00+00:00'\n    AND date < TIMESTAMPTZ '2026-11-14T00:00:00+00:00'\n    AND site_id <> 'SITE_B'\n)\nSELECT site_id, device_days, ROUND(avg_uptime_pct, 2) AS avg_uptime_pct, ROUND(min_uptime_pct, 2) AS min_uptime_pct, ROUND(max_uptime_pct, 2) AS max_uptime_pct,\n       CASE WHEN site_id = 'SITE_B' THEN ROUND(avg_uptime_pct - other_avg_uptime_pct, 2) ELSE NULL END AS site_b_diff_vs_others_pct_points\nFROM site CROSS JOIN others\nORDER BY site_id",
+     "columns": [
+      "site_id",
+      "device_days",
+      "avg_uptime_pct",
+      "min_uptime_pct",
+      "max_uptime_pct",
+      "site_b_diff_vs_others_pct_points"
+     ],
+     "rows": [
+      [
+       "SITE_A",
+       619,
+       96.92,
+       79.69,
+       100.0,
+       null
+      ],
+      [
+       "SITE_B",
+       429,
+       97.14,
+       85.71,
+       100.0,
+       0.21
+      ],
+      [
+       "SITE_C",
+       376,
+       96.94,
+       60.61,
+       100.0,
+       null
+      ]
+     ],
+     "row_count": 3
+    }
+   ],
+   "citations": []
+  }
+ ]
+}

@@ -33,6 +33,7 @@ rag = [
 backend = [
     "duckdb>=1.5.6",
     "fastapi>=0.143.0",
+    "openai>=3.26.1",
     "uvicorn[standard]>=0.54.0",
 ]
 

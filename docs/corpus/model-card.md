@@ -60,7 +60,7 @@ Each score uses its own alert threshold, fixed on validation for at most 2 alert
 | AUPRC (ranking) | per hour | 0.40 | 0.22 | +0.08 to +0.26 |
 | AUROC (ranking) | per hour | 0.79 | 0.74 | -0.01 to +0.13 |
 
-**Reading it:** within the same alert budget, the model flags more deteriorating patients in advance; both scores are followed by an escalation after about 1 in 30 alerts. Most alerts are not followed by an escalation within 6 hours, for either score. NEWS2's whole-number scores can't use the budget exactly, so it raises slightly fewer alerts.
+**Reading it:** within the same alert budget, the model flags **14 percentage points more** deteriorating patients in advance (89% vs 75%: 4 more of the 28); both scores are followed by an escalation after about 1 in 30 alerts. Most alerts are not followed by an escalation within 6 hours, for either score. NEWS2's whole-number scores can't use the budget exactly, so it raises slightly fewer alerts.
 
 Intervals come from a bootstrap that resamples whole hospital stays. The test block holds only 28 escalations, so every interval is wide.
 
