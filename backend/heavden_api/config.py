@@ -9,6 +9,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def load_dotenv(path: Path = ROOT / ".env") -> None:
+    """Local development only: read KEY=value lines from `.env` (git-ignored) without
+    overriding variables that are already set. On Render, variables come from the dashboard."""
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
 def _origins() -> tuple[str, ...]:
     raw = os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000")
     return tuple(o.strip() for o in raw.split(",") if o.strip())
@@ -31,6 +44,15 @@ class Settings:
     allowed_origins: tuple[str, ...] = field(default_factory=_origins)
     # below this best-match similarity, document search reports "not covered"
     min_similarity: float = 0.55
+    # the assistant: without a key, /chat replays recorded answers
+    openai_api_key: str | None = field(
+        default_factory=lambda: os.environ.get("OPENAI_API_KEY") or None, repr=False
+    )
+    # gpt-5.5 answered judgement questions reliably in testing; gpt-5.4-mini is cheaper but weaker
+    llm_model: str = field(default_factory=lambda: os.environ.get("LLM_MODEL", "gpt-5.5"))
+    chat_requests_per_hour: int = field(
+        default_factory=lambda: int(os.environ.get("CHAT_REQUESTS_PER_HOUR", "30"))
+    )
 
     def __post_init__(self):
         if self.mode not in ("demo", "live"):
