@@ -32,11 +32,11 @@ The deterioration risk model was trained on past data. When the data or the worl
 | AUPRC drop against the champion's validation AUPRC | > 10% relative | > 20% relative |
 | Brier score (calibration) worsening | > 10% | > 20% |
 | Quarantine or null rate in silver vitals | > 2% | > 5% |
-| Alert rate against the 3.3% budget | > 4.5% | > 6% |
+| Alert load against the budget of 2 alerts per nurse per shift | > 2.5 | > 3 |
 
 **Why PSI and not a KS test?** With thousands of readings a KS test flags tiny, harmless differences as "significant". PSI measures *how much* a distribution moved, and the minimum of 500 samples stops small slices from raising false alarms.
 
-**Why the alert rate?** It needs no outcomes, so it is known immediately, while AUPRC must wait 6 hours for labels.
+**Why the alert load?** It needs no outcomes, so it is known immediately, while AUPRC and escalations flagged must wait 6 hours for labels.
 
 ## 4. Triage checklist
 
@@ -50,7 +50,7 @@ The deterioration risk model was trained on past data. When the data or the worl
 ## 5. Scenarios and correct responses
 
 ### 5.1 SpO2 sensor bias (data drift, gradual)
-- **Symptoms:** PSI on `spo2_*` features rises at **one site** (Site B), growing day by day. Other vitals unchanged. Alert rate at that site rises. Calibration worsens there.
+- **Symptoms:** PSI on `spo2_*` features rises at **one site** (Site B), growing day by day. Other vitals unchanged. Alert load at that site rises. Calibration worsens there.
 - **Cause:** a device fault (see device manual, FSN-2026-11): SpO2 reads up to 3 points low.
 - **Correct response:** **do not retrain.** The patients haven't changed; the measurements are wrong. Retraining would teach the model to accept the faulty readings. Ask Clinical Engineering to fix the devices, add a temporary note on the ward board, and **reject** the retrain request with a reference to the notice. Consider excluding affected readings from future training data.
 

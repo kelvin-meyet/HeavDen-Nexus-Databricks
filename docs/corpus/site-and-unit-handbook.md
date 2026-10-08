@@ -38,7 +38,7 @@ Valley (SITE_C) has a small ICU without capacity for long stays. Patients needin
 
 - Shifts are **12 hours**: day 07:00-19:00, night 19:00-07:00 (local time).
 - Ward nurse-to-patient ratio is **1 nurse to 5 patients** on general and respiratory wards, and 1 to 4 on step-down.
-- The **alert budget** for the deterioration risk score is set from this staffing: about **2 High alerts per nurse per 12-hour shift**, which is about 3.3% of patient-hours. More alerts than that cause alarm fatigue.
+- The **alert budget** for the deterioration risk score is set from this staffing: about **2 High alerts per nurse per 12-hour shift**. An alert fires when a patient enters the High band; the same patient doesn't alert again for 6 hours. More alerts than that cause alarm fatigue.
 
 ## 4. Oxygen targets
 

@@ -31,20 +31,67 @@ def _table(n_patients: int = 60, days: int = 14, seed: int = 0) -> pd.DataFrame:
     return df
 
 
-def test_alert_budget_is_two_alerts_per_nurse_per_shift():
-    assert evaluate.AlertBudget().fraction == pytest.approx(2 / 60)
+def test_alert_budget_converts_alerts_per_nurse_shift():
+    budget = evaluate.AlertBudget()
+    assert budget.alerts_per_patient_hour == pytest.approx(2 / 60)
+    assert budget.per_nurse_shift(alerts=10, patient_hours=300) == pytest.approx(2.0)
 
 
-def test_threshold_hits_the_budget_on_continuous_scores():
-    scores = np.random.default_rng(0).random(10_000)
-    thr = evaluate.threshold_for_budget(scores, 0.05)
-    assert (scores >= thr).mean() == pytest.approx(0.05, abs=0.002)
+def _stay(flags, encounter="E1", labels=None):
+    hours = pd.date_range(T0, periods=len(flags), freq="h")
+    df = pd.DataFrame({"encounter_id": encounter, "prediction_ts": hours})
+    df["label"] = labels if labels is not None else 0.0
+    return df, np.array(flags, dtype=bool)
 
 
-def test_alert_metrics_count_caught_events():
-    y = np.array([1, 1, 0, 0, 0])
-    m = evaluate.alert_metrics(y, np.array([0.9, 0.1, 0.8, 0.2, 0.3]), threshold=0.5)
-    assert m == {"alert_rate": 0.4, "precision_at_budget": 0.5, "recall_at_budget": 0.5}
+def test_alert_onsets_fire_on_entry_and_suppress_repeats():
+    # enters at 0, leaves, re-enters at 3 (suppressed), re-enters at 7 (>= 6 h later: alerts)
+    df, high = _stay([1, 1, 0, 1, 0, 0, 0, 1, 1])
+    assert np.flatnonzero(evaluate.alert_onsets(df, high)).tolist() == [0, 7]
+    # a gap in the hourly series (e.g. a transfer without data) is not "still High"
+    gap = df.drop(index=1)
+    assert evaluate.alert_onsets(gap, high[[0, 2, 3, 4, 5, 6, 7, 8]]).sum() == 2
+
+
+def test_alert_onsets_keep_the_input_row_order():
+    a, high_a = _stay([0, 1, 1], "A")
+    b, high_b = _stay([1, 0, 0], "B")
+    df = pd.concat([a.assign(high=high_a), b.assign(high=high_b)], ignore_index=True)
+    shuffled = df.sample(frac=1, random_state=0).reset_index(drop=True)
+    onset = evaluate.alert_onsets(shuffled, shuffled["high"].to_numpy())
+    alerted = shuffled[onset]
+    pairs = zip(alerted["encounter_id"], alerted["prediction_ts"].dt.hour, strict=True)
+    assert sorted(pairs) == [
+        ("A", 1),
+        ("B", 0),
+    ]
+
+
+def test_alert_metrics_count_alerts_not_hours():
+    labels = [0, 0, 0, 0, 1, 1, 1, 1, 1, 1]  # escalation in the hour after the last row
+    df, _ = _stay([0] * 10, labels=labels)
+    scores = np.array([0, 0, 0, 0, 0, 0.9, 0.9, 0.9, 0.9, 0.9])  # one long High period
+    m = evaluate.alert_metrics(df, scores, threshold=0.5)
+    assert m["alerts"] == 1 and m["alert_precision"] == 1.0  # 5 High hours, 1 alert
+    assert m["escalations"] == 1 and m["escalations_flagged"] == 1.0
+    assert m["median_warning_hours"] == 5 and m["high_hour_share"] == 0.5
+
+
+def test_threshold_for_alert_budget_stays_within_budget():
+    rng = np.random.default_rng(0)
+    frames = []
+    for e in range(60):
+        df, _ = _stay([0] * 48, f"E{e}")
+        frames.append(df)
+    df = pd.concat(frames, ignore_index=True)
+    scores = rng.random(len(df))
+    budget = evaluate.AlertBudget()
+    thr = evaluate.threshold_for_alert_budget(df, scores, budget)
+    alerts = evaluate.alert_onsets(df, scores >= thr).sum()
+    allowed = budget.alerts_per_patient_hour * len(df)
+    assert alerts <= allowed
+    # and it's the lowest such threshold: a little lower goes over budget
+    assert evaluate.alert_onsets(df, scores >= thr - 0.02).sum() > allowed
 
 
 def test_time_split_is_ordered_with_gaps():
@@ -72,9 +119,7 @@ def test_candidates_are_calibrated_and_beat_a_weak_baseline():
         # calibration keeps the ranking of the raw model
         raw = r.model.raw_scores(va)
         assert np.corrcoef(np.argsort(np.argsort(p)), np.argsort(np.argsort(raw)))[0, 1] > 0.99
-        assert r.valid_metrics["alert_rate"] == pytest.approx(
-            evaluate.AlertBudget().fraction, abs=0.01
-        )
+        assert r.valid_metrics["alerts_per_nurse_shift"] <= 2.0
     champion = train.select_champion(results, baseline)
     assert champion is not None
     assert champion.valid_metrics["auprc"] == max(
@@ -83,5 +128,7 @@ def test_candidates_are_calibrated_and_beat_a_weak_baseline():
 
 
 def test_no_champion_when_nothing_beats_news2():
-    weak = train.CandidateResult("weak", None, {"auprc": 0.1, "precision_at_budget": 0.1})
-    assert train.select_champion([weak], {"auprc": 0.2, "precision_at_budget": 0.2}) is None
+    baseline = {"auprc": 0.2, "escalations_flagged": 0.6}
+    weak = train.CandidateResult("weak", None, {"auprc": 0.1, "escalations_flagged": 0.9})
+    misses_more = train.CandidateResult("x", None, {"auprc": 0.4, "escalations_flagged": 0.5})
+    assert train.select_champion([weak, misses_more], baseline) is None
