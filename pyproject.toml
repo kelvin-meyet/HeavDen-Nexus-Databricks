@@ -1,0 +1,51 @@
+[project]
+name = "heavden-nexus-databricks"
+version = "0.1.0"
+description = "HeavDen-Nexus: end-to-end ML/AI analytics platform on Azure Databricks (synthetic healthcare data)"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "lightgbm>=4.7.0",
+    "mlflow>=3.17.0",
+    "numpy>=2.0",
+    "pandas>=2.2",
+    "pyarrow>=25.0.1",
+    "pyyaml>=6.0",
+    "scikit-learn>=1.9.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.8",
+    "nbstripout>=0.8",
+]
+notebooks = [
+    "ipykernel>=6.29",
+    "matplotlib>=3.9",
+    "scipy>=1.14",
+]
+rag = [
+    "faiss-cpu>=1.15.1",
+    "fastembed>=0.9.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["generator", "databricks/src/heavden"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["generator", "heavden"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
