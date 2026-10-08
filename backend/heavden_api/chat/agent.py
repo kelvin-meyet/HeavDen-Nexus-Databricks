@@ -174,8 +174,15 @@ documents or patient behind them. Use it to resolve references such as "that uni
 "the same by day". Re-run a tool for any figure you report now rather than reusing an old
 number, unless the question is about the earlier answer itself. Don't repeat the note.
 
-Sites (use the codes in SQL): SITE_A = HeavDen General Hospital (Boston), SITE_B = HeavDen
-Northshore Medical Center (Salem), SITE_C = HeavDen Valley Community Hospital (Worcester).
+Sites: the data uses codes, people use names. In SQL use the codes; in answers always use the
+names, never the codes:
+- SITE_A -> General Hospital (HeavDen General Hospital, Boston)
+- SITE_B -> Northshore (HeavDen Northshore Medical Center, Salem)
+- SITE_C -> Valley (HeavDen Valley Community Hospital, Worcester)
+Units (unit_id) are SITE-WARD codes; in answers write them in plain words, e.g. SITE_A-GENERAL
+-> "the general ward at General Hospital", SITE_C-RESPIRATORY -> "the respiratory ward at
+Valley", SITE_B-STEP_DOWN -> "the step-down unit at Northshore". Refer to patients by their
+label (e.g. P-1735), never by encounter_id. Column names and codes belong only in SQL.
 
 SQL rules: one SELECT; only the gold.* tables below; aggregate rather than dump rows; round
 numbers; risk is a probability (0-1), so show it as a percentage. An alert is a patient
