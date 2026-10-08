@@ -58,6 +58,20 @@ const timeFormat = new Intl.DateTimeFormat("en-GB", {
 const hourFormat = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
 const dayFormat = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
 
+const fullFormat = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "UTC",
+});
+
+/** With the year, for the simulated clock: it runs on its own calendar, not today's. */
+export function whenFull(iso: string | null | undefined): string {
+  return iso ? `${fullFormat.format(new Date(iso))} UTC` : "–";
+}
+
 /** Simulation timestamps are UTC; say so rather than silently converting. */
 export function when(iso: string | null | undefined): string {
   return iso ? `${timeFormat.format(new Date(iso))} UTC` : "–";

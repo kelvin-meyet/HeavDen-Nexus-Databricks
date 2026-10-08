@@ -15,7 +15,7 @@ const FLOW = [
   },
   {
     title: "Simulate the ward",
-    body: "Wearable monitors send six vital signs every 5 minutes, with real-world faults: noise, motion, dropped messages, flat batteries, stuck sensors. A hidden rule decides who deteriorates; nurses chart oxygen and alertness.",
+    body: "Wearable monitors send six vital signs every 5 minutes, with real-world faults: noise, motion, dropped messages, flat batteries, stuck sensors. A hidden rule decides who deteriorates; nurses chart oxygen and alertness. The simulation runs on its own calendar: 14 days from 1 November 2026, paused at the last hour, which is the ward time shown in the sidebar.",
   },
   {
     title: "Build the data platform",
