@@ -1,0 +1,148 @@
+# Retrieval eval set for the document (RAG) tool. Seeds the Phase 4 agent eval set (Plan.md §11).
+# Each question names the document (and optionally version / section substring) that answers it.
+# doc_id: null marks questions the corpus does NOT answer: the assistant should decline them.
+# as_of: answer with the documents in force on that date (default: current versions).
+
+questions:
+  # Escalation protocol (current = v2.0)
+  - question: What NEWS2 score means I should call the rapid response team?
+    doc_id: HD-CLIN-001
+    version: "2.0"
+    section: Escalation by NEWS2
+  - question: What should a nurse do when a patient's risk band turns High?
+    doc_id: HD-CLIN-001
+    version: "2.0"
+    section: Escalation by risk band
+  - question: What changed in the new escalation protocol?
+    doc_id: HD-CLIN-001
+    version: "2.0"
+    section: What changed
+  - question: What are proactive review rounds?
+    doc_id: HD-CLIN-001
+    version: "2.0"
+    section: What changed
+  - question: How quickly should the outreach nurse see a patient with a single red score?
+    doc_id: HD-CLIN-001
+    version: "2.0"
+  - question: Which outcomes count as an escalation for the model's labels?
+    doc_id: HD-CLIN-001
+    section: Documentation
+
+  # Escalation protocol, as it was before the change
+  - question: What NEWS2 score triggered an emergency rapid response call?
+    doc_id: HD-CLIN-001
+    version: "1.0"
+    section: Escalation by NEWS2
+    as_of: 2026-11-05
+  - question: Did a High risk alert trigger a rapid response call?
+    doc_id: HD-CLIN-001
+    version: "1.0"
+    section: Escalation by risk band
+    as_of: 2026-11-05
+
+  # NEWS2 reference
+  - question: How many NEWS2 points does a respiratory rate of 23 score?
+    doc_id: HD-CLIN-002
+    section: Scoring table
+  - question: When should SpO2 scale 2 be used?
+    doc_id: HD-CLIN-002
+    section: scale 2
+  - question: Why does a patient on oxygen get extra points even if their saturation is normal?
+    doc_id: HD-CLIN-002
+    section: Oxygen
+  - question: What does ACVPU stand for?
+    doc_id: HD-CLIN-002
+    section: ACVPU
+  - question: Where do consciousness and oxygen values come from when NEWS2 is calculated?
+    doc_id: HD-CLIN-002
+    section: data platform
+
+  # Device manual
+  - question: What fields are in a VitalBand message?
+    doc_id: HD-DEV-001
+    section: Message format
+  - question: What is etco2 and when did it appear?
+    doc_id: HD-DEV-001
+    section: Firmware
+  - question: Why are SpO2 readings low at Northshore?
+    doc_id: HD-DEV-001
+    section: FSN-2026-11
+  - question: How often do device batteries run out?
+    doc_id: HD-DEV-001
+    section: Known measurement problems
+  - question: Can I identify a patient from a device ID?
+    doc_id: HD-DEV-001
+    section: reused
+
+  # Drift runbook
+  - question: Should we retrain the model when SpO2 drifts at one site only?
+    doc_id: HD-OPS-002
+    section: SpO2 sensor bias
+  - question: Why do we use PSI instead of a KS test?
+    doc_id: HD-OPS-002
+    section: Thresholds
+  - question: What is the correct response to concept drift after a protocol change?
+    doc_id: HD-OPS-002
+    section: Protocol change
+  - question: What should happen when motion becomes null and etco2 shows up in rescued data?
+    doc_id: HD-OPS-002
+    section: Firmware schema change
+  - question: What does a challenger need to pass before promotion?
+    doc_id: HD-OPS-002
+    section: Promotion
+
+  # Model card and data card
+  - question: What does the High risk band mean in terms of probability?
+    doc_id: HD-ML-001
+    section: Risk bands
+  - question: Is the model less accurate for younger patients?
+    doc_id: HD-ML-001
+  - question: How much better than NEWS2 is the model?
+    doc_id: HD-ML-001
+    section: Performance
+  - question: How were the training, validation and test sets split?
+    doc_id: HD-ML-002
+    section: Splits
+  - question: Is any real patient data used?
+    doc_id: HD-ML-002
+
+  # Site handbook and data dictionary
+  - question: What is the rapid response extension at Valley hospital?
+    doc_id: HD-OPS-001
+    section: Rapid response
+  - question: How many beds does Northshore have?
+    doc_id: HD-OPS-001
+    section: network
+  - question: What is the SpO2 target for COPD patients?
+    doc_id: HD-OPS-001
+    section: Oxygen targets
+  - question: Which table has one row per High alert?
+    doc_id: HD-DATA-001
+    section: alerts_fact
+  - question: What does the label column mean in patient_hour_features?
+    doc_id: HD-DATA-001
+    section: patient_hour_features
+
+  # Exact codes and identifiers (where keyword search helps)
+  - question: What is FSN-2026-11?
+    doc_id: HD-DEV-001
+    section: FSN-2026-11
+  - question: Which site has RRT extension 3333?
+    doc_id: HD-OPS-001
+    section: Rapid response
+  - question: What does hours_since_obs mean?
+    doc_id: HD-DATA-001
+    section: patient_hour_features
+  - question: What changed in firmware 3.2.0?
+    doc_id: HD-DEV-001
+    section: Firmware
+
+  # Not answered by the corpus: should be declined
+  - question: What dose of amoxicillin should I give for pneumonia?
+    doc_id: null
+  - question: What is the parking policy for night-shift staff?
+    doc_id: null
+  - question: Who won the football game last night?
+    doc_id: null
+  - question: How do I reset my email password?
+    doc_id: null
