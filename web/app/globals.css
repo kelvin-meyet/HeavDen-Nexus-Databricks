@@ -1,32 +1,41 @@
-/* HeavDen Nexus: the visual language of a paper NEWS2 observation chart.
-   Biro-blue ink on cool chart paper; NEWS2 zone tints appear only where they mean a score. */
+/* HeavDen Nexus: the visual language of a NEWS2 observation chart, turned up.
+   Ink blue on chart paper, a deep-ink sidebar, and NEWS2 zone colours that appear only where
+   they mean a score. Red is kept for the High band and the alert threshold. */
 
 :root {
-  --paper: #f5f8fa;
+  --paper: #f3f6fb;
   --sheet: #ffffff;
-  --ink: #1d3b8b; /* the ballpoint nurses plot with: data, links */
-  --ink-soft: #5b6fa8;
-  --graphite: #26323d; /* text */
-  --graphite-soft: #5a6773;
-  --rule: #d6dee6;
-  --grid: #e3eaf0;
-  --zone-1: #fbf0b9;
-  --zone-2: #f7cb95;
-  --zone-3: #ee9c9c;
-  --alert: #b3261e;
-  --alert-tint: #fbe4e2;
-  --ok: #2f6b4f;
+  --ink: #2340c8; /* data, links, the plotted line */
+  --ink-strong: #1a2f99;
+  --ink-soft: #7d8fe0;
+  --ink-wash: #e8edff;
+  --night: #0f1c4d; /* sidebar */
+  --night-2: #182a6b;
+  --graphite: #1c2633; /* text */
+  --graphite-soft: #556170;
+  --rule: #d9e0ea;
+  --grid: #e4eaf3;
+  --zone-1: #fff0a3;
+  --zone-2: #ffc785;
+  --zone-3: #ff9d9d;
+  --alert: #d7263d;
+  --alert-tint: #ffe6e9;
+  --amber: #f29d0b;
+  --amber-tint: #fff3dc;
+  --ok: #12965f;
+  --ok-tint: #ddf6ea;
 
-  --step--1: 0.8rem;
+  --step--1: 0.82rem;
   --step-0: 1rem;
   --step-1: 1.25rem;
-  --step-2: 1.563rem;
-  --step-3: 1.953rem;
-  --step-4: 2.441rem;
+  --step-2: 1.6rem;
+  --step-3: 2.1rem;
+  --step-4: clamp(2.2rem, 1.6rem + 2.2vw, 3.4rem);
 
-  --gutter: clamp(16px, 4vw, 40px);
-  --measure: 70ch;
-  --radius: 6px;
+  --gutter: clamp(16px, 3vw, 44px);
+  --measure: 72ch;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(15, 28, 77, 0.06), 0 6px 18px -8px rgba(15, 28, 77, 0.18);
 }
 
 * {
@@ -56,20 +65,22 @@ a {
 h1,
 h2,
 h3 {
+  font-family: var(--font-display), var(--font-body), sans-serif;
   color: var(--graphite);
-  line-height: 1.2;
+  line-height: 1.1;
   margin: 0;
 }
 
 h1 {
   font-size: var(--step-4);
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-weight: 800;
+  letter-spacing: -0.025em;
 }
 
 h2 {
   font-size: var(--step-2);
   font-weight: 700;
+  letter-spacing: -0.015em;
 }
 
 h3 {
@@ -106,10 +117,11 @@ textarea {
 
 /* ---------- Page frame ---------- */
 
+/* Pages fill the space beside the sidebar; text keeps a readable measure inside. */
 .page {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 32px var(--gutter) 64px;
+  width: 100%;
+  max-width: 1760px;
+  padding: 36px var(--gutter) 72px;
 }
 
 .pageHead {
@@ -136,19 +148,27 @@ textarea {
   margin-top: 40px;
   display: grid;
   gap: 14px;
+  align-content: start;
 }
 
 /* ---------- Controls ---------- */
 
 .button {
   appearance: none;
-  border: 1.5px solid var(--ink);
+  border: 0;
   background: var(--ink);
   color: #fff;
-  border-radius: var(--radius);
-  padding: 8px 16px;
+  border-radius: 999px;
+  padding: 10px 20px;
   font-weight: 700;
   cursor: pointer;
+  box-shadow: 0 4px 14px -6px var(--ink);
+  transition: background 0.15s, transform 0.15s;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--ink-strong);
+  transform: translateY(-1px);
 }
 
 .button:disabled {
@@ -161,14 +181,21 @@ textarea {
   border: 1.5px solid var(--rule);
   background: var(--sheet);
   color: var(--graphite);
-  border-radius: var(--radius);
-  padding: 6px 12px;
+  border-radius: 999px;
+  padding: 7px 16px;
   cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.buttonQuiet:hover:not(:disabled) {
+  border-color: var(--ink);
+  color: var(--ink);
 }
 
 .buttonQuiet[aria-pressed="true"] {
   border-color: var(--ink);
-  color: var(--ink);
+  background: var(--ink);
+  color: #fff;
   font-weight: 700;
 }
 
@@ -218,12 +245,13 @@ textarea {
 
 .bandHigh {
   display: inline-block;
-  padding: 1px 8px;
+  padding: 2px 10px;
   border-radius: 999px;
   background: var(--alert);
   color: #fff;
   font-weight: 700;
   font-size: var(--step--1);
+  box-shadow: 0 3px 10px -4px var(--alert);
 }
 
 .bandLow {
@@ -242,6 +270,7 @@ textarea {
 
 .trendDown {
   color: var(--ok);
+  font-weight: 700;
 }
 
 /* ---------- Tables ---------- */
@@ -279,6 +308,13 @@ textarea {
   overflow-x: auto;
   border: 1px solid var(--rule);
   border-radius: var(--radius);
+  background: var(--sheet);
+  box-shadow: var(--shadow);
+}
+
+.table tbody tr:hover td,
+.table tbody tr:hover th {
+  background: #f7f9ff;
 }
 
 /* ---------- Observation chart (the signature) ---------- */
@@ -291,7 +327,8 @@ textarea {
   background-size: 16px 16px;
   border: 1px solid var(--rule);
   border-radius: var(--radius);
-  padding: 10px 12px 4px;
+  padding: 12px 14px 6px;
+  box-shadow: var(--shadow);
 }
 
 .obsTitle {
@@ -304,8 +341,11 @@ textarea {
 }
 
 .obsLatest {
+  font-family: var(--font-display), sans-serif;
   color: var(--ink);
-  font-size: var(--step-1);
+  font-size: var(--step-2);
+  font-weight: 800;
+  letter-spacing: -0.02em;
 }
 
 .zoneKey {
@@ -330,5 +370,21 @@ textarea {
 @media (prefers-reduced-motion: reduce) {
   .skeleton {
     animation: none;
+  }
+}
+
+/* Reading text keeps a comfortable line length even on wide pages. */
+.lede,
+.notice,
+.errorBox {
+  max-width: var(--measure);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
   }
 }

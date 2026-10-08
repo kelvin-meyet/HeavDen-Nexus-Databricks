@@ -1,7 +1,7 @@
 import type { SiteId } from "./types";
 
 export const SITES: Record<SiteId, { name: string; short: string; city: string }> = {
-  SITE_A: { name: "HeavDen General Hospital", short: "General", city: "Boston" },
+  SITE_A: { name: "HeavDen General Hospital", short: "General Hospital", city: "Boston" },
   SITE_B: { name: "HeavDen Northshore Medical Center", short: "Northshore", city: "Salem" },
   SITE_C: { name: "HeavDen Valley Community Hospital", short: "Valley", city: "Worcester" },
 };
@@ -27,7 +27,8 @@ export function unitName(unitId: string): string {
   const [, site, kind] = unitId.match(/^(SITE_[A-C])-(.+)$/) ?? [];
   if (!site) return unitId;
   const label = { GENERAL: "general ward", STEP_DOWN: "step-down unit", RESPIRATORY: "respiratory ward" }[kind];
-  return `${siteName(site)} ${label ?? kind.toLowerCase()}`;
+  const unit = label ?? kind.toLowerCase();
+  return `${unit[0].toUpperCase()}${unit.slice(1)} at ${siteName(site)}`;
 }
 
 /** Risk is a probability; show it as a percentage with sensible precision. */

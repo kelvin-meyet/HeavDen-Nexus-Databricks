@@ -31,13 +31,29 @@ interface ObsChartProps {
   threshold?: { value: number; label: string };
   format?: (v: number) => string;
   height?: number;
+  /** draw the line in on first render (once, honouring reduced-motion settings) */
+  animate?: boolean;
+}
+
+function prefersReducedMotion() {
+  return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
 /**
  * The project's signature: values plotted as dots joined by ink lines on chart paper,
  * over NEWS2 scoring zones, the way nurses chart observations by hand.
  */
-export function ObsChart({ title, points, unit = "", zones, domain, threshold, format, height = 180 }: ObsChartProps) {
+export function ObsChart({
+  title,
+  points,
+  unit = "",
+  zones,
+  domain,
+  threshold,
+  format,
+  height = 180,
+  animate = false,
+}: ObsChartProps) {
   const fmt = format ?? ((v: number) => `${Math.round(v * 10) / 10}${unit}`);
   const latest = [...points].reverse().find((p) => p.value != null)?.value;
   const [lo, hi] = domain ?? ["auto", "auto"];
@@ -94,11 +110,13 @@ export function ObsChart({ title, points, unit = "", zones, domain, threshold, f
               type="linear"
               dataKey="value"
               stroke="var(--ink)"
-              strokeWidth={1.75}
-              dot={{ r: 2.5, fill: "var(--ink)", stroke: "var(--ink)" }}
+              strokeWidth={2.25}
+              dot={{ r: 3, fill: "var(--sheet)", stroke: "var(--ink)", strokeWidth: 2 }}
               activeDot={{ r: 4 }}
               connectNulls={false}
-              isAnimationActive={false}
+              isAnimationActive={animate && !prefersReducedMotion()}
+              animationDuration={1400}
+              animationEasing="ease-out"
             />
           </LineChart>
         )}

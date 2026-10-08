@@ -1,15 +1,67 @@
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-  gap: 40px;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: clamp(24px, 3vw, 56px);
   align-items: start;
-  padding: 16px 0 36px;
+  padding: 8px 0 40px;
 }
 
 .heroText {
   display: grid;
-  gap: 18px;
-  padding-top: 8px;
+  gap: 20px;
+  padding-top: 6px;
+}
+
+.heroText h1 {
+  max-width: 20ch;
+  font-size: clamp(2rem, 1.4rem + 1.6vw, 2.9rem);
+}
+
+/* Three live figures, read like vital signs: a coloured mark says what kind of number it is. */
+.vitals {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 4px 0 0;
+}
+
+.vital {
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: var(--sheet);
+  box-shadow: var(--shadow);
+  border-top: 4px solid var(--tone);
+}
+
+.vital[data-tone="alert"] {
+  --tone: var(--alert);
+}
+
+.vital[data-tone="ok"] {
+  --tone: var(--ok);
+}
+
+.vital[data-tone="amber"] {
+  --tone: var(--amber);
+}
+
+.vital dt {
+  font-size: var(--step--1);
+  color: var(--graphite-soft);
+}
+
+.vital dd {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: var(--step-3);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: var(--tone);
 }
 
 .heroChart {
@@ -18,62 +70,137 @@
 }
 
 .chartCaption {
-  font-size: var(--step--1);
   color: var(--graphite-soft);
 }
 
 .chartPair {
   display: grid;
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
 }
 
-/* The four ways in, laid out like rows on a ward whiteboard, not as a grid of cards. */
-.board {
-  border-top: 1.5px solid var(--graphite);
-}
-
-.row {
+.lower {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1.2fr) minmax(0, 1fr);
-  gap: 6px 24px;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  gap: clamp(24px, 3vw, 56px);
+  align-items: start;
+}
+
+.ward {
+  background: var(--sheet);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 20px 22px 8px;
+}
+
+.wardHead {
+  display: flex;
+  justify-content: space-between;
   align-items: baseline;
-  padding: 18px 8px;
-  border-bottom: 1px solid var(--rule);
-  color: var(--graphite);
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.more {
+  font-weight: 700;
   text-decoration: none;
 }
 
-.row:hover,
-.row:focus-visible {
-  background: var(--sheet);
-}
-
-.row:hover .rowName {
+.more:hover {
   text-decoration: underline;
 }
 
-.rowName {
-  font-size: var(--step-1);
+.wardList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.wardRow {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  padding: 12px 6px;
+  border-top: 1px solid var(--rule);
+  color: var(--graphite);
+  text-decoration: none;
+  border-radius: 6px;
+}
+
+.wardRow:hover {
+  background: var(--ink-wash);
+}
+
+.wardName {
+  font-family: var(--font-display), sans-serif;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.wardRisk {
   font-weight: 700;
-  color: var(--ink);
 }
 
-.rowFigure strong {
-  color: var(--ink);
-  font-size: var(--step-1);
-}
-
-.rowWhat {
+.wardWhy {
   color: var(--graphite-soft);
+  font-size: var(--step--1);
 }
 
-@media (max-width: 900px) {
-  .hero {
+.sections {
+  display: grid;
+  gap: 12px;
+}
+
+.section {
+  --tone: var(--ink);
+  display: grid;
+  gap: 4px;
+  padding: 18px 20px 18px 22px;
+  border-radius: var(--radius);
+  background: var(--sheet);
+  box-shadow: var(--shadow);
+  border-left: 5px solid var(--tone);
+  color: var(--graphite);
+  text-decoration: none;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.section[data-tone="amber"] {
+  --tone: var(--amber);
+}
+
+.section[data-tone="ok"] {
+  --tone: var(--ok);
+}
+
+.section:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px -12px rgba(15, 28, 77, 0.35);
+}
+
+.sectionName {
+  font-family: var(--font-display), sans-serif;
+  font-size: var(--step-1);
+  font-weight: 800;
+  color: var(--graphite);
+}
+
+@media (max-width: 1200px) {
+  .hero,
+  .lower {
     grid-template-columns: 1fr;
-    gap: 24px;
+  }
+}
+
+@media (max-width: 640px) {
+  .vitals,
+  .chartPair {
+    grid-template-columns: 1fr;
   }
 
-  .row {
-    grid-template-columns: 1fr;
+  .wardRow {
+    grid-template-columns: 1fr 1fr;
   }
 }
