@@ -136,9 +136,18 @@ def fit_lightgbm(
 
 
 def calibrate(base, valid: pd.DataFrame, columns: list[str]) -> CalibratedModel:
-    """Isotonic calibration fitted on validation predictions."""
+    """Isotonic calibration fitted on validation predictions.
+
+    The extreme steps of an isotonic fit rest on a handful of points (e.g. the 5 highest-scored
+    hours all escalated), which would make the model claim 0% or 100%. Two anchor points, a
+    negative at the highest raw score and a positive at the lowest, keep both ends honest
+    (4 of 5 rather than 5 of 5) without changing the middle of the curve or the ranking.
+    """
     raw = base.predict_proba(to_matrix(valid, columns))[:, 1]
-    iso = IsotonicRegression(y_min=0, y_max=1, out_of_bounds="clip").fit(raw, valid["label"])
+    y = valid["label"].to_numpy(float)
+    raw_anchored = np.concatenate([raw, [raw.max(), raw.min()]])
+    y_anchored = np.concatenate([y, [0.0, 1.0]])
+    iso = IsotonicRegression(y_min=0, y_max=1, out_of_bounds="clip").fit(raw_anchored, y_anchored)
     return CalibratedModel(base, iso, columns)
 
 
