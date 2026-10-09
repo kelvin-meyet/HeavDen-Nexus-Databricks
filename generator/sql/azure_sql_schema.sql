@@ -1,8 +1,10 @@
 -- HeavDen Health: hospital source-of-record schema (Azure SQL Database, T-SQL).
--- Synthetic data only. Loaded from Synthea profiles + generator/hospital.py placements.
--- Databricks ingests with the Lakeflow Connect query-based SQL Server connector, using each
--- table's last_updated column as the cursor (Plan.md §7.2). Change Tracking stays enabled for
--- the JDBC fallback. The loader must set last_updated = SYSUTCDATETIME() on every UPDATE.
+-- Synthetic data only. Loaded by generator/source_db.py from Synthea and the hospital simulation.
+-- One database holds every environment: generator/source_db.py replaces `dbo.` with the
+-- environment's schema (dev, staging, prod) before running this file.
+-- Databricks ingests with a serverless JDBC job that reads SQL Server Change Tracking
+-- (Plan.md §7.2). last_updated holds the *simulated* time of the row's latest change
+-- (admission, transfer, discharge), which Silver uses to order SCD2 history.
 
 ALTER DATABASE CURRENT
 SET CHANGE_TRACKING = ON (CHANGE_RETENTION = 7 DAYS, AUTO_CLEANUP = ON);
