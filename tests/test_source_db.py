@@ -269,3 +269,10 @@ def test_problems_reports_values_that_would_not_fit(tables):
     found = source_db.problems(broken)
     assert "medications.description: 501 characters > 500" in found
     assert "patients.first_name: missing values in a NOT NULL column" in found
+
+
+@pytest.mark.parametrize("table", source_db.TABLE_ORDER)
+def test_every_insert_stays_below_the_servers_parameter_limit(tables, table):
+    # SQL Server refused a request with exactly 2100 parameters on 9 Oct.
+    for _, params in source_db.insert_batches("dev", table, tables[table]):
+        assert len(params) < 2100

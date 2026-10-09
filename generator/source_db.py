@@ -45,8 +45,9 @@ TABLE_ORDER = (
     "device_assignments",
 )
 
-# SQL Server accepts at most 2100 parameters per statement and 1000 rows per VALUES list.
-MAX_PARAMS = 2100
+# SQL Server accepts at most 2100 parameters per request and 1000 rows per VALUES list. Exactly
+# 2100 is refused ("too many parameters"; the driver's request uses a slot), so stay well below.
+MAX_PARAMS = 2000
 MAX_ROWS = 1000
 
 
