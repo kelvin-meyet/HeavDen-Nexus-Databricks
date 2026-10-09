@@ -172,6 +172,11 @@
   font-size: var(--step--1);
 }
 
+.credit {
+  display: block;
+  margin-top: 6px;
+}
+
 /* Narrow screens: the sidebar becomes a top bar. */
 @media (max-width: 900px) {
   .app {

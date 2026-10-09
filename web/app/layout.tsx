@@ -22,10 +22,20 @@ const display = Bricolage_Grotesque({
   display: "swap",
 });
 
+const DESCRIPTION =
+  "AI early warning for hospital wards: a predictive model that must beat the clinical standard, a data " +
+  "platform on Azure Databricks and an AI assistant that shows its working. Built end to end by Kelvin " +
+  "Ofori-Minta. All data is synthetic.";
+
 export const metadata: Metadata = {
   title: "HeavDen Nexus",
-  description:
-    "Deterioration risk, ward analytics and an assistant for a fictional hospital network. All data is synthetic.",
+  description: DESCRIPTION,
+  // What LinkedIn, Slack and others show when the link is shared.
+  openGraph: {
+    title: "HeavDen Nexus: AI early warning for hospital wards",
+    description: DESCRIPTION,
+    type: "website",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

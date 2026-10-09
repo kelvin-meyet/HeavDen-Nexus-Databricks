@@ -187,9 +187,93 @@
   color: var(--graphite);
 }
 
+.eyebrow {
+  margin: 0;
+  font-weight: 700;
+  font-size: var(--step--1);
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+
+/* What powers it: four cards, each a claim with its measured proof and where to see it. */
+.powers {
+  padding: 0 0 40px;
+}
+
+.powers h2 {
+  margin-bottom: 14px;
+}
+
+.powerList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.power {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 18px 20px;
+  border-radius: var(--radius);
+  background: var(--sheet);
+  box-shadow: var(--shadow);
+  border-top: 4px solid var(--ink);
+}
+
+.power h3 {
+  font-size: var(--step-1);
+  line-height: 1.25;
+}
+
+.powerProof {
+  margin: 0;
+  font-weight: 700;
+  color: var(--graphite);
+}
+
+/* The builder: who made this, and how to reach him. */
+.builder {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 20px 40px;
+  align-items: center;
+  margin: 0 0 40px;
+  padding: 24px 28px;
+  border-radius: var(--radius);
+  background: var(--ink-wash);
+  border: 1.5px solid var(--rule);
+}
+
+.builder p {
+  max-width: 75ch;
+  margin: 6px 0 0;
+}
+
+.builderActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.builderActions a {
+  text-decoration: none;
+  min-height: 24px;
+}
+
 @media (max-width: 1200px) {
   .hero,
   .lower {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .builder {
     grid-template-columns: 1fr;
   }
 }

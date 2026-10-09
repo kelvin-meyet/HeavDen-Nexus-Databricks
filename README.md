@@ -4,18 +4,20 @@
 
 HeavDen Nexus watches every inpatient across three fictional hospitals, hour by hour. It estimates each patient's chance of needing an emergency team within the next six hours, raises a limited number of alerts a nurse can act on, explains each score in clinical terms, and answers questions about the wards in plain English, showing the queries and sources behind every answer.
 
+**Built end to end by [Kelvin Ofori-Minta](https://www.linkedin.com/in/kelvin-ofori-minta-ph-d-9a5692b8), ML & Data Platform Engineer and the developer behind HeavDen.** Available for roles, contracts and projects in any industry: data platforms on Databricks and beyond, predictive models and MLOps, and AI assistants. See [Work with me](#work-with-me).
+
 > **Synthetic data only.** Every patient, hospital and document is invented. This is a portfolio project, not a medical device, and must not be used for real patient care.
 
 ![Overview: the ward's highest-risk patients, plotted on a NEWS2-style observation chart](docs/images/overview.png)
 
 ## Where it stands
 
-The project is built in phases. **Phase 0 (offline foundations) is complete**: everything below runs on a laptop, with no cloud spend. The Azure Databricks phases come next.
+The project is built in phases. **Phase 0 (offline foundations) is complete**: it runs on a laptop, with no cloud spend. **Phase 1 (the data platform on Azure Databricks) is in progress.**
 
 | Phase | Scope | Status |
 |---|---|---|
 | 0. Offline foundations | data generators, drift scenarios, features, model, evaluation, documents, API and web app in demo mode, learning notebooks, CI | **done** |
-| 1. Data platform | Terraform, Azure SQL, Lakeflow Connect and Auto Loader into Bronze, Silver and Gold pipelines with expectations, Unity Catalog | next |
+| 1. Data platform | Terraform and Unity Catalog; Azure SQL into Bronze with a serverless Change Tracking job; device files with Auto Loader; a Lakeflow pipeline into Silver with expectations, quarantine, history (AUTO CDC) and reconciliation; Gold next | **in progress** (ingestion and Silver running in dev) |
 | 2. Model and serving | feature tables, MLflow on Unity Catalog (`@champion` / `@challenger`), batch scoring, a scale-to-zero serving endpoint | planned |
 | 3. Monitoring and MLOps | Lakehouse Monitoring, PSI and Jensen-Shannon drift metrics, email alerts, retraining and promotion approved in GitHub Actions | planned |
 | 4. AI assistant on Databricks | Genie, Vector Search and a Unity Catalog function behind one agent, gated by an MLflow evaluation set | planned |
@@ -37,6 +39,11 @@ The project is built in phases. **Phase 0 (offline foundations) is complete**: e
 **An assistant that shows its working** (`backend/heavden_api/chat/`)
 - One tool-calling agent with three tools: SQL over the gold tables, search over the hospital's documents (protocols, device manual, runbooks, model card) with citations, and a patient-risk lookup.
 - LLM-written SQL is parsed and allow-listed, then run in a locked, read-only sandbox. Prompt-injection and data-leak defences sit before, inside and after the model. Answers stream as they are written and remember the conversation for follow-ups.
+
+**A data platform on Azure Databricks** (`infra/terraform/`, `databricks/`)
+- Terraform for the Azure resources and the Unity Catalog foundation; jobs and pipelines in a Databricks bundle (DAB) with dev, staging and prod targets.
+- Azure SQL into Bronze with a serverless job that reads SQL Server Change Tracking (snapshots when needed, at-least-once, watermarks); device and outcome files into Bronze with Auto Loader.
+- A Lakeflow pipeline into Silver: data-quality expectations, a quarantine table with reasons, de-duplication, history with AUTO CDC, and a reconciliation that accounts for every reading. The transformations are plain PySpark, tested on local Spark against the pandas reference.
 
 **A web app** (`web/`, `backend/`)
 - Next.js on Vercel and FastAPI on Render. In demo mode the API serves a snapshot of the gold tables through DuckDB, using the same SQL the live Databricks mode will run.
@@ -73,7 +80,7 @@ flowchart LR
   end
 
   subgraph Databricks["Azure Databricks (Unity Catalog, serverless)"]
-    ASQL -- Lakeflow Connect --> B[Bronze]
+    ASQL -- JDBC + Change Tracking job --> B[Bronze]
     ADLS -- Auto Loader --> B
     B -- Lakeflow pipelines<br/>+ expectations --> S[Silver]
     S --> G[Gold]
@@ -178,6 +185,18 @@ notebooks/local/        learning notebooks
 tests/                  unit tests
 .github/workflows/      CI
 ```
+
+## Work with me
+
+I'm Kelvin Ofori-Minta, an ML & Data Platform Engineer and the developer behind HeavDen. HeavDen Nexus is my worked example: I designed and built every part of it. I help teams in any industry, as a hands-on engineer on Databricks or anywhere else, with:
+
+- **data platforms and pipelines**: ingestion, change data capture, medallion pipelines, data quality, governance, infrastructure as code;
+- **predictive models that earn their place**: baselines, honest evaluation, calibration, explanations;
+- **MLOps and monitoring**: MLflow, CI/CD, drift detection, approval-gated retraining;
+- **AI assistants on your data**: text-to-SQL, document search (RAG), guardrails, evaluation and red-teaming;
+- **data products and cloud cost**: FastAPI and Next.js apps, serverless designs that stay affordable.
+
+Open to full-time roles, contracts and consulting projects: [email](mailto:kelvinmeyet@gmail.com) · [LinkedIn](https://www.linkedin.com/in/kelvin-ofori-minta-ph-d-9a5692b8) · [GitHub](https://github.com/kelvin-meyet)
 
 ## License
 

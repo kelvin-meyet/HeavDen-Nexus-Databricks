@@ -7,6 +7,7 @@ import { ObsChart, ZoneKey } from "@/components/ObsChart";
 import { useApi } from "@/lib/api";
 import { num, pct, riskPct, unitName } from "@/lib/format";
 import { VITALS } from "@/lib/news2";
+import { BUILDER, MAILTO } from "@/lib/site";
 import type { Board, PatientDetail, Summary } from "@/lib/types";
 
 import styles from "./home.module.css";
@@ -30,6 +31,45 @@ const SECTIONS = [
     tone: "ok",
     text: "How it was built, how well the model does, and what testing changed.",
   },
+  {
+    href: "/work-with-me",
+    name: "Work with me",
+    tone: "ink",
+    text: "The engineer behind HeavDen: what I build for teams, in any industry.",
+  },
+];
+
+// What powers the product. Each figure is measured (README results, the dev pipeline run of
+// 9 Oct 2026, the assistant's red-team run); update them when those change.
+const POWERS = [
+  {
+    name: "A predictive model that must beat the clinical standard",
+    proof: "Flagged 25 of 28 escalations in advance, against 21 for NEWS2, with the same alert budget.",
+    detail: "Calibrated risk every hour, with the reasons behind each score.",
+    href: "/behind-the-scenes",
+    link: "See the results",
+  },
+  {
+    name: "A governed data platform on Azure Databricks",
+    proof: "153,311 monitor readings checked and reconciled in the latest run: none lost.",
+    detail: "Hospital records and device files flow through bronze, silver and gold, under Unity Catalog.",
+    href: "/about-the-data",
+    link: "How the data flows",
+  },
+  {
+    name: "An AI assistant that shows its working",
+    proof: "Passed all 19 adversarial tests: no leaks, no off-topic answers, typos understood.",
+    detail: "Answers from the data, the hospital's documents and each patient's risk, with its queries and sources.",
+    href: "/assistant",
+    link: "Ask it something",
+  },
+  {
+    name: "MLOps built to run for years, cheaply",
+    proof: "Every change tested in CI; serverless, designed to run for under $25 a month.",
+    detail: "Drift monitoring and human-approved retraining are being built next.",
+    href: "/behind-the-scenes",
+    link: "How it's built",
+  },
 ];
 
 export default function Home() {
@@ -43,10 +83,12 @@ export default function Home() {
     <div className="page">
       <section className={styles.hero}>
         <div className={styles.heroText}>
+          <p className={styles.eyebrow}>HeavDen Nexus · AI early warning for hospital wards</p>
           <h1>Spot the patients who are getting worse, hours before they need rescuing.</h1>
           <p className="lede">
-            HeavDen Nexus watches every patient on three hospitals&rsquo; wards, hour by hour. It flags those likely
-            to need an emergency team within six hours, explains why, and answers questions in plain English.
+            A predictive model, a data platform on Azure Databricks and an AI assistant, working together. HeavDen
+            Nexus watches every patient on three hospitals&rsquo; wards, hour by hour, flags those likely to need an
+            emergency team within six hours, explains why, and answers questions in plain English.
           </p>
 
           <dl className={styles.vitals}>
@@ -63,7 +105,10 @@ export default function Home() {
               <dd>{s ? num(s.alerts_per_nurse_shift_24h, 1) : "–"}</dd>
             </div>
           </dl>
-          <p className="muted small">All patients and hospitals are invented, built to show how such a system is made, tested and monitored.</p>
+          <p className="muted small">
+            Figures at the simulated ward time shown in the sidebar. All patients and hospitals are invented, built to
+            show how such a system is made, tested and monitored.
+          </p>
         </div>
 
         <div className={styles.heroChart}>
@@ -95,6 +140,45 @@ export default function Home() {
               <ZoneKey />
             </>
           )}
+        </div>
+      </section>
+
+      <section className={styles.powers} aria-labelledby="powers-title">
+        <h2 id="powers-title">What powers it</h2>
+        <ul className={styles.powerList}>
+          {POWERS.map((p) => (
+            <li key={p.name} className={styles.power}>
+              <h3>{p.name}</h3>
+              <p className={styles.powerProof}>{p.proof}</p>
+              <p className="muted small">{p.detail}</p>
+              <Link href={p.href} className={styles.more}>
+                {p.link}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className={styles.builder} aria-labelledby="builder-title">
+        <div>
+          <h2 id="builder-title">Built end to end by one engineer</h2>
+          <p>
+            Designed and built by <strong>{BUILDER.name}</strong>, {BUILDER.title} and the developer behind{" "}
+            {BUILDER.brand}: from the synthetic data and the cloud platform to the model, the assistant and this app.
+            Available for roles, contracts and projects in any industry: data platforms on Databricks and beyond,
+            predictive models and MLOps, and AI assistants.
+          </p>
+        </div>
+        <div className={styles.builderActions}>
+          <Link href="/work-with-me" className="button">
+            Work with me
+          </Link>
+          <a href={BUILDER.linkedin} className="buttonQuiet" rel="noopener noreferrer" target="_blank">
+            LinkedIn<span className="visually-hidden"> (opens in a new tab)</span>
+          </a>
+          <a href={MAILTO} className="buttonQuiet">
+            Email
+          </a>
         </div>
       </section>
 

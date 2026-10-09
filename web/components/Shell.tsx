@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { useApi } from "@/lib/api";
+import { BUILDER } from "@/lib/site";
 import { whenFull } from "@/lib/format";
 import type { Health } from "@/lib/types";
 
@@ -15,6 +16,7 @@ const NAV = [
   { href: "/analytics", label: "Analytics" },
   { href: "/assistant", label: "Assistant" },
   { href: "/behind-the-scenes", label: "Behind the scenes" },
+  { href: "/work-with-me", label: "Work with me" },
 ];
 
 export function Shell({ children }: { children: React.ReactNode }) {
@@ -96,6 +98,16 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <footer className={styles.footer}>
           HeavDen Nexus is a portfolio project. It is not a medical device and must not be used for real patient
           care. <Link href="/about-the-data">About the hospital and its data</Link>
+          <span className={styles.credit}>
+            Built by <Link href="/work-with-me">{BUILDER.name}</Link>, {BUILDER.title} ·{" "}
+            <a href={BUILDER.linkedin} rel="noopener noreferrer" target="_blank">
+              LinkedIn
+            </a>{" "}
+            ·{" "}
+            <a href={BUILDER.github} rel="noopener noreferrer" target="_blank">
+              GitHub
+            </a>
+          </span>
         </footer>
       </div>
     </div>

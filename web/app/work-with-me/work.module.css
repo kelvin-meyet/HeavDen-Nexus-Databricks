@@ -1,0 +1,121 @@
+/* A credibility page: who, proof, services, how, contact. Same paper-chart look as the app. */
+.head {
+  max-width: 900px;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  font-weight: 700;
+  font-size: var(--step--1);
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 18px;
+}
+
+.actions a {
+  text-decoration: none;
+  min-height: 24px;
+}
+
+/* Proof figures, read like the Overview's vital-sign tiles. */
+.proof {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin: 0 0 8px;
+  max-width: 1100px;
+}
+
+.proof div {
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 16px 18px;
+  border-radius: var(--radius);
+  background: var(--sheet);
+  box-shadow: var(--shadow);
+  border-top: 4px solid var(--ink);
+}
+
+.proof dt {
+  font-size: var(--step--1);
+  color: var(--graphite-soft);
+}
+
+.proof dd {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-size: var(--step-3);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: var(--ink);
+}
+
+.services {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 0 32px;
+  border-top: 1.5px solid var(--graphite);
+  max-width: 1100px;
+}
+
+.services li {
+  padding: 18px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.services h3,
+.principles h3 {
+  font-size: var(--step-1);
+  margin-bottom: 6px;
+}
+
+.services p {
+  margin: 0 0 8px;
+}
+
+.serviceProof {
+  font-size: var(--step--1);
+  color: var(--graphite-soft);
+}
+
+.proofLabel {
+  font-weight: 700;
+  color: var(--graphite);
+}
+
+.principles {
+  margin: 0;
+  padding-left: 1.4em;
+  display: grid;
+  gap: 10px;
+  max-width: 75ch;
+}
+
+.principles p {
+  margin: 0;
+}
+
+.contact {
+  max-width: 900px;
+  padding: 24px 28px;
+  border-radius: var(--radius);
+  background: var(--ink-wash);
+  border: 1.5px solid var(--rule);
+}
+
+.contact p {
+  max-width: 70ch;
+}

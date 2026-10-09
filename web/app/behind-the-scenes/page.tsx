@@ -4,11 +4,12 @@ import Link from "next/link";
 
 import { useApi } from "@/lib/api";
 import { riskPct, when } from "@/lib/format";
+import { BUILDER } from "@/lib/site";
 import type { Health } from "@/lib/types";
 
 import styles from "./behind.module.css";
 
-const REPO = "https://github.com/kelvin-meyet/HeavDen-Nexus-Databricks";
+const REPO = BUILDER.repo;
 
 const FLOW = [
   {
