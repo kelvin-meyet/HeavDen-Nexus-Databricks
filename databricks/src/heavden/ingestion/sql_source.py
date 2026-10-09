@@ -7,9 +7,10 @@ stays in Unity Catalog and never appears in this code or the job.
 Each run:
 1. one query reads the database's current Change Tracking version (`to_version`) and every
    table's minimum valid version (older changes have been cleaned up);
-2. per table: with no watermark yet, or a watermark older than the minimum valid version, it
-   copies the whole table (`_change_op` = 'S'); otherwise it reads the changes in
-   (watermark, to_version] from `CHANGETABLE(CHANGES ...)` (`_change_op` = 'I' or 'U');
+2. per table: with no watermark yet, a watermark older than the minimum valid version, or a
+   table that was dropped and recreated since the last run, it copies the whole table
+   (`_change_op` = 'S'); otherwise it reads the changes in (watermark, to_version] from
+   `CHANGETABLE(CHANGES ...)` (`_change_op` = 'I' or 'U');
 3. appends the rows to `bronze.sql_<table>` and then logs `to_version` in `bronze.sql_watermarks`
    (with row counts per change type), which is the next run's watermark.
 
@@ -17,6 +18,11 @@ Delivery is at-least-once: a run that fails between the two writes re-reads the 
 next time, and Silver de-duplicates on (key, last_updated). The simulation never deletes rows
 (a discharge is an update), so a delete ('D') fails the run after it is logged: Silver would
 otherwise keep a row that no longer exists.
+
+Recreating a table (`generator.load --replace`) records no deletes and doesn't advance the
+Change Tracking version, so reading changes would miss rows that disappeared. The job therefore
+keeps each table's creation time (`sys.tables.create_date`) with its watermark and takes a
+snapshot when it changes; Silver treats a snapshot as the table's complete new state.
 
 The file needs only the standard library and PySpark, so the job runs it as a plain Python file.
 """
@@ -55,6 +61,7 @@ class Read:
     mode: str  # "snapshot" | "changes"
     from_version: int | None  # exclusive; None for a snapshot
     to_version: int  # inclusive
+    table_created: dt.datetime | None = None  # the source table's create_date
 
 
 # --- T-SQL sent to the source -----------------------------------------------------------
@@ -63,10 +70,12 @@ class Read:
 
 
 def versions_query() -> str:
-    """The current version, and each change-tracked table's minimum valid version."""
+    """The current version, and each change-tracked table's minimum valid version and creation
+    time."""
     return (
         "SELECT CHANGE_TRACKING_CURRENT_VERSION() AS current_version, "
-        "s.name AS schema_name, t.name AS table_name, c.min_valid_version "
+        "s.name AS schema_name, t.name AS table_name, c.min_valid_version, "
+        "t.create_date AS table_created "
         "FROM sys.change_tracking_tables AS c "
         "JOIN sys.tables AS t ON t.object_id = c.object_id "
         "JOIN sys.schemas AS s ON s.schema_id = t.schema_id"
@@ -104,11 +113,22 @@ def _name(schema: str, table: str) -> str:
 
 
 def plan_reads(
-    schema: str, versions: list[dict[str, Any]], watermarks: dict[str, int]
+    schema: str,
+    versions: list[dict[str, Any]],
+    watermarks: dict[str, int],
+    created: dict[str, dt.datetime | None] | None = None,
 ) -> list[Read]:
-    """One Read per table, from the versions query and the last run's watermarks."""
+    """One Read per table, from the versions query and the last run's watermarks.
+
+    `created` holds each table's creation time as recorded by the last run. A different time
+    now means the table was recreated, so its old change history no longer describes it. An
+    unknown time (None: rows written before 10 Oct 2026 didn't record it) also takes a snapshot,
+    because a recreation can't be ruled out.
+    """
+    created = created or {}
     rows = [r for r in versions if r["schema_name"] == schema]
     min_valid = {r["table_name"]: r["min_valid_version"] for r in rows}
+    now_created = {r["table_name"]: r.get("table_created") for r in rows}
     missing = [t for t in TABLES if t not in min_valid]
     if missing:
         raise RuntimeError(f"Change Tracking is not enabled on {schema}.{', '.join(missing)}")
@@ -117,10 +137,11 @@ def plan_reads(
     reads = []
     for table in TABLES:
         last = watermarks.get(table)
-        if last is None or last < min_valid[table]:
-            reads.append(Read(table, "snapshot", None, current))
+        recreated = created.get(table) != now_created[table]
+        if last is None or last < min_valid[table] or recreated:
+            reads.append(Read(table, "snapshot", None, current, now_created[table]))
         else:
-            reads.append(Read(table, "changes", last, current))
+            reads.append(Read(table, "changes", last, current, now_created[table]))
     return reads
 
 
@@ -175,22 +196,31 @@ def read_versions(spark, connection: str, database: str, sleep=time.sleep) -> li
     )
 
 
-def read_watermarks(spark, catalog: str, schema: str) -> dict[str, int]:
+def read_watermarks(
+    spark, catalog: str, schema: str
+) -> tuple[dict[str, int], dict[str, dt.datetime | None]]:
+    """({table: last to_version}, {table: creation time recorded with it})."""
     table = f"{catalog}.bronze.{WATERMARKS_TABLE}"
     spark.sql(
         f"CREATE TABLE IF NOT EXISTS {table} ("
         "source_schema STRING, table_name STRING, mode STRING, from_version BIGINT, "
         "to_version BIGINT, rows BIGINT, inserts BIGINT, updates BIGINT, deletes BIGINT, "
-        "ingest_ts TIMESTAMP) "
+        "ingest_ts TIMESTAMP, table_created TIMESTAMP) "
         "COMMENT 'Change Tracking watermarks: one row per source table per ingestion run. "
         "The latest to_version per table is where the next run starts.'"
     )
+    if "table_created" not in spark.table(table).columns:  # created before 10 Oct 2026
+        spark.sql(f"ALTER TABLE {table} ADD COLUMNS (table_created TIMESTAMP)")
     latest = spark.sql(
-        f"SELECT table_name, to_version FROM {table} WHERE source_schema = :schema "
+        f"SELECT table_name, to_version, table_created FROM {table} "
+        "WHERE source_schema = :schema "
         "QUALIFY row_number() OVER (PARTITION BY table_name ORDER BY ingest_ts DESC) = 1",
         args={"schema": schema},
     ).collect()
-    return {row.table_name: int(row.to_version) for row in latest}
+    return (
+        {row.table_name: int(row.to_version) for row in latest},
+        {row.table_name: row.table_created for row in latest},
+    )
 
 
 def ingest(spark, catalog: str, schema: str, connection: str, database: str) -> list[dict]:
@@ -198,10 +228,10 @@ def ingest(spark, catalog: str, schema: str, connection: str, database: str) -> 
 
     run_ts = dt.datetime.now(dt.UTC).replace(tzinfo=None)
     watermarks_table = f"{catalog}.bronze.{WATERMARKS_TABLE}"
-    watermarks = read_watermarks(spark, catalog, schema)
+    watermarks, created = read_watermarks(spark, catalog, schema)
     versions = read_versions(spark, connection, database)
     log = []
-    for read in plan_reads(schema, versions, watermarks):
+    for read in plan_reads(schema, versions, watermarks, created):
         target = f"{catalog}.bronze.sql_{read.table}"
         if read.mode == "snapshot":
             df = remote(spark, connection, database, snapshot_query(schema, read.table))
@@ -233,6 +263,7 @@ def ingest(spark, catalog: str, schema: str, connection: str, database: str) -> 
             "updates": ops.get("U", 0),
             "deletes": ops.get("D", 0),
             "ingest_ts": run_ts,
+            "table_created": read.table_created,
         }
         # Logged per table, so a failure on a later table doesn't make this one re-read.
         spark.createDataFrame([entry], schema=spark.table(watermarks_table).schema).write.mode(
