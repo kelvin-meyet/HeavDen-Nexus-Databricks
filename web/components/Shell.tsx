@@ -84,7 +84,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </div>
 
         <p className={styles.synthetic}>
-          <strong>Synthetic data.</strong> Every patient and hospital here is invented. Not a medical device.
+          <strong>Synthetic data.</strong> Every patient and hospital here is invented. Not a medical device.{" "}
+          <Link href="/about-the-data" className={styles.aboutLink}>
+            How the data is made
+          </Link>
         </p>
       </aside>
 
@@ -92,7 +95,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <main id="main">{children}</main>
         <footer className={styles.footer}>
           HeavDen Nexus is a portfolio project. It is not a medical device and must not be used for real patient
-          care.
+          care. <Link href="/about-the-data">About the hospital and its data</Link>
         </footer>
       </div>
     </div>

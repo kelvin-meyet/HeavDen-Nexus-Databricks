@@ -149,6 +149,12 @@
   color: #fff;
 }
 
+.aboutLink {
+  color: #fff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .content {
   min-width: 0;
   display: flex;
