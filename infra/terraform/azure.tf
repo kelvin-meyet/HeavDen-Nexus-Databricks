@@ -200,7 +200,7 @@ resource "azurerm_consumption_budget_subscription" "credits" {
       threshold      = notification.value
       operator       = "GreaterThanOrEqualTo"
       threshold_type = "Actual"
-      contact_emails = [var.alert_email]
+      contact_emails = var.alert_emails
     }
   }
 
@@ -209,6 +209,6 @@ resource "azurerm_consumption_budget_subscription" "credits" {
     threshold      = 100
     operator       = "GreaterThanOrEqualTo"
     threshold_type = "Forecasted"
-    contact_emails = [var.alert_email]
+    contact_emails = var.alert_emails
   }
 }

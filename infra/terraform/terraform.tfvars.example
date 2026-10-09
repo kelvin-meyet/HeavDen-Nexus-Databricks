@@ -5,7 +5,7 @@ subscription_id     = "00000000-0000-0000-0000-000000000000"
 resource_group_name = "<the Databricks workspace's resource group>"
 databricks_host     = "https://adb-<workspace-id>.<n>.azuredatabricks.net"
 my_ip               = "<from https://ifconfig.me>"
-alert_email         = "<where budget alerts go>"
+alert_emails        = ["<where budget alerts go>", "<optional second address>"]
 
 # Optional (defaults shown)
 # location      = "centralus"

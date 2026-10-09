@@ -24,9 +24,9 @@ variable "my_ip" {
   type        = string
 }
 
-variable "alert_email" {
-  description = "Where budget alerts are sent."
-  type        = string
+variable "alert_emails" {
+  description = "Where budget alerts are sent (one or more addresses)."
+  type        = list(string)
 }
 
 variable "budget_amount" {
