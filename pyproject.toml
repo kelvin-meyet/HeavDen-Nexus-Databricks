@@ -36,6 +36,9 @@ backend = [
     "openai>=3.26.1",
     "uvicorn[standard]>=0.54.0",
 ]
+azure = [
+    "mssql-python==1.14.0",
+]
 
 [build-system]
 requires = ["hatchling"]

@@ -1,0 +1,59 @@
+# HeavDen Nexus: everything that runs inside Databricks (jobs, pipelines, endpoints, monitors,
+# dashboards). Azure resources and the Unity Catalog foundation (catalogs, schemas, volumes,
+# secret scope) are created by Terraform in infra/terraform, not here.
+#
+#   cd databricks
+#   databricks bundle validate -t dev --profile azure-heavden
+#   databricks bundle deploy   -t dev --profile azure-heavden
+#
+# One workspace hosts all three environments; each target writes to its own catalog
+# (heavden_<target>) and reads its own schema of the source database and folder of the lake.
+
+bundle:
+  name: heavden-nexus
+
+include:
+  - resources/*.yml
+
+workspace:
+  host: https://adb-7405604448133690.10.azuredatabricks.net
+
+variables:
+  catalog:
+    description: Unity Catalog catalog this target writes to.
+  sql_schema:
+    description: Schema of the Azure SQL source database this target reads (dev, staging, prod).
+  sql_server:
+    description: Azure SQL server (terraform output sql_server_fqdn).
+    default: heavden-sql-jlytf.database.windows.net
+  sql_database:
+    description: Azure SQL database (terraform output sql_database).
+    default: heavden
+  secret_scope:
+    description: Key Vault-backed secret scope holding sql-admin-user and sql-admin-password.
+    default: heavden-kv
+
+targets:
+  # Personal development: resources are prefixed with "[dev <user>]" and schedules are paused.
+  dev:
+    default: true
+    mode: development
+    variables:
+      catalog: heavden_dev
+      sql_schema: dev
+
+  # Production mode deploys under the deploying identity's home folder (later: the target's
+  # service principal), which other users can't write to.
+  # Deployed by CI on every merge to main (from Phase 1's deploy workflow), on small seeded data.
+  staging:
+    mode: production
+    variables:
+      catalog: heavden_staging
+      sql_schema: staging
+
+  # Deployed by CI after approval in the prod-deploy GitHub environment.
+  prod:
+    mode: production
+    variables:
+      catalog: heavden_prod
+      sql_schema: prod
