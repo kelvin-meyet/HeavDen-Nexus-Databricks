@@ -164,6 +164,37 @@ def ddl_columns(table: str) -> list[str]:
     return names
 
 
+def column_rules(table: str) -> dict[str, tuple[int | None, bool]]:
+    """{column: (max text length or None, nullable)} for a table, read from the DDL."""
+    text = SCHEMA_SQL.read_text(encoding="utf-8")
+    body = re.search(rf"CREATE TABLE dbo\.{table} \((.*?)\n\);", text, flags=re.DOTALL).group(1)
+    rules = {}
+    for line in body.splitlines():
+        match = re.match(r"\s*(\w+)\s+(\w+)(?:\((\d+)(?:,\s*\d+)?\))?\s*(NOT NULL|NULL)?", line)
+        if not match or match.group(1).upper() == "CONSTRAINT":
+            continue
+        column, sql_type, size, null = match.groups()
+        length = int(size) if size and sql_type.upper() in {"VARCHAR", "NVARCHAR", "CHAR"} else None
+        rules[column] = (length, null != "NOT NULL")
+    return rules
+
+
+def problems(tables: dict[str, pd.DataFrame]) -> list[str]:
+    """Values that wouldn't fit their column: too long, or missing where NOT NULL."""
+    found = []
+    for table, df in tables.items():
+        for column, (length, nullable) in column_rules(table).items():
+            if column not in df:
+                continue
+            if not nullable and df[column].isna().any():
+                found.append(f"{table}.{column}: missing values in a NOT NULL column")
+            if length is not None:
+                longest = df[column].dropna().astype(str).str.len().max()
+                if longest > length:
+                    found.append(f"{table}.{column}: {longest} characters > {length}")
+    return found
+
+
 def _sql_value(value):
     """pandas/numpy values to what the driver sends: naive UTC datetimes, None for missing."""
     if value is None or value is pd.NaT:
@@ -300,8 +331,13 @@ def drop_schema(cursor, schema: str) -> None:
 def load(connection, schema: str, tables: dict[str, pd.DataFrame], replace: bool = False) -> None:
     """Create the environment's schema and insert every table (in one transaction per table)."""
     cursor = connection.cursor()
-    enable_change_tracking(cursor)
-    connection.commit()
+    # ALTER DATABASE can't run inside a transaction, and the driver opens one unless
+    # autocommit is on: switch it on for this one statement only.
+    connection.autocommit = True
+    try:
+        enable_change_tracking(cursor)
+    finally:
+        connection.autocommit = False
     if replace:
         drop_schema(cursor, schema)
         connection.commit()
@@ -367,6 +403,9 @@ def main() -> None:
     print(f"{days} simulated days, as of {ward.activity.end}:")
     for name, df in tables.items():
         print(f"  {name}: {len(df):,} rows")
+    issues = problems(tables)
+    if issues:
+        raise SystemExit("These values don't fit the schema:\n  " + "\n  ".join(issues))
     if args.dry_run:
         return
 

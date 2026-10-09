@@ -224,3 +224,48 @@ def test_connect_retries_on_the_drivers_wording_without_a_code():
 
     assert source_db.connect_with_retry(open_connection, sleep=lambda _: None) == "connection"
     assert len(calls) == 2
+
+
+class _FakeCursor:
+    def __init__(self, connection):
+        self.connection = connection
+
+    def execute(self, sql, params=None):
+        self.connection.statements.append((sql, self.connection.autocommit))
+
+
+class _FakeConnection:
+    def __init__(self):
+        self.autocommit = False
+        self.statements = []
+        self.commits = 0
+
+    def cursor(self):
+        return _FakeCursor(self)
+
+    def commit(self):
+        self.commits += 1
+
+
+def test_load_runs_alter_database_outside_a_transaction(tables):
+    connection = _FakeConnection()
+    source_db.load(connection, "dev", tables, replace=True)
+    alter = [auto for sql, auto in connection.statements if "ALTER DATABASE" in sql]
+    assert alter == [True]  # autocommit on for the database-level statement
+    others = [auto for sql, auto in connection.statements if "ALTER DATABASE" not in sql]
+    assert others and not any(others)  # everything else runs in transactions
+    inserted = [sql for sql, _ in connection.statements if sql.startswith("INSERT INTO dev.")]
+    assert {s.split()[2] for s in inserted} == {f"dev.{t}" for t in source_db.TABLE_ORDER}
+
+
+def test_generated_values_fit_the_schema(tables):
+    assert source_db.problems(tables) == []
+
+
+def test_problems_reports_values_that_would_not_fit(tables):
+    broken = dict(tables)
+    broken["medications"] = tables["medications"].assign(description="x" * 501)
+    broken["patients"] = tables["patients"].assign(first_name=None)
+    found = source_db.problems(broken)
+    assert "medications.description: 501 characters > 500" in found
+    assert "patients.first_name: missing values in a NOT NULL column" in found
