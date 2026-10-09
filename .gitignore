@@ -109,3 +109,13 @@ ml_model.md
 
 # Generated data (Synthea output, simulator output) - reproducible from seeds, never committed
 data/
+
+# Terraform: state can hold passwords; tfvars holds my subscription details
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+tfplan
+*.tfplan
+crash.log

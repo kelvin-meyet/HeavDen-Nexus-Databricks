@@ -1,0 +1,13 @@
+# Copy to terraform.tfvars (git-ignored) and fill in. No secrets go in this file:
+# every provider signs in with `az login`, and the SQL password is generated into Key Vault.
+
+subscription_id     = "00000000-0000-0000-0000-000000000000"
+resource_group_name = "<the Databricks workspace's resource group>"
+databricks_host     = "https://adb-<workspace-id>.<n>.azuredatabricks.net"
+my_ip               = "<from https://ifconfig.me>"
+alert_emails        = ["<where budget alerts go>", "<optional second address>"]
+
+# Optional (defaults shown)
+# location      = "centralus"
+# budget_amount = 200
+# budget_start  = "2026-10-01T00:00:00Z"
