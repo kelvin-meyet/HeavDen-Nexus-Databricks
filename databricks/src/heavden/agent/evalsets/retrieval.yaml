@@ -105,6 +105,12 @@ questions:
     section: Splits
   - question: Is any real patient data used?
     doc_id: HD-ML-002
+  - question: Why does the model only use six medical conditions?
+    doc_id: HD-ML-002
+    section: Which conditions
+  - question: What does COPD change in a patient's simulated vital signs?
+    doc_id: HD-ML-002
+    section: Which conditions
 
   # Site handbook and data dictionary
   - question: What is the rapid response extension at Valley hospital?

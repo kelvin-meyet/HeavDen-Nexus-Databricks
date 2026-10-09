@@ -31,6 +31,28 @@ audience: analysts, ML and data teams, reviewers
 4. **Truth generator:** a **hidden rule** decides which patients start to deteriorate (respiratory, sepsis or cardiac). Their vitals worsen over 2-12 hours, and staff escalate when the deterioration reaches the protocol's threshold. The model never sees the hidden rule, only the vitals and outcomes.
 5. **Bedside care:** nurses give oxygen to patients with low SpO2 (which hides the drop), and record consciousness.
 
+## 2a. Which conditions shape the data, and why
+
+Synthea records list more than 200 different active conditions per population. The simulation gives an effect to **six of them, plus beta-blockers**. Every patient still gets all six vital signs; a condition only shifts that patient's personal normal values and their risk.
+
+| Condition | What it does in the simulation |
+|---|---|
+| COPD | Normal SpO2 about 91% instead of 97%, breathing rate about 3 higher; NEWS2 uses SpO2 scale 2 and the oxygen target is 88-92%; deteriorations are more often respiratory; more likely to be on the respiratory unit; higher risk |
+| Heart failure | Heart rate about 8 higher; deteriorations are more often cardiac; more likely to be on step-down; higher risk |
+| Atrial fibrillation | Heart rate about 10 higher and more irregular; deteriorations are more often cardiac |
+| Hypertension | Systolic about 14 higher, diastolic about 8 higher |
+| Diabetes, chronic kidney disease | Systolic about 5 higher |
+| On a beta-blocker | Heart rate about 10 lower, which can hide a rising heart rate |
+| Each of the six conditions | More likely to be admitted, slightly higher risk of deteriorating |
+
+Age matters too: blood pressure rises and heart rate falls after 50, and risk rises with age.
+
+**Why these six:** each has a direct, well-known effect on bedside vital signs or on the risk of deteriorating on a ward; each is common enough in the population to learn from; and each is a classic trap for early-warning scores, because a reading that is normal for one patient is alarming for another (for example SpO2 of 90% with COPD). A short, explicit list also keeps the simulation calibrated and explainable.
+
+**Inclusion rule:** a condition becomes a model feature only if the simulation gives it an effect. Every other condition has no effect on the simulated vitals or outcomes, so using it would only add noise. Social circumstances that Synthea records as conditions (employment, education, housing, criminal record) are never used: they have no clinical meaning here and would raise fairness problems. The feature `n_conditions` counts only the six tracked conditions (0 to 6), not every diagnosis.
+
+Flags are set by matching the condition description (for example "chronic obstructive" or "pulmonary emphysema" for COPD), counting only conditions and medicines still active.
+
 ## 3. Labels
 
 A patient-hour at time `t` is **positive** if an escalation happens in the following 6 hours, (t, t+6h]. The label stays unknown (null) until the window has closed. Escalations occur at about 3-4 per 100 patient-days.
@@ -54,6 +76,8 @@ The generator can switch on four controlled changes, used to test monitoring (se
 - Only site, age, sex and ward type are available for fairness analysis. Ethnicity and other attributes are not simulated.
 - No children, maternity, ICU or emergency department patients.
 - One Synthea run; rare conditions have few examples.
+- Conditions that matter in real hospitals have no effect here: ischaemic heart disease and previous heart attacks (cardiac risk), anaemia (oxygen delivery), dementia (new confusion is harder to judge), alcohol or drug dependence (withdrawal, infection risk).
+- Condition flags come from description text; production systems map standard codes (SNOMED CT) instead.
 
 ## 7. Governance
 
