@@ -189,3 +189,19 @@ def test_connect_does_not_retry_other_errors():
 
     with pytest.raises(RuntimeError, match="18456"):
         source_db.connect_with_retry(open_connection, sleep=lambda _: None)
+
+
+def test_connection_string_is_accepted_by_the_driver():
+    # Parses offline with the driver's own allow-list; never connects. Skipped where the
+    # `azure` dependency group isn't installed (CI).
+    parser = pytest.importorskip("mssql_python.connection_string_parser")
+    text = source_db.connection_string("srv.database.windows.net", "heavden", "u", "p!#%*-_=+;x")
+    params = parser._ConnectionStringParser(validate_keywords=True)._parse(text)
+    assert params == {
+        "server": "tcp:srv.database.windows.net,1433",
+        "database": "heavden",
+        "uid": "u",
+        "pwd": "p!#%*-_=+;x",  # braces keep ';' and symbols inside the password
+        "encrypt": "yes",
+        "trustservercertificate": "no",
+    }

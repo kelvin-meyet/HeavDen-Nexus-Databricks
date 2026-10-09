@@ -252,6 +252,14 @@ def connect_with_retry(
     raise AssertionError("unreachable")
 
 
+def connection_string(server: str, database: str, user: str, password: str) -> str:
+    """mssql-python accepts only its own keywords (no `Connection Timeout`: use `timeout=`)."""
+    return (
+        f"Server=tcp:{server},1433;Database={database};Uid={user};Pwd={{{password}}};"
+        "Encrypt=yes;TrustServerCertificate=no"
+    )
+
+
 def connect(server: str, database: str, key_vault: str):
     """A connection as the SQL admin, with the login read from Key Vault."""
     import mssql_python  # in the `azure` dependency group
@@ -260,8 +268,7 @@ def connect(server: str, database: str, key_vault: str):
     password = _key_vault_secret(key_vault, "sql-admin-password")
     return connect_with_retry(
         lambda: mssql_python.connect(
-            f"Server=tcp:{server},1433;Database={database};Uid={user};Pwd={password};"
-            "Encrypt=yes;TrustServerCertificate=no;Connection Timeout=60"
+            connection_string(server, database, user, password), timeout=60
         )
     )
 
