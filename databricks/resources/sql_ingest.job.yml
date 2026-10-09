@@ -1,0 +1,32 @@
+# Azure SQL -> Bronze with Change Tracking (Plan.md §7.2; code in src/heavden/ingestion/sql_source.py).
+# No schedule: it runs on demand, and later as a task of the baseline and drift_episode jobs,
+# right after the generator loads the source (one database wake-up covers both).
+resources:
+  jobs:
+    sql_ingest:
+      name: heavden-sql-ingest
+      description: Copies new and changed rows of the Azure SQL source into ${var.catalog}.bronze.sql_<table>.
+      max_concurrent_runs: 1 # two runs would read the same watermark and append the same changes
+      performance_target: STANDARD # cost-efficient serverless; slower start is fine for a batch copy
+      timeout_seconds: 1800
+      tags:
+        project: heavden
+        component: ingestion
+      tasks:
+        - task_key: ingest_sql
+          environment_key: default
+          spark_python_task:
+            python_file: ../src/heavden/ingestion/sql_source.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --sql-schema
+              - ${var.sql_schema}
+              - --database
+              - ${var.sql_database}
+              - --connection
+              - ${var.sql_connection}
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "4"

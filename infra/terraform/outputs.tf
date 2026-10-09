@@ -25,3 +25,11 @@ output "secret_scope" {
 output "catalogs" {
   value = [for c in databricks_catalog.env : c.name]
 }
+
+output "sql_connection" {
+  value = databricks_connection.sql_source.name
+}
+
+output "sql_warehouse_id" {
+  value = databricks_sql_endpoint.shared.id
+}
