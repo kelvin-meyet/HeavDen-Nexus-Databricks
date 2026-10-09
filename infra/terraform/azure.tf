@@ -111,11 +111,13 @@ resource "azurerm_mssql_firewall_rule" "me" {
 
 # The free offer: serverless General Purpose, 100,000 vCore-seconds and 32 GB a month at no cost.
 # AutoPause when the monthly allowance runs out, so it can never bill, but then the database
-# stays offline until the next month. To make the allowance last:
-#   - pause after 15 idle minutes (the minimum): each wake-up then idles away ~450 vCore-seconds
-#     at 0.5 vCores, instead of ~1,800 with the default 60 minutes
-#   - at most 1 vCore while running: our loads and incremental reads are small
-# Budget: roughly 150+ wake-ups a month. Automated test runs never connect to it (Plan.md §14).
+# stays offline until the next month. Azure only allows the default 60-minute auto-pause delay
+# with AutoPause (a 15-minute delay was rejected: "Only default value for auto pause delay is
+# allowed"), so each wake-up idles away ~1,800 vCore-seconds at 0.5 vCores: ~50 wake-ups a month.
+# To make that last: at most 1 vCore while running, batch work so one wake-up does a whole load
+# or episode, and never connect from unit tests or PR CI (Plan.md §14).
+# Fallback if it runs low: freeLimitExhaustionBehavior = "BillOverUsage" keeps it online and
+# bills only the overage (and then allows a 15-minute delay).
 resource "azapi_resource" "source_db" {
   type      = "Microsoft.Sql/servers/databases@2025-01-01"
   name      = "heavden"
@@ -133,7 +135,7 @@ resource "azapi_resource" "source_db" {
     properties = {
       useFreeLimit                = true
       freeLimitExhaustionBehavior = "AutoPause"
-      autoPauseDelay              = 15
+      autoPauseDelay              = 60
       minCapacity                 = 0.5
       maxSizeBytes                = 34359738368
       zoneRedundant               = false
