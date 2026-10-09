@@ -233,6 +233,16 @@ def _key_vault_secret(vault: str, name: str) -> str:
     ).stdout.strip()
 
 
+# Error 40613. mssql-python reports only the text ("Database 'x' on server 'y' is not
+# currently available. Please retry the connection later."), so match the number or the words.
+_WAKING_UP = ("40613", "is not currently available")
+
+
+def _is_waking_up(error: Exception) -> bool:
+    text = str(error)
+    return any(marker in text for marker in _WAKING_UP)
+
+
 def connect_with_retry(
     open_connection, attempts: int = 6, wait_seconds: float = 20, sleep=time.sleep
 ):
@@ -244,8 +254,8 @@ def connect_with_retry(
     for attempt in range(1, attempts + 1):
         try:
             return open_connection()
-        except Exception as error:  # the driver's error classes vary; match on the code
-            if "40613" not in str(error) or attempt == attempts:
+        except Exception as error:  # the driver exposes only the message text, not the code
+            if not _is_waking_up(error) or attempt == attempts:
                 raise
             print(f"  database is waking up (attempt {attempt}/{attempts}); retrying...")
             sleep(wait_seconds)

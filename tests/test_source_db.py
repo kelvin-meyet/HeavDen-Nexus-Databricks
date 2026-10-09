@@ -205,3 +205,22 @@ def test_connection_string_is_accepted_by_the_driver():
         "encrypt": "yes",
         "trustservercertificate": "no",
     }
+
+
+def test_connect_retries_on_the_drivers_wording_without_a_code():
+    # The exact message mssql-python gave on 9 Oct for a paused database (no error number).
+    message = (
+        "Driver Error: General error; DDBC Error: [Microsoft][SQL Server]Database 'heavden' on "
+        "server 'heavden-sql-jlytf.database.windows.net' is not currently available.  Please "
+        "retry the connection later."
+    )
+    calls = []
+
+    def open_connection():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError(message)
+        return "connection"
+
+    assert source_db.connect_with_retry(open_connection, sleep=lambda _: None) == "connection"
+    assert len(calls) == 2
