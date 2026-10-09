@@ -23,14 +23,14 @@ variables:
     description: Unity Catalog catalog this target writes to.
   sql_schema:
     description: Schema of the Azure SQL source database this target reads (dev, staging, prod).
-  sql_server:
-    description: Azure SQL server (terraform output sql_server_fqdn).
-    default: heavden-sql-jlytf.database.windows.net
+  sql_connection:
+    description: Unity Catalog connection to the Azure SQL source (terraform output sql_connection).
+    default: heavden_sql
   sql_database:
     description: Azure SQL database (terraform output sql_database).
     default: heavden
   secret_scope:
-    description: Key Vault-backed secret scope holding sql-admin-user and sql-admin-password.
+    description: Key Vault-backed secret scope (terraform output secret_scope).
     default: heavden-kv
 
 targets:
@@ -42,11 +42,13 @@ targets:
       catalog: heavden_dev
       sql_schema: dev
 
-  # Production mode deploys under the deploying identity's home folder (later: the target's
-  # service principal), which other users can't write to.
+  # Production mode needs an explicit root_path: the deploying identity's home folder, which other
+  # users can't write to. Once CI deploys as the target's service principal, this is its folder.
   # Deployed by CI on every merge to main (from Phase 1's deploy workflow), on small seeded data.
   staging:
     mode: production
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
     variables:
       catalog: heavden_staging
       sql_schema: staging
@@ -54,6 +56,8 @@ targets:
   # Deployed by CI after approval in the prod-deploy GitHub environment.
   prod:
     mode: production
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
     variables:
       catalog: heavden_prod
       sql_schema: prod

@@ -79,3 +79,21 @@ resource "databricks_secret_scope" "kv" {
 
   depends_on = [azurerm_role_assignment.databricks_kv]
 }
+
+# The source database as a Unity Catalog connection. The ingestion job reads it with
+# remote_query(), so the SQL login lives here (encrypted by Unity Catalog), not in job code;
+# using it needs USE CONNECTION, which the owner group has. One connection serves all three
+# environments: they are schemas of the same database.
+resource "databricks_connection" "sql_source" {
+  name            = "heavden_sql"
+  connection_type = "SQLSERVER"
+  owner           = var.admin_group
+  comment         = "HeavDen hospital source database (Azure SQL, synthetic data)"
+
+  options = {
+    host     = azurerm_mssql_server.source.fully_qualified_domain_name
+    port     = "1433"
+    user     = azurerm_mssql_server.source.administrator_login
+    password = random_password.sql_admin.result
+  }
+}
