@@ -117,6 +117,7 @@ def write_local(files: dict[str, str], root: Path) -> Path:
 def upload(az: str, local_root: Path, env: str, account: str, replace: bool) -> None:
     """Upload `<local_root>/<env>/` to `landing/<env>/` with the signed-in Azure CLI identity."""
     common = ["--account-name", account, "--auth-mode", "login", "--only-show-errors"]
+    common += ["--output", "none"]  # the upload otherwise prints every blob
     if replace:
         subprocess.run(
             [az, "storage", "blob", "delete-batch", "--source", "landing", "--pattern", f"{env}/*"]
