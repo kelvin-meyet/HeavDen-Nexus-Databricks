@@ -110,7 +110,12 @@ resource "azurerm_mssql_firewall_rule" "me" {
 }
 
 # The free offer: serverless General Purpose, 100,000 vCore-seconds and 32 GB a month at no cost.
-# AutoPause when the monthly allowance runs out, so it can never bill.
+# AutoPause when the monthly allowance runs out, so it can never bill, but then the database
+# stays offline until the next month. To make the allowance last:
+#   - pause after 15 idle minutes (the minimum): each wake-up then idles away ~450 vCore-seconds
+#     at 0.5 vCores, instead of ~1,800 with the default 60 minutes
+#   - at most 1 vCore while running: our loads and incremental reads are small
+# Budget: roughly 150+ wake-ups a month. Automated test runs never connect to it (Plan.md §14).
 resource "azapi_resource" "source_db" {
   type      = "Microsoft.Sql/servers/databases@2025-01-01"
   name      = "heavden"
@@ -120,14 +125,15 @@ resource "azapi_resource" "source_db" {
 
   body = {
     sku = {
-      name   = "GP_S_Gen5_2"
-      tier   = "GeneralPurpose"
-      family = "Gen5"
+      name     = "GP_S_Gen5"
+      tier     = "GeneralPurpose"
+      family   = "Gen5"
+      capacity = 1
     }
     properties = {
       useFreeLimit                = true
       freeLimitExhaustionBehavior = "AutoPause"
-      autoPauseDelay              = 60
+      autoPauseDelay              = 15
       minCapacity                 = 0.5
       maxSizeBytes                = 34359738368
       zoneRedundant               = false
