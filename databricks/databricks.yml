@@ -15,6 +15,12 @@ bundle:
 include:
   - resources/*.yml
 
+# Upload the Databricks-track learning notebooks too, so they sit next to the code they import.
+sync:
+  paths:
+    - .
+    - ../notebooks/databricks
+
 workspace:
   host: https://adb-7405604448133690.10.azuredatabricks.net
 

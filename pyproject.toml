@@ -54,6 +54,11 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
 
+[tool.ruff.lint.per-file-ignores]
+# Databricks provides spark, dbutils and display at runtime, and these notebooks add the
+# deployed repo to sys.path before importing project code.
+"notebooks/databricks/*" = ["F821", "E402"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["generator", "heavden", "heavden_api"]
 
