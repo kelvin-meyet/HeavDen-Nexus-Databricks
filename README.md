@@ -19,7 +19,7 @@ The project is built in phases. **Phase 0 (offline foundations) is complete**: e
 | 2. Model and serving | feature tables, MLflow on Unity Catalog (`@champion` / `@challenger`), batch scoring, a scale-to-zero serving endpoint | planned |
 | 3. Monitoring and MLOps | Lakehouse Monitoring, PSI and Jensen-Shannon drift metrics, email alerts, retraining and promotion approved in GitHub Actions | planned |
 | 4. AI assistant on Databricks | Genie, Vector Search and a Unity Catalog function behind one agent, gated by an MLflow evaluation set | planned |
-| 5–6. Live app, then handoff | live mode for the app, then snapshots and teardown so the public demo outlives the cloud credits | planned |
+| 5–6. Live app, then maintenance mode | live mode for the app, then a low-cost steady state (about $10–20 a month): a weekly job refreshes the data and the app's snapshot, and nothing runs in between | planned |
 
 ## What's in it
 
@@ -111,7 +111,7 @@ Key decisions:
 - **Serverless only, triggered runs, scale-to-zero endpoints**, to fit a $200, 30-day cloud budget. Dev and staging run only from CI, on small seeded data.
 - **Model deployment is an alias swap** (`@champion`), never Model Registry stages.
 - **Retraining and promotion need a human approval in GitHub Actions environments**, so the approval history stays in the repo after the cloud workspace is gone.
-- **The public app is not a Databricks App** (those can't be public). It runs on Vercel and Render, and falls back to demo mode when the credits end.
+- **The public app is not a Databricks App** (those can't be public). It runs on Vercel and Render. After the build period it serves a snapshot that a weekly Databricks job refreshes, so public traffic never wakes the cloud resources.
 
 ## Run it locally
 
