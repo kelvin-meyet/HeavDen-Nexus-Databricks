@@ -249,7 +249,7 @@ def _az() -> str:
     found = shutil.which("az")
     if found:
         return found
-    default = Path(r"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbinz.cmd")
+    default = Path(r"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd")
     if default.exists():
         return str(default)
     raise FileNotFoundError("Azure CLI (az) not found; install it and run `az login`.")

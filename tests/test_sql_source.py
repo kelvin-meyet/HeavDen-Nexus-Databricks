@@ -1,3 +1,4 @@
+import datetime as dt
 import re
 
 import pytest
@@ -22,9 +23,19 @@ def test_tables_and_keys_match_the_source_ddl():
         assert keys == _ddl_primary_key(table), table
 
 
-def _versions(schema="dev", current=100, min_valid=10, skip=()):
+CREATED = dt.datetime(2026, 10, 9, 17, 41)
+
+
+def _versions(schema="dev", current=100, min_valid=10, skip=(), created=None):
+    created = created or {}
     rows = [
-        {"current_version": current, "schema_name": s, "table_name": t, "min_valid_version": mv}
+        {
+            "current_version": current,
+            "schema_name": s,
+            "table_name": t,
+            "min_valid_version": mv,
+            "table_created": created.get(t, CREATED),
+        }
         for s, mv in ((schema, min_valid), ("staging", 1))
         for t in sql_source.TABLES
         if (s, t) not in skip
@@ -41,15 +52,41 @@ def test_first_run_takes_snapshots_up_to_the_current_version():
 
 def test_later_runs_read_changes_since_the_watermark():
     watermarks = dict.fromkeys(sql_source.TABLES, 40)
-    reads = sql_source.plan_reads("dev", _versions(), watermarks)
+    created = dict.fromkeys(sql_source.TABLES, CREATED)
+    reads = sql_source.plan_reads("dev", _versions(), watermarks, created)
     assert {(r.mode, r.from_version, r.to_version) for r in reads} == {("changes", 40, 100)}
 
 
 def test_a_watermark_older_than_the_retained_changes_forces_a_snapshot():
     watermarks = dict.fromkeys(sql_source.TABLES, 40) | {"encounters": 5}
-    reads = {r.table: r for r in sql_source.plan_reads("dev", _versions(min_valid=10), watermarks)}
+    created = dict.fromkeys(sql_source.TABLES, CREATED)
+    versions = _versions(min_valid=10)
+    reads = {r.table: r for r in sql_source.plan_reads("dev", versions, watermarks, created)}
     assert reads["encounters"].mode == "snapshot"
     assert reads["sites"].mode == "changes"
+
+
+def test_a_recreated_table_is_copied_whole_even_though_versions_look_fine():
+    # Dropping and recreating a table doesn't advance the Change Tracking version, and the
+    # rows it lost never show up as deletes: only the creation time gives it away.
+    watermarks = dict.fromkeys(sql_source.TABLES, 10)
+    before = dict.fromkeys(sql_source.TABLES, CREATED)
+    later = CREATED + dt.timedelta(hours=2)
+    versions = _versions(current=18, min_valid=10, created={"encounters": later})
+    reads = {r.table: r for r in sql_source.plan_reads("dev", versions, watermarks, before)}
+    assert reads["encounters"].mode == "snapshot"
+    assert reads["encounters"].table_created == later
+    assert reads["sites"].mode == "changes"
+
+
+def test_an_unknown_creation_time_takes_a_snapshot():
+    # Watermark rows written before creation times were recorded have None: a recreation
+    # can't be ruled out, so copy the table whole once.
+    watermarks = dict.fromkeys(sql_source.TABLES, 10)
+    before = dict.fromkeys(sql_source.TABLES, None)
+    reads = sql_source.plan_reads("dev", _versions(min_valid=10), watermarks, before)
+    assert {r.mode for r in reads} == {"snapshot"}
+    assert {r.table_created for r in reads} == {CREATED}
 
 
 def test_a_table_without_change_tracking_fails_the_run():
