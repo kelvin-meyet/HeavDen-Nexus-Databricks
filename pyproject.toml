@@ -39,6 +39,9 @@ backend = [
 azure = [
     "mssql-python==1.14.0",
 ]
+spark = [
+    "pyspark==4.0.4",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -58,6 +61,8 @@ select = ["E", "F", "I", "B", "UP"]
 # Databricks provides spark, dbutils and display at runtime, and these notebooks add the
 # deployed repo to sys.path before importing project code.
 "notebooks/databricks/*" = ["F821", "E402"]
+# Lakeflow pipeline files get `spark` from the pipeline runtime.
+"databricks/src/pipelines/*" = ["F821"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["generator", "heavden", "heavden_api"]

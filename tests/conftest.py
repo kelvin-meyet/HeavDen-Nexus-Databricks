@@ -1,5 +1,6 @@
-"""Shared fixtures: a small demo snapshot built with the real snapshot builder."""
+"""Shared fixtures: a small demo snapshot built with the real snapshot builder, and local Spark."""
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -58,6 +59,37 @@ def _readings(activity) -> pd.DataFrame:
         for i, t in enumerate(ts)
     ]
     return pd.DataFrame(rows)
+
+
+@pytest.fixture(scope="session")
+def spark():
+    """Local Spark for the pipeline transformations (`uv sync --group spark`; needs Java 17+).
+
+    Uses the JDK at HEAVDEN_JAVA (default ~/tools/jdk-21), never the `java` on PATH, which may
+    be too old; otherwise JAVA_HOME (set on GitHub's runners).
+    """
+    pytest.importorskip("pyspark")
+    java = Path(os.environ.get("HEAVDEN_JAVA", Path.home() / "tools" / "jdk-21" / "bin" / "java"))
+    if java.exists() or java.with_suffix(".exe").exists():
+        os.environ["JAVA_HOME"] = str(java.parents[1])
+    elif "JAVA_HOME" not in os.environ:
+        pytest.skip("Spark needs Java 17+: set HEAVDEN_JAVA or JAVA_HOME")
+    from pyspark.sql import SparkSession
+
+    session = (
+        SparkSession.builder.master("local[2]")
+        .appName("heavden-tests")
+        .config("spark.sql.session.timeZone", "UTC")  # Databricks serverless runs in UTC
+        # Arrow converts pandas timestamps in the session time zone; without it, PySpark goes
+        # through the machine's local time and shifts them around daylight-saving changes.
+        .config("spark.sql.execution.arrow.pyspark.enabled", "true")
+        .config("spark.sql.shuffle.partitions", "2")
+        .config("spark.ui.enabled", "false")
+        .getOrCreate()
+    )
+    session.sparkContext.setLogLevel("ERROR")
+    yield session
+    session.stop()
 
 
 @pytest.fixture(scope="session")
