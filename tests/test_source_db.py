@@ -189,3 +189,90 @@ def test_connect_does_not_retry_other_errors():
 
     with pytest.raises(RuntimeError, match="18456"):
         source_db.connect_with_retry(open_connection, sleep=lambda _: None)
+
+
+def test_connection_string_is_accepted_by_the_driver():
+    # Parses offline with the driver's own allow-list; never connects. Skipped where the
+    # `azure` dependency group isn't installed (CI).
+    parser = pytest.importorskip("mssql_python.connection_string_parser")
+    text = source_db.connection_string("srv.database.windows.net", "heavden", "u", "p!#%*-_=+;x")
+    params = parser._ConnectionStringParser(validate_keywords=True)._parse(text)
+    assert params == {
+        "server": "tcp:srv.database.windows.net,1433",
+        "database": "heavden",
+        "uid": "u",
+        "pwd": "p!#%*-_=+;x",  # braces keep ';' and symbols inside the password
+        "encrypt": "yes",
+        "trustservercertificate": "no",
+    }
+
+
+def test_connect_retries_on_the_drivers_wording_without_a_code():
+    # The exact message mssql-python gave on 9 Oct for a paused database (no error number).
+    message = (
+        "Driver Error: General error; DDBC Error: [Microsoft][SQL Server]Database 'heavden' on "
+        "server 'heavden-sql-jlytf.database.windows.net' is not currently available.  Please "
+        "retry the connection later."
+    )
+    calls = []
+
+    def open_connection():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError(message)
+        return "connection"
+
+    assert source_db.connect_with_retry(open_connection, sleep=lambda _: None) == "connection"
+    assert len(calls) == 2
+
+
+class _FakeCursor:
+    def __init__(self, connection):
+        self.connection = connection
+
+    def execute(self, sql, params=None):
+        self.connection.statements.append((sql, self.connection.autocommit))
+
+
+class _FakeConnection:
+    def __init__(self):
+        self.autocommit = False
+        self.statements = []
+        self.commits = 0
+
+    def cursor(self):
+        return _FakeCursor(self)
+
+    def commit(self):
+        self.commits += 1
+
+
+def test_load_runs_alter_database_outside_a_transaction(tables):
+    connection = _FakeConnection()
+    source_db.load(connection, "dev", tables, replace=True)
+    alter = [auto for sql, auto in connection.statements if "ALTER DATABASE" in sql]
+    assert alter == [True]  # autocommit on for the database-level statement
+    others = [auto for sql, auto in connection.statements if "ALTER DATABASE" not in sql]
+    assert others and not any(others)  # everything else runs in transactions
+    inserted = [sql for sql, _ in connection.statements if sql.startswith("INSERT INTO dev.")]
+    assert {s.split()[2] for s in inserted} == {f"dev.{t}" for t in source_db.TABLE_ORDER}
+
+
+def test_generated_values_fit_the_schema(tables):
+    assert source_db.problems(tables) == []
+
+
+def test_problems_reports_values_that_would_not_fit(tables):
+    broken = dict(tables)
+    broken["medications"] = tables["medications"].assign(description="x" * 501)
+    broken["patients"] = tables["patients"].assign(first_name=None)
+    found = source_db.problems(broken)
+    assert "medications.description: 501 characters > 500" in found
+    assert "patients.first_name: missing values in a NOT NULL column" in found
+
+
+@pytest.mark.parametrize("table", source_db.TABLE_ORDER)
+def test_every_insert_stays_below_the_servers_parameter_limit(tables, table):
+    # SQL Server refused a request with exactly 2100 parameters on 9 Oct.
+    for _, params in source_db.insert_batches("dev", table, tables[table]):
+        assert len(params) < 2100

@@ -39,7 +39,7 @@ CREATE TABLE dbo.patients (
 CREATE TABLE dbo.conditions (
     patient_id   VARCHAR(36)   NOT NULL REFERENCES dbo.patients (patient_id),
     code         VARCHAR(20)   NOT NULL,  -- SNOMED-CT
-    description  NVARCHAR(255) NOT NULL,
+    description  NVARCHAR(500) NOT NULL,
     start_date   DATE          NOT NULL,
     stop_date    DATE          NULL,      -- NULL = still active
     last_updated DATETIME2     NOT NULL DEFAULT SYSUTCDATETIME(),
@@ -49,7 +49,7 @@ CREATE TABLE dbo.conditions (
 CREATE TABLE dbo.medications (
     patient_id   VARCHAR(36)   NOT NULL REFERENCES dbo.patients (patient_id),
     code         VARCHAR(20)   NOT NULL,  -- RxNorm
-    description  NVARCHAR(255) NOT NULL,
+    description  NVARCHAR(500) NOT NULL,
     start_ts     DATETIME2     NOT NULL,
     stop_ts      DATETIME2     NULL,
     last_updated DATETIME2     NOT NULL DEFAULT SYSUTCDATETIME(),
