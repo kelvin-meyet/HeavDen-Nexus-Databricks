@@ -1,0 +1,53 @@
+/* Reading page: one comfortable column, with tables and cards allowed a little wider. */
+.prose {
+  max-width: 72ch;
+}
+
+.toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  max-width: 820px;
+  padding: 10px 0 14px;
+  border-bottom: 1px solid var(--rule);
+  font-size: var(--step--1);
+}
+
+.pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px 32px;
+  max-width: 980px;
+  margin: 12px 0;
+}
+
+.list {
+  max-width: 72ch;
+  padding-left: 1.2em;
+}
+
+.list li {
+  margin-bottom: 6px;
+}
+
+.list ul {
+  margin-top: 6px;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0 32px;
+  border-top: 1.5px solid var(--graphite);
+  max-width: 980px;
+}
+
+.cards article {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.cards h3 {
+  font-size: var(--step-1);
+  margin-bottom: 6px;
+}

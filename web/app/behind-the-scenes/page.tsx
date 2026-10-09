@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useApi } from "@/lib/api";
 import { riskPct, when } from "@/lib/format";
 import type { Health } from "@/lib/types";
@@ -81,6 +83,10 @@ export default function BehindPage() {
             </li>
           ))}
         </ol>
+        <p className="small muted">
+          How the hospitals run and how each piece of data is made:{" "}
+          <Link href="/about-the-data">the hospital and its data</Link>.
+        </p>
       </section>
 
       <section className="section" aria-labelledby="results-title">
