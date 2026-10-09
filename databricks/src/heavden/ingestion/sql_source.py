@@ -161,6 +161,20 @@ def remote(spark, connection: str, database: str, query: str):
     )
 
 
+def read_versions(spark, connection: str, database: str, sleep=time.sleep) -> list[dict[str, Any]]:
+    """The versions query, retried while the database wakes up.
+
+    The first query of a run is the one that wakes a paused database. spark.sql() connects
+    while analysing the query (to learn its columns), so the whole call sits inside the retry.
+    """
+    return with_retry(
+        lambda: [
+            row.asDict() for row in remote(spark, connection, database, versions_query()).collect()
+        ],
+        sleep=sleep,
+    )
+
+
 def read_watermarks(spark, catalog: str, schema: str) -> dict[str, int]:
     table = f"{catalog}.bronze.{WATERMARKS_TABLE}"
     spark.sql(
@@ -185,8 +199,7 @@ def ingest(spark, catalog: str, schema: str, connection: str, database: str) -> 
     run_ts = dt.datetime.now(dt.UTC).replace(tzinfo=None)
     watermarks_table = f"{catalog}.bronze.{WATERMARKS_TABLE}"
     watermarks = read_watermarks(spark, catalog, schema)
-    versions_df = remote(spark, connection, database, versions_query())
-    versions = with_retry(lambda: [row.asDict() for row in versions_df.collect()])
+    versions = read_versions(spark, connection, database)
     log = []
     for read in plan_reads(schema, versions, watermarks):
         target = f"{catalog}.bronze.sql_{read.table}"

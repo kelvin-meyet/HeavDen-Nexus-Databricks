@@ -101,3 +101,26 @@ def test_retry_waits_for_a_waking_database_and_nothing_else():
     with pytest.raises(RuntimeError, match="Login failed"):
         sql_source.with_retry(broken, sleep=sleeps.append)
     assert len(sleeps) == 2
+
+
+def test_the_first_query_is_retried_even_when_spark_connects_while_analysing_it():
+    # spark.sql() raises before any DataFrame exists when the database is paused.
+    class Row(dict):
+        def asDict(self):
+            return dict(self)
+
+    class Spark:
+        calls = 0
+
+        def sql(self, text):
+            Spark.calls += 1
+            if Spark.calls == 1:
+                raise RuntimeError(
+                    "[FAILED_JDBC.CONNECTION] Failed to connect to the database. Caused by: "
+                    "Database 'heavden' is not currently available. Please retry later."
+                )
+            return type("DF", (), {"collect": lambda self: [Row(current_version=7)]})()
+
+    versions = sql_source.read_versions(Spark(), "heavden_sql", "heavden", sleep=lambda s: None)
+    assert versions == [{"current_version": 7}]
+    assert Spark.calls == 2
