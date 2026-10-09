@@ -19,6 +19,7 @@ import math
 import re
 import shutil
 import subprocess
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -232,15 +233,36 @@ def _key_vault_secret(vault: str, name: str) -> str:
     ).stdout.strip()
 
 
+def connect_with_retry(
+    open_connection, attempts: int = 6, wait_seconds: float = 20, sleep=time.sleep
+):
+    """Open a connection, waiting while a paused serverless database wakes up.
+
+    The first login to an auto-paused database fails with error 40613 ("database ... is not
+    currently available") and starts the resume, which usually takes under a minute.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            return open_connection()
+        except Exception as error:  # the driver's error classes vary; match on the code
+            if "40613" not in str(error) or attempt == attempts:
+                raise
+            print(f"  database is waking up (attempt {attempt}/{attempts}); retrying...")
+            sleep(wait_seconds)
+    raise AssertionError("unreachable")
+
+
 def connect(server: str, database: str, key_vault: str):
     """A connection as the SQL admin, with the login read from Key Vault."""
     import mssql_python  # in the `azure` dependency group
 
     user = _key_vault_secret(key_vault, "sql-admin-user")
     password = _key_vault_secret(key_vault, "sql-admin-password")
-    return mssql_python.connect(
-        f"Server=tcp:{server},1433;Database={database};Uid={user};Pwd={password};"
-        "Encrypt=yes;TrustServerCertificate=no;Connection Timeout=60"
+    return connect_with_retry(
+        lambda: mssql_python.connect(
+            f"Server=tcp:{server},1433;Database={database};Uid={user};Pwd={password};"
+            "Encrypt=yes;TrustServerCertificate=no;Connection Timeout=60"
+        )
     )
 
 

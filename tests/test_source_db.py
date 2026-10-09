@@ -168,3 +168,24 @@ def test_values_are_converted_for_the_driver(tables):
     assert timestamps and all(p.tzinfo is None for p in timestamps)
     assert None in params  # open stays have no discharge_ts
     assert not any(isinstance(p, (np.generic, pd.Timestamp)) or p is pd.NaT for p in params)
+
+
+def test_connect_retries_while_the_database_wakes_up():
+    calls, waits = [], []
+
+    def open_connection():
+        calls.append(1)
+        if len(calls) < 3:
+            raise RuntimeError("[40613] Database 'heavden' is not currently available")
+        return "connection"
+
+    result = source_db.connect_with_retry(open_connection, sleep=waits.append)
+    assert result == "connection" and len(calls) == 3 and len(waits) == 2
+
+
+def test_connect_does_not_retry_other_errors():
+    def open_connection():
+        raise RuntimeError("[18456] Login failed for user")
+
+    with pytest.raises(RuntimeError, match="18456"):
+        source_db.connect_with_retry(open_connection, sleep=lambda _: None)
