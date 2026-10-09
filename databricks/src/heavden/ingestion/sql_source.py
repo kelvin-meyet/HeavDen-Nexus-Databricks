@@ -15,14 +15,16 @@ Each run:
    (with row counts per change type), which is the next run's watermark.
 
 Delivery is at-least-once: a run that fails between the two writes re-reads the same changes
-next time, and Silver de-duplicates on (key, last_updated). The simulation never deletes rows
+next time, and Silver's AUTO CDC orders rows by (last_updated, version, ingestion time), so a
+second copy of a row changes nothing. The simulation never deletes rows
 (a discharge is an update), so a delete ('D') fails the run after it is logged: Silver would
 otherwise keep a row that no longer exists.
 
 Recreating a table (`generator.load --replace`) records no deletes and doesn't advance the
 Change Tracking version, so reading changes would miss rows that disappeared. The job therefore
 keeps each table's creation time (`sys.tables.create_date`) with its watermark and takes a
-snapshot when it changes; Silver treats a snapshot as the table's complete new state.
+snapshot when it changes. Silver applies snapshot rows as upserts, so a row missing from a new
+snapshot isn't removed there: after reloading *different* data, fully refresh the pipeline.
 
 The file needs only the standard library and PySpark, so the job runs it as a plain Python file.
 """

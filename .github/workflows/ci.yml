@@ -30,9 +30,10 @@ jobs:
           enable-cache: true
 
       # --locked fails if uv.lock is out of date with pyproject.toml.
-      # The notebooks group (Jupyter, matplotlib) isn't needed to lint or test.
+      # The notebooks group (Jupyter, matplotlib) isn't needed to lint or test. The spark group
+      # runs the pipeline transformations on local Spark, with the runner's Java 17 (JAVA_HOME).
       - name: Install dependencies
-        run: uv sync --locked --group dev --group rag --group backend
+        run: uv sync --locked --group dev --group rag --group backend --group spark
 
       - name: Lint
         run: uv run ruff check .
