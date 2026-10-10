@@ -31,11 +31,23 @@ One row per patient per hour in hospital: the model's input.
 | `readings_1h`, `missing_1h`, `missing_6h` | number of readings received, and expected readings missing (dropouts, battery) |
 | `hours_since_admission` | time since the stay began |
 | `age`, `sex` | at admission |
-| `copd`, `heart_failure`, `diabetes`, `ckd`, `hypertension`, `atrial_fibrillation`, `on_beta_blocker`, `n_conditions` | long-term conditions and medication flags |
+| `copd`, `heart_failure`, `diabetes`, `ckd`, `hypertension`, `atrial_fibrillation`, `on_beta_blocker`, `n_conditions` | long-term condition and medication flags, active at admission. Only these six conditions are flagged, and `n_conditions` counts only them (see the *Data Card* and `gold.condition_flag_reference`) |
 | `on_oxygen`, `o2_flow_lpm`, `new_confusion`, `hours_since_obs` | from the most recent nurse observation before `prediction_ts` |
 | `news2_*`, `news2_total` | the seven NEWS2 component scores and total (see the *NEWS2 Reference Card*) |
-| `label` | 1 if escalated in the next 6 hours, 0 if not, null while the 6-hour window is still open |
+| `label` | 1 if escalated in the next 6 hours, 0 if not, null while the 6-hour window is still open (in the demo snapshot; on the data platform labels live in `gold.training_set`) |
 | `label_known_at` | when the label became known (`prediction_ts` + 6 hours) |
+
+## 2a. `gold.training_set`
+
+The rows of `gold.patient_hour_features` whose label is final, with the label added: what the model trains on.
+
+| Column | Meaning |
+|---|---|
+| all columns of `gold.patient_hour_features` | as above |
+| `label` | 1 if an escalation was **recorded** in the 6 hours after `prediction_ts`, else 0 |
+| `label_known_at` | when the label became final: the escalation's recording time, or `prediction_ts` + 12 hours for a 0 |
+
+Escalations are charted about 6 hours after they happen, so a 0 is only final once the 6-hour window **and** the 6-hour recording delay have passed (12 hours). Hours whose label isn't final yet are left out rather than guessed as 0.
 
 ## 3. `gold.risk_scores`
 
@@ -98,6 +110,19 @@ One row per device per day.
 | `stuck_minutes`, `battery_outages`, `min_battery_pct` | fault indicators |
 | `firmware` | firmware version(s) reported that day |
 | `mean_spo2` | daily mean SpO2 across patients on the device; a drop at one site can reveal a sensor fault |
+
+## 7a. `gold.condition_flag_reference`
+
+Which diagnosis and medication descriptions set each model flag, and for how many patients: the audit trail for the condition flags.
+
+| Column | Meaning |
+|---|---|
+| `flag` | `copd`, `heart_failure`, `diabetes`, `ckd`, `hypertension`, `atrial_fibrillation` or `on_beta_blocker` |
+| `source` | `condition` or `medication` |
+| `code`, `description` | the SNOMED-CT (conditions) or RxNorm (medications) code and its text |
+| `patients` | how many patients have that description |
+
+Descriptions that set no flag (for example prediabetes, anaemia or social findings) are not listed: the simulation gives them no effect on vital signs or risk.
 
 ## 8. `gold.encounters`
 

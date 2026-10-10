@@ -1,4 +1,4 @@
-# Bronze -> Silver (-> Gold) Lakeflow pipeline (Plan.md §7.2-7.4; code in src/pipelines/medallion,
+# Bronze -> Silver -> Gold Lakeflow pipeline (Plan.md §7.2-7.4; code in src/pipelines/medallion,
 # transformations in src/heavden/pipelines). No schedule: it runs on demand after the generator
 # and sql_ingest have landed new data, and later as a task of the baseline and drift_episode jobs.
 # Each run processes what's new and stops (triggered, not continuous).
