@@ -82,14 +82,25 @@ export default function Home() {
   return (
     <div className="page">
       <section className={`paperBand ${styles.hero}`}>
-        <p className={styles.eyebrow}>
-          <span className={styles.eyebrowTag}>HeavDen Nexus</span>
-          AI early warning for hospital wards
+        <p className={`lockup ${styles.lockup}`}>
+          <span className="lockupMark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" width="24" height="24">
+              <polyline
+                points="2,20 9,20 12,9 16,26 20,14 23,20 30,20"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.6"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+              />
+            </svg>
+          </span>
+          <span className="lockupName">HeavDen Nexus</span>
+          <span className="lockupLine">AI early warning for hospital wards</span>
         </p>
         <div className={styles.heroText}>
           <h1>
-            Spot the patients who are getting worse, <span className={styles.accent}>hours before</span> they need
-            rescuing.
+            Spot the patients who are getting worse, hours before they need rescuing.
           </h1>
           <p className="lede">
             A predictive model, a data platform on Azure Databricks and an AI assistant, working together. HeavDen

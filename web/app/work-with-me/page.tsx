@@ -85,9 +85,9 @@ export default function WorkWithMePage() {
   return (
     <div className="page">
       <header className={`pageHead paperBand ${styles.head}`}>
-        <p className={styles.eyebrow}>
-          <span className={styles.eyebrowTag}>{BUILDER.name}</span>
-          {BUILDER.title}
+        <p className="lockup">
+          <span className="lockupName">{BUILDER.name}</span>
+          <span className="lockupLine">{BUILDER.title}</span>
         </p>
         <h1>I build data platforms, predictive models and AI assistants that people can trust.</h1>
         <p className="lede">

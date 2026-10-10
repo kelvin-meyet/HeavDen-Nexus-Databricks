@@ -60,6 +60,8 @@ body {
   font-family: var(--font-body), system-ui, sans-serif;
   font-size: var(--step-0);
   line-height: 1.5;
+  /* Tabular digits keep table columns aligned. Headings and big figures (display font) switch
+     to proportional, or full stops and commas get a digit's width ("2 . 1"). */
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
 }
@@ -73,6 +75,7 @@ h1,
 h2,
 h3 {
   font-family: var(--font-display), var(--font-body), sans-serif;
+  font-variant-numeric: proportional-nums;
   color: var(--graphite);
   line-height: 1.1;
   margin: 0;
@@ -132,27 +135,56 @@ textarea {
   padding: 36px var(--gutter) 72px;
 }
 
-/* A full-width band of chart paper behind the hero, fading into the page, so wide screens
-   read as one designed surface rather than content floating between empty margins. */
-
+/* A plain white sheet under the hero, full width, like a chart sheet on the ward's paper.
+   It fills wide screens without decoration competing with the charts. */
 .paperBand::before {
   content: "";
   position: absolute;
   z-index: -1;
   inset: -36px calc(50% - 50vw) 0;
-  background-color: var(--sheet);
-  background-image:
-    linear-gradient(var(--grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid) 1px, transparent 1px),
-    radial-gradient(60% 80% at 85% 20%, var(--ink-wash) 0%, transparent 70%);
-  background-size: 24px 24px, 24px 24px, 100% 100%;
-  -webkit-mask-image: linear-gradient(180deg, #000 55%, transparent 100%);
-  mask-image: linear-gradient(180deg, #000 55%, transparent 100%);
+  background: var(--sheet);
+  border-bottom: 1px solid var(--rule);
 }
 
 .paperBand {
   position: relative;
   isolation: isolate;
+}
+
+/* Brand lockup: who or what this page is about, set as a name rather than a label. */
+.lockup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin: 0;
+  max-width: none;
+}
+
+.lockupMark {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--night);
+  color: var(--zone-1);
+}
+
+.lockupName {
+  font-family: var(--font-display), sans-serif;
+  font-variant-numeric: proportional-nums;
+  font-size: var(--step-2);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--graphite);
+}
+
+.lockupLine {
+  padding-left: 14px;
+  border-left: 2px solid var(--rule);
+  font-size: var(--step-1);
+  color: var(--graphite-soft);
 }
 
 .pageHead {
@@ -373,6 +405,7 @@ textarea {
 
 .obsLatest {
   font-family: var(--font-display), sans-serif;
+  font-variant-numeric: proportional-nums;
   color: var(--ink);
   font-size: var(--step-2);
   font-weight: 800;

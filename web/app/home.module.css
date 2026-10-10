@@ -6,6 +6,10 @@
   padding: 8px 0 40px;
 }
 
+.lockup {
+  grid-column: 1 / -1;
+}
+
 /* The live figures run under both columns, so neither column leaves a hole. */
 .heroFigures {
   grid-column: 1 / -1;
@@ -25,10 +29,6 @@
   font-weight: 800;
   line-height: 1.05;
   letter-spacing: -0.025em;
-}
-
-.accent {
-  color: var(--ink);
 }
 
 /* Three live figures, read like vital signs: a coloured mark says what kind of number it is. */
@@ -71,6 +71,7 @@
 .vital dd {
   margin: 0;
   font-family: var(--font-display), sans-serif;
+  font-variant-numeric: proportional-nums;
   font-size: var(--step-3);
   font-weight: 800;
   letter-spacing: -0.03em;
@@ -149,6 +150,7 @@
 
 .wardName {
   font-family: var(--font-display), sans-serif;
+  font-variant-numeric: proportional-nums;
   font-weight: 800;
   color: var(--ink);
 }
@@ -196,46 +198,15 @@
 
 .sectionName {
   font-family: var(--font-display), sans-serif;
+  font-variant-numeric: proportional-nums;
   font-size: var(--step-1);
   font-weight: 800;
   color: var(--graphite);
 }
 
-.eyebrow {
-  grid-column: 1 / -1;
-  justify-self: start;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  width: fit-content;
-  max-width: 100%;
-  margin: 0;
-  padding: 7px 16px 7px 8px;
-  border-radius: 999px;
-  background: var(--sheet);
-  border: 1.5px solid var(--ink-soft);
-  box-shadow: 0 6px 18px -10px rgba(35, 64, 200, 0.55);
-  font-size: var(--step-0);
-  font-weight: 700;
-  color: var(--graphite);
-}
-
-.eyebrowTag {
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: var(--ink);
-  color: #fff;
-  font-family: var(--font-display), sans-serif;
-  font-size: 0.8rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
 /* What powers it: four cards, each a claim with its measured proof and where to see it. */
 .powers {
-  padding: 0 0 40px;
+  padding: 48px 0 48px;
 }
 
 .powers h2 {
@@ -248,18 +219,15 @@
   padding: 0;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
+  gap: 20px 32px;
 }
 
 .power {
   display: grid;
   align-content: start;
   gap: 8px;
-  padding: 18px 20px;
-  border-radius: var(--radius);
-  background: var(--sheet);
-  box-shadow: var(--shadow);
-  border-top: 4px solid var(--ink);
+  padding: 16px 4px 0 0;
+  border-top: 3px solid var(--ink);
 }
 
 .power h3 {

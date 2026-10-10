@@ -49,6 +49,7 @@
   gap: 10px;
   flex-shrink: 0;
   font-family: var(--font-display), sans-serif;
+  font-variant-numeric: proportional-nums;
   font-size: var(--step-1);
   font-weight: 800;
   letter-spacing: -0.02em;
