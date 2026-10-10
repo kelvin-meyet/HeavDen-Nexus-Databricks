@@ -89,6 +89,7 @@ Grouped SHAP importance, largest first: patient background (age, long-term condi
 
 - **Synthetic data.** Simulated deteriorations are smoother than real ones, so real-world gains over NEWS2 would likely be smaller.
 - **Uneven alert load by age.** Wards with very old patients carry most of the alerts, mostly false alarms; younger patients rarely alert (section 5). Clinicians should not be reassured by a Low band in a young patient who looks unwell.
+- **Only six long-term conditions.** The model knows COPD, heart failure, diabetes, chronic kidney disease, hypertension and atrial fibrillation (plus beta-blockers), and `n_conditions` counts only these. Conditions that matter in real wards, such as ischaemic heart disease, anaemia, dementia or alcohol and drug dependence, are not represented, because the synthetic data gives them no effect.
 - **Sudden events.** Escalations without a gradual change in vital signs beforehand cannot be predicted.
 - **Measurement faults.** The model trusts the monitor. Faulty sensors (e.g. FSN-2026-11, SpO2 under-reading at Site B) produce wrong risks.
 - **Protocol dependence.** The model learned when staff escalated under protocol v1.0. After protocol v2.0 (2026-11-09) it under-predicts escalation until retrained (see the *Drift Incident Runbook*, scenario 5.3).

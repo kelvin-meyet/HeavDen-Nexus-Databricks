@@ -77,6 +77,7 @@ def prediction_grid(encounters: pd.DataFrame, data_start, data_end) -> pd.DataFr
         left = e.discharge_ts if pd.notna(e.discharge_ts) else data_end
         last = min(left, data_end)
         times = pd.date_range(first, last, freq="h", inclusive="left")
+        times = times[times < last]  # date_range returns `first` when first == last
         rows.append(pd.DataFrame({"encounter_id": e.encounter_id, "prediction_ts": times}))
     return pd.concat(rows, ignore_index=True)
 
