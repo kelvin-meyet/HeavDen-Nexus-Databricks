@@ -34,6 +34,7 @@
 
   --gutter: clamp(16px, 3vw, 44px);
   --topbar-h: 60px;
+  --page-max: 1640px;
   --measure: 72ch;
   --radius: 10px;
   --shadow: 0 1px 2px rgba(15, 28, 77, 0.06), 0 6px 18px -8px rgba(15, 28, 77, 0.18);
@@ -80,7 +81,7 @@ h3 {
 h1 {
   font-size: var(--step-4);
   font-weight: 800;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.02em;
 }
 
 h2 {
@@ -126,9 +127,32 @@ textarea {
 /* Pages sit centred under the top bar; text keeps a readable measure inside. */
 .page {
   width: 100%;
-  max-width: 1440px;
+  max-width: var(--page-max);
   margin-inline: auto;
   padding: 36px var(--gutter) 72px;
+}
+
+/* A full-width band of chart paper behind the hero, fading into the page, so wide screens
+   read as one designed surface rather than content floating between empty margins. */
+
+.paperBand::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: -36px calc(50% - 50vw) 0;
+  background-color: var(--sheet);
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px),
+    radial-gradient(60% 80% at 85% 20%, var(--ink-wash) 0%, transparent 70%);
+  background-size: 24px 24px, 24px 24px, 100% 100%;
+  -webkit-mask-image: linear-gradient(180deg, #000 55%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 55%, transparent 100%);
+}
+
+.paperBand {
+  position: relative;
+  isolation: isolate;
 }
 
 .pageHead {

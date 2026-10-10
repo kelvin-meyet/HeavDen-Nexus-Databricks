@@ -84,9 +84,10 @@ const PRINCIPLES = [
 export default function WorkWithMePage() {
   return (
     <div className="page">
-      <header className={`pageHead ${styles.head}`}>
+      <header className={`pageHead paperBand ${styles.head}`}>
         <p className={styles.eyebrow}>
-          {BUILDER.name} · {BUILDER.title}
+          <span className={styles.eyebrowTag}>{BUILDER.name}</span>
+          {BUILDER.title}
         </p>
         <h1>I build data platforms, predictive models and AI assistants that people can trust.</h1>
         <p className="lede">

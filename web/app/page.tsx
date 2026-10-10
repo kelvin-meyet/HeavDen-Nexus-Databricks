@@ -81,10 +81,16 @@ export default function Home() {
 
   return (
     <div className="page">
-      <section className={styles.hero}>
-        <p className={styles.eyebrow}>HeavDen Nexus · AI early warning for hospital wards</p>
+      <section className={`paperBand ${styles.hero}`}>
+        <p className={styles.eyebrow}>
+          <span className={styles.eyebrowTag}>HeavDen Nexus</span>
+          AI early warning for hospital wards
+        </p>
         <div className={styles.heroText}>
-          <h1>Spot the patients who are getting worse, hours before they need rescuing.</h1>
+          <h1>
+            Spot the patients who are getting worse, <span className={styles.accent}>hours before</span> they need
+            rescuing.
+          </h1>
           <p className="lede">
             A predictive model, a data platform on Azure Databricks and an AI assistant, working together. HeavDen
             Nexus watches every patient on three hospitals&rsquo; wards, hour by hour, flags those likely to need an

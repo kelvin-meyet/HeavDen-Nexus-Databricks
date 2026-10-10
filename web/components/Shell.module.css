@@ -1,4 +1,5 @@
 .app {
+  overflow-x: clip;
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -36,7 +37,7 @@
   display: flex;
   align-items: center;
   gap: 12px 24px;
-  max-width: 1440px;
+  max-width: var(--page-max);
   margin-inline: auto;
   padding: 10px var(--gutter);
   min-height: var(--topbar-h);
@@ -213,7 +214,7 @@
 
 .footer {
   width: 100%;
-  max-width: 1440px;
+  max-width: var(--page-max);
   margin-inline: auto;
   padding: 20px var(--gutter) 32px;
   border-top: 1px solid var(--rule);

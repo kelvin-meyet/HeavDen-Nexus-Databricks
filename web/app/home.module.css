@@ -20,8 +20,15 @@
 }
 
 .heroText h1 {
-  max-width: 20ch;
-  font-size: clamp(2rem, 1.4rem + 1.6vw, 2.9rem);
+  max-width: 18ch;
+  font-size: clamp(2.2rem, 1.4rem + 2.2vw, 3.6rem);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+}
+
+.accent {
+  color: var(--ink);
 }
 
 /* Three live figures, read like vital signs: a coloured mark says what kind of number it is. */
@@ -196,25 +203,34 @@
 
 .eyebrow {
   grid-column: 1 / -1;
-  display: flex;
+  justify-self: start;
+  display: inline-flex;
   align-items: center;
   gap: 10px;
+  width: fit-content;
+  max-width: 100%;
   margin: 0;
-  font-weight: 700;
+  padding: 7px 16px 7px 8px;
+  border-radius: 999px;
+  background: var(--sheet);
+  border: 1.5px solid var(--ink-soft);
+  box-shadow: 0 6px 18px -10px rgba(35, 64, 200, 0.55);
   font-size: var(--step-0);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  max-width: none;
-  color: var(--ink);
+  font-weight: 700;
+  color: var(--graphite);
 }
 
-.eyebrow::before {
-  content: "";
-  flex-shrink: 0;
-  width: 28px;
-  height: 3px;
-  border-radius: 2px;
+.eyebrowTag {
+  padding: 3px 10px;
+  border-radius: 999px;
   background: var(--ink);
+  color: #fff;
+  font-family: var(--font-display), sans-serif;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 /* What powers it: four cards, each a claim with its measured proof and where to see it. */

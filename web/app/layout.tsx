@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Atkinson_Hyperlegible, Bricolage_Grotesque } from "next/font/google";
+import { Atkinson_Hyperlegible, Plus_Jakarta_Sans } from "next/font/google";
 
 import { Shell } from "@/components/Shell";
 
@@ -14,10 +14,10 @@ const body = Atkinson_Hyperlegible({
   display: "swap",
 });
 
-// Headings: Bricolage Grotesque, a lively grotesque with character, for titles and figures.
-const display = Bricolage_Grotesque({
+// Headings and figures: Plus Jakarta Sans, a crisp geometric sans that reads as calm and premium.
+const display = Plus_Jakarta_Sans({
   subsets: ["latin"],
-  weight: ["500", "700", "800"],
+  weight: ["500", "600", "700", "800"],
   variable: "--font-display",
   display: "swap",
 });
