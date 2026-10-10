@@ -1,9 +1,16 @@
 .hero {
   display: grid;
   grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-  gap: clamp(24px, 3vw, 56px);
-  align-items: start;
+  gap: 28px clamp(24px, 3vw, 56px);
+  align-items: center;
   padding: 8px 0 40px;
+}
+
+/* The live figures run under both columns, so neither column leaves a hole. */
+.heroFigures {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 10px;
 }
 
 .heroText {
@@ -21,8 +28,8 @@
 .vitals {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin: 4px 0 0;
+  gap: 14px;
+  margin: 0;
 }
 
 .vital {
@@ -188,11 +195,26 @@
 }
 
 .eyebrow {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0;
   font-weight: 700;
-  font-size: var(--step--1);
-  letter-spacing: 0.02em;
+  font-size: var(--step-0);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  max-width: none;
   color: var(--ink);
+}
+
+.eyebrow::before {
+  content: "";
+  flex-shrink: 0;
+  width: 28px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--ink);
 }
 
 /* What powers it: four cards, each a claim with its measured proof and where to see it. */
@@ -209,7 +231,7 @@
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
 }
 
@@ -270,6 +292,10 @@
   .lower {
     grid-template-columns: 1fr;
   }
+
+  .powerList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 900px) {
@@ -280,7 +306,8 @@
 
 @media (max-width: 640px) {
   .vitals,
-  .chartPair {
+  .chartPair,
+  .powerList {
     grid-template-columns: 1fr;
   }
 

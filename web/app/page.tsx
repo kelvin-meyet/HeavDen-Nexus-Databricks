@@ -82,32 +82,13 @@ export default function Home() {
   return (
     <div className="page">
       <section className={styles.hero}>
+        <p className={styles.eyebrow}>HeavDen Nexus · AI early warning for hospital wards</p>
         <div className={styles.heroText}>
-          <p className={styles.eyebrow}>HeavDen Nexus · AI early warning for hospital wards</p>
           <h1>Spot the patients who are getting worse, hours before they need rescuing.</h1>
           <p className="lede">
             A predictive model, a data platform on Azure Databricks and an AI assistant, working together. HeavDen
             Nexus watches every patient on three hospitals&rsquo; wards, hour by hour, flags those likely to need an
             emergency team within six hours, explains why, and answers questions in plain English.
-          </p>
-
-          <dl className={styles.vitals}>
-            <div className={styles.vital} data-tone="alert">
-              <dt>in the High band now</dt>
-              <dd>{s ? num(s.high_risk) : "–"}</dd>
-            </div>
-            <div className={styles.vital} data-tone="ok">
-              <dt>of escalations flagged in advance this week</dt>
-              <dd>{s ? pct(s.escalations_flagged_7d) : "–"}</dd>
-            </div>
-            <div className={styles.vital} data-tone="amber">
-              <dt>alerts per nurse per shift (budget 2)</dt>
-              <dd>{s ? num(s.alerts_per_nurse_shift_24h, 1) : "–"}</dd>
-            </div>
-          </dl>
-          <p className="muted small">
-            Figures at the simulated ward time shown in the sidebar. All patients and hospitals are invented, built to
-            show how such a system is made, tested and monitored.
           </p>
         </div>
 
@@ -140,6 +121,27 @@ export default function Home() {
               <ZoneKey />
             </>
           )}
+        </div>
+
+        <div className={styles.heroFigures}>
+          <dl className={styles.vitals}>
+            <div className={styles.vital} data-tone="alert">
+              <dt>in the High band now</dt>
+              <dd>{s ? num(s.high_risk) : "–"}</dd>
+            </div>
+            <div className={styles.vital} data-tone="ok">
+              <dt>of escalations flagged in advance this week</dt>
+              <dd>{s ? pct(s.escalations_flagged_7d) : "–"}</dd>
+            </div>
+            <div className={styles.vital} data-tone="amber">
+              <dt>alerts per nurse per shift (budget 2)</dt>
+              <dd>{s ? num(s.alerts_per_nurse_shift_24h, 1) : "–"}</dd>
+            </div>
+          </dl>
+          <p className="muted small">
+            Figures at the simulated ward time shown at the top of the page. All patients and hospitals are invented,
+            built to show how such a system is made, tested and monitored.
+          </p>
         </div>
       </section>
 

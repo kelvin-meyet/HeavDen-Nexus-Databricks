@@ -1,6 +1,6 @@
 .app {
-  display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
 }
 
@@ -12,33 +12,41 @@
 .skip:focus {
   left: 16px;
   top: 8px;
-  z-index: 10;
+  z-index: 30;
   background: var(--sheet);
   padding: 8px 12px;
 }
 
 /* Deep ink with a faint chart-paper grid: the observation chart, at night. */
-.sidebar {
+.topbar {
   position: sticky;
   top: 0;
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
-  padding: 24px 18px;
+  z-index: 20;
   color: #e8edff;
   background-color: var(--night);
   background-image:
     linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
-    linear-gradient(180deg, var(--night) 0%, var(--night-2) 100%);
+    linear-gradient(90deg, var(--night) 0%, var(--night-2) 100%);
   background-size: 18px 18px, 18px 18px, 100% 100%;
+  box-shadow: 0 6px 18px -12px rgba(15, 28, 77, 0.7);
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px 24px;
+  max-width: 1440px;
+  margin-inline: auto;
+  padding: 10px var(--gutter);
+  min-height: var(--topbar-h);
 }
 
 .brand {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
   font-family: var(--font-display), sans-serif;
   font-size: var(--step-1);
   font-weight: 800;
@@ -50,9 +58,9 @@
 .brandMark {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
   background: var(--ink);
   color: var(--zone-1);
   box-shadow: 0 6px 18px -6px rgba(35, 64, 200, 0.9);
@@ -63,22 +71,31 @@
 }
 
 .nav {
-  display: grid;
+  display: flex;
+  align-items: center;
   gap: 4px;
+  flex: 1;
 }
 
-.navLink {
-  display: block;
-  padding: 10px 14px;
-  border-radius: 10px;
-  color: #c7d0f5;
-  text-decoration: none;
+.navLink,
+.cta {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 6px 12px;
+  border-radius: 999px;
   font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
   transition: background 0.15s, color 0.15s;
 }
 
+.navLink {
+  color: #c7d0f5;
+}
+
 .navLink:hover {
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.08);
   color: #fff;
 }
 
@@ -87,20 +104,50 @@
   color: var(--night);
 }
 
-.status {
-  margin-top: auto;
-  padding: 14px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+/* The hiring call to action stands apart from the product pages. */
+.cta {
+  margin-left: auto;
+  background: var(--zone-1);
+  color: var(--night);
 }
 
-.live {
+.cta:hover,
+.cta[aria-current="page"] {
+  background: #fff;
+}
+
+.navLink:focus-visible,
+.cta:focus-visible,
+.menuButton:focus-visible,
+.brand:focus-visible {
+  outline-color: var(--zone-1);
+}
+
+.menuButton {
+  display: none;
+  margin-left: auto;
+  min-height: 36px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: transparent;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.status {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   font-size: var(--step--1);
   color: #aab6ea;
+  cursor: default;
 }
 
 .liveDot {
@@ -121,41 +168,40 @@
   }
 }
 
-.time {
-  margin-top: 4px;
-  font-family: var(--font-display), sans-serif;
-  font-size: var(--step-1);
-  font-weight: 700;
-  color: #fff;
+@media (prefers-reduced-motion: reduce) {
+  .liveDot {
+    animation: none;
+  }
 }
 
-.statusNote,
-.offline {
-  margin-top: 2px;
-  font-size: var(--step--1);
-  color: #aab6ea;
+.time {
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
 }
 
 .offline {
   color: var(--zone-3);
 }
 
+/* A quiet strip under the bar: what this data is, every page. */
 .synthetic {
+  max-width: none;
+  margin: 0;
+  padding: 7px var(--gutter);
+  background: var(--ink-wash);
+  border-bottom: 1px solid var(--rule);
   font-size: var(--step--1);
-  color: #aab6ea;
+  color: var(--graphite-soft);
+  text-align: center;
 }
 
 .synthetic strong {
-  color: #fff;
-}
-
-.aboutLink {
-  color: #fff;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  color: var(--graphite);
 }
 
 .content {
+  flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -166,6 +212,9 @@
 }
 
 .footer {
+  width: 100%;
+  max-width: 1440px;
+  margin-inline: auto;
   padding: 20px var(--gutter) 32px;
   border-top: 1px solid var(--rule);
   color: var(--graphite-soft);
@@ -177,44 +226,55 @@
   margin-top: 6px;
 }
 
-/* Narrow screens: the sidebar becomes a top bar. */
-@media (max-width: 900px) {
-  .app {
-    grid-template-columns: 1fr;
+/* Below this width the six links no longer fit: they move behind a Menu button. */
+@media (max-width: 1180px) {
+  .bar {
+    flex-wrap: wrap;
   }
 
-  .sidebar {
-    position: static;
-    height: auto;
-    gap: 12px;
-    padding: 14px var(--gutter);
+  .menuButton {
+    display: inline-flex;
+    align-items: center;
   }
 
   .nav {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
+    display: none;
+    order: 10;
+    flex-basis: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 6px 0 4px;
   }
 
-  .navLink {
-    padding: 6px 12px;
+  .nav[data-open="true"] {
+    display: flex;
+  }
+
+  .navLink,
+  .cta {
+    border-radius: 10px;
+    padding: 10px 14px;
+  }
+
+  .cta {
+    margin: 6px 0 0;
+    justify-content: center;
   }
 
   .status {
-    margin-top: 0;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 4px 10px;
-    padding: 8px 12px;
+    order: 5;
+  }
+}
+
+@media (max-width: 640px) {
+  .status {
+    order: 11;
+    flex-basis: 100%;
+    justify-content: center;
   }
 
-  .time {
-    margin: 0;
-    font-size: var(--step-0);
-  }
-
-  .synthetic {
+  .statusLabel,
+  .syntheticNote {
     display: none;
   }
 }

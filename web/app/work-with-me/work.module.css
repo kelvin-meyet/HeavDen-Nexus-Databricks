@@ -4,11 +4,25 @@
 }
 
 .eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0 0 6px;
   font-weight: 700;
-  font-size: var(--step--1);
-  letter-spacing: 0.02em;
+  font-size: var(--step-0);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  max-width: none;
   color: var(--ink);
+}
+
+.eyebrow::before {
+  content: "";
+  flex-shrink: 0;
+  width: 28px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--ink);
 }
 
 .actions {

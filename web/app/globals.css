@@ -1,5 +1,5 @@
 /* HeavDen Nexus: the visual language of a NEWS2 observation chart, turned up.
-   Ink blue on chart paper, a deep-ink sidebar, and NEWS2 zone colours that appear only where
+   Ink blue on chart paper, a deep-ink top bar, and NEWS2 zone colours that appear only where
    they mean a score. Red is kept for the High band and the alert threshold. */
 
 :root {
@@ -9,7 +9,7 @@
   --ink-strong: #1a2f99;
   --ink-soft: #7d8fe0;
   --ink-wash: #e8edff;
-  --night: #0f1c4d; /* sidebar */
+  --night: #0f1c4d; /* top bar */
   --night-2: #182a6b;
   --graphite: #1c2633; /* text */
   --graphite-soft: #556170;
@@ -33,6 +33,7 @@
   --step-4: clamp(2.2rem, 1.6rem + 2.2vw, 3.4rem);
 
   --gutter: clamp(16px, 3vw, 44px);
+  --topbar-h: 60px;
   --measure: 72ch;
   --radius: 10px;
   --shadow: 0 1px 2px rgba(15, 28, 77, 0.06), 0 6px 18px -8px rgba(15, 28, 77, 0.18);
@@ -40,6 +41,11 @@
 
 * {
   box-sizing: border-box;
+}
+
+html {
+  /* Anchors and skip links land below the sticky top bar. */
+  scroll-padding-top: calc(var(--topbar-h) + 16px);
 }
 
 html,
@@ -117,10 +123,11 @@ textarea {
 
 /* ---------- Page frame ---------- */
 
-/* Pages fill the space beside the sidebar; text keeps a readable measure inside. */
+/* Pages sit centred under the top bar; text keeps a readable measure inside. */
 .page {
   width: 100%;
-  max-width: 1760px;
+  max-width: 1440px;
+  margin-inline: auto;
   padding: 36px var(--gutter) 72px;
 }
 
