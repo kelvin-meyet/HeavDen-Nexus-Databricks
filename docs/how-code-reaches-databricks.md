@@ -74,6 +74,8 @@ How a workflow run signs in:
 
 Nothing reusable is stored anywhere, so there is nothing to leak, expire or rotate. A token from another repository, branch or environment is refused.
 
+The token names the repository with numeric IDs as well as names (`repo:kelvin-meyet@167044815/HeavDen-Nexus-Databricks@1407984379:environment:staging`, GitHub's *immutable subject*). The trust rules match that exact string, so even a deleted and recreated repository with the same name can't sign in. The prefix is the Terraform variable `github_oidc_subject_prefix`.
+
 ### Setting it up (once)
 
 From the repository root:

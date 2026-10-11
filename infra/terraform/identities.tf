@@ -58,7 +58,7 @@ resource "azuread_application_federated_identity_credential" "github" {
   description    = "GitHub Actions jobs in the ${each.key} environment of ${var.github_repository}"
   issuer         = "https://token.actions.githubusercontent.com"
   audiences      = ["api://AzureADTokenExchange"]
-  subject        = "repo:${var.github_repository}:environment:${each.key}"
+  subject        = "${var.github_oidc_subject_prefix}:environment:${each.key}"
 }
 
 # The same identities in the workspace. Workspace access lets them deploy bundle files to their

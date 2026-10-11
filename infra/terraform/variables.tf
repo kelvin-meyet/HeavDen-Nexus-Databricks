@@ -58,3 +58,12 @@ variable "github_repository" {
   type        = string
   default     = "kelvin-meyet/HeavDen-Nexus-Databricks"
 }
+
+# GitHub's OIDC token names the repository with its owner's and its own numeric IDs ("immutable
+# subject"), so a deleted-and-recreated repository with the same name can't sign in. Read it with
+#   gh api repos/<owner>/<repo>/actions/oidc/customization/sub --jq .sub_claim_prefix
+variable "github_oidc_subject_prefix" {
+  description = "Start of the subject in this repository's GitHub OIDC tokens."
+  type        = string
+  default     = "repo:kelvin-meyet@167044815/HeavDen-Nexus-Databricks@1407984379"
+}
