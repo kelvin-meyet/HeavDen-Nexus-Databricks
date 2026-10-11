@@ -3,8 +3,10 @@
 #
 #   Actions -> prod-run -> Run workflow   (or: gh workflow run prod-run.yml -f ingest_sql=true)
 #
-# Each step is optional: copying Azure SQL wakes the free database, and a full refresh rebuilds
-# every pipeline table from Bronze (needed after loading *different* data into the source).
+# Each step is optional: copying Azure SQL wakes the free database, a full refresh rebuilds
+# every pipeline table from Bronze (needed after loading *different* data into the source), and
+# training registers a new model version (@challenger if it passes the gates; @champion only for
+# the first model).
 
 name: prod-run
 
@@ -15,8 +17,16 @@ on:
         description: "Copy Azure SQL into Bronze first (wakes the database)"
         type: boolean
         default: true
+      run_pipeline:
+        description: "Run the pipeline (Bronze -> Silver -> Gold)"
+        type: boolean
+        default: true
       full_refresh:
         description: "Rebuild every pipeline table from Bronze (after reloading different data)"
+        type: boolean
+        default: false
+      train:
+        description: "Train and register the model on gold.training_set"
         type: boolean
         default: false
 
@@ -58,6 +68,7 @@ jobs:
         run: databricks bundle run sql_ingest -t prod
 
       - name: Run the pipeline
+        if: inputs.run_pipeline
         env:
           FULL_REFRESH: ${{ inputs.full_refresh }}
         run: |
@@ -66,3 +77,7 @@ jobs:
           else
             databricks bundle run medallion -t prod
           fi
+
+      - name: Train and register the model
+        if: inputs.train
+        run: databricks bundle run train -t prod

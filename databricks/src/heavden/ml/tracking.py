@@ -43,8 +43,15 @@ def log_candidate(
     example: pd.DataFrame,
     extra_metrics: dict[str, float] | None = None,
     tags: dict[str, str] | None = None,
+    code_paths: list[str] | None = None,
+    pip_requirements: list[str] | None = None,
 ) -> LoggedCandidate:
-    """Log one candidate as an MLflow run (params, validation metrics, calibrated model)."""
+    """Log one candidate as an MLflow run (params, validation metrics, calibrated model).
+
+    `code_paths` ships source code inside the model (the `heavden` package, whose
+    `CalibratedModel` class the pickle refers to), so the model loads wherever its
+    `pip_requirements` are installed, without our wheel.
+    """
     with mlflow.start_run(run_name=result.name) as run:
         mlflow.log_params({"model_type": result.name, **result.params})
         mlflow.log_metrics({f"valid_{k}": v for k, v in result.valid_metrics.items()})
@@ -59,6 +66,8 @@ def log_candidate(
             # our CalibratedModel class lives in the installed `heavden` package
             serialization_format=mlflow.sklearn.SERIALIZATION_FORMAT_CLOUDPICKLE,
             signature=infer_signature(sample, result.model.predict_proba(sample)[:, 1]),
+            code_paths=code_paths,
+            pip_requirements=pip_requirements,
         )
         return LoggedCandidate(run.info.run_id, info.model_uri)
 
@@ -70,3 +79,36 @@ def register_champion(
     version = mlflow.register_model(logged.model_uri, name)
     mlflow.MlflowClient().set_registered_model_alias(name, alias, version.version)
     return int(version.version)
+
+
+def register_version(
+    logged: LoggedCandidate, name: str, *, passed_gates: bool, description: str = ""
+) -> tuple[int, list[str]]:
+    """Register a trained model as a new version of `name`. Returns (version, aliases set).
+
+    Every training run registers its chosen model, so the registry is the audit trail. Aliases:
+    a model that passed the gates becomes `@challenger`; it also becomes `@champion` only if
+    there is no champion yet (the first model). Replacing an existing champion is a promotion
+    decision for a person, not for the training job (Phase 3: production-approval).
+    """
+    client = mlflow.MlflowClient()
+    version = int(mlflow.register_model(logged.model_uri, name).version)
+    if description:
+        client.update_model_version(name, str(version), description=description)
+    client.set_model_version_tag(name, str(version), "passed_gates", str(passed_gates).lower())
+    aliases: list[str] = []
+    if passed_gates:
+        client.set_registered_model_alias(name, "challenger", version)
+        aliases.append("challenger")
+        if not has_alias(name, "champion"):
+            client.set_registered_model_alias(name, "champion", version)
+            aliases.append("champion")
+    return version, aliases
+
+
+def has_alias(name: str, alias: str) -> bool:
+    try:
+        mlflow.MlflowClient().get_model_version_by_alias(name, alias)
+    except mlflow.exceptions.MlflowException:
+        return False
+    return True
