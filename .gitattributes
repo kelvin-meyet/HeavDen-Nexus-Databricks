@@ -1,3 +1,5 @@
 *.ipynb filter=nbstripout
 *.zpln filter=nbstripout
 *.ipynb diff=ipynb
+# Shell scripts keep LF endings on Windows checkouts too (bash fails on CRLF).
+*.sh text eol=lf

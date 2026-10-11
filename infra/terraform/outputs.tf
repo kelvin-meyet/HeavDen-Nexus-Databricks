@@ -33,3 +33,12 @@ output "sql_connection" {
 output "sql_warehouse_id" {
   value = databricks_sql_endpoint.shared.id
 }
+
+output "tenant_id" {
+  value = data.azurerm_client_config.current.tenant_id
+}
+
+# GitHub variable AZURE_CLIENT_ID for each environment (not a secret: it only names the identity).
+output "ci_client_ids" {
+  value = { for env, app in azuread_application.ci : env => app.client_id }
+}

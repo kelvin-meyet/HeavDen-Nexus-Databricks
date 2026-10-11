@@ -9,13 +9,19 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      ingest_sql:
+        description: "Staging: also copy the Azure SQL source into Bronze (wakes the database)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+# A newer push cancels an older PR run, but never a deploy on main halfway through.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   lint-and-test:
@@ -70,3 +76,86 @@ jobs:
 
       - name: Production build
         run: npm run build
+
+  # Checks every target resolves (variables, paths, permissions) as the dev service principal,
+  # which can't read or write any data. Dev itself is deployed by hand.
+  bundle-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DATABRICKS_AUTH_TYPE: azure-cli
+    defaults:
+      run:
+        working-directory: databricks
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - uses: databricks/setup-cli@v1.17.0
+        with:
+          version: 1.17.0
+
+      - name: Validate every target
+        run: |
+          for target in dev staging prod; do
+            databricks bundle validate --strict -t "$target"
+          done
+
+  # Every change merged to main is deployed to staging as the staging service principal, then the
+  # pipeline rebuilds Bronze -> Silver -> Gold on the fixed seeded data (about $0.10-0.35 a run).
+  # Azure SQL is read only on the first run or on request: each read can wake the free database.
+  staging:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [lint-and-test, bundle-validate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: staging
+    concurrency:
+      group: staging
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DATABRICKS_AUTH_TYPE: azure-cli
+    defaults:
+      run:
+        working-directory: databricks
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - uses: databricks/setup-cli@v1.17.0
+        with:
+          version: 1.17.0
+
+      - name: Deploy
+        run: databricks bundle deploy -t staging
+
+      - name: Copy Azure SQL into Bronze (first run, or on request)
+        env:
+          INGEST_SQL: ${{ inputs.ingest_sql }}
+        run: |
+          exists=$(databricks tables exists heavden_staging.bronze.sql_watermarks | jq -r .table_exists)
+          if [ "$exists" != "true" ] || [ "$INGEST_SQL" = "true" ]; then
+            databricks bundle run sql_ingest -t staging
+          else
+            echo "Bronze already holds the source tables; skipping (re-run with ingest_sql to refresh)."
+          fi
+
+      - name: Run the pipeline
+        run: databricks bundle run medallion -t staging

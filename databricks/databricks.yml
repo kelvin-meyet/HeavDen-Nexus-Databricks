@@ -50,7 +50,7 @@ targets:
 
   # Production mode needs an explicit root_path: the deploying identity's home folder, which other
   # users can't write to. Once CI deploys as the target's service principal, this is its folder.
-  # Deployed by CI on every merge to main (from Phase 1's deploy workflow), on small seeded data.
+  # Deployed by CI (ci.yml, job staging) on every merge to main, then run on small seeded data.
   staging:
     mode: production
     workspace:
@@ -59,7 +59,7 @@ targets:
       catalog: heavden_staging
       sql_schema: staging
 
-  # Deployed by CI after approval in the prod-deploy GitHub environment.
+  # Deployed by CI (release.yml) for a v* tag, after approval in the prod-deploy GitHub environment.
   prod:
     mode: production
     workspace:
