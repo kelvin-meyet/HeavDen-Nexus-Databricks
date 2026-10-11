@@ -89,6 +89,6 @@ def test_spark_timestamps_become_utc():
     import pandas as pd
 
     df = pd.DataFrame({"prediction_ts": pd.to_datetime(["2026-11-01 10:00"])})
-    out = training._utc(df, ("prediction_ts",))
+    out = training.to_utc(df, ("prediction_ts",))
     assert str(out["prediction_ts"].dt.tz) == "UTC"
     assert out["prediction_ts"].iloc[0] == pd.Timestamp("2026-11-01 10:00", tz="UTC")

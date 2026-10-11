@@ -55,6 +55,9 @@ variables:
   valid_days:
     description: Days of validation, where calibration, the alert threshold and the champion are chosen.
     default: 2
+  scoring_model:
+    description: Which registered version scores the patient-hours (an alias, or "latest").
+    default: champion
 
 targets:
   # Personal development: resources are prefixed with "[dev <user>]" and schedules are paused.
@@ -67,6 +70,7 @@ targets:
       # 2 days of data: 1 day train, half a day validation, the rest test (a smoke test)
       train_days: 1
       valid_days: 0.5
+      scoring_model: latest # 2-day models rarely pass the gates, so there may be no champion
 
   # Production mode needs an explicit root_path: the deploying identity's home folder, which other
   # users can't write to. Once CI deploys as the target's service principal, this is its folder.
@@ -81,6 +85,7 @@ targets:
       # 2 days of data: 1 day train, half a day validation, the rest test (a smoke test)
       train_days: 1
       valid_days: 0.5
+      scoring_model: latest # 2-day models rarely pass the gates, so there may be no champion
 
   # Deployed by CI (release.yml) for a v* tag, after approval in the prod-deploy GitHub environment.
   prod:

@@ -6,7 +6,7 @@
 # Each step is optional: copying Azure SQL wakes the free database, a full refresh rebuilds
 # every pipeline table from Bronze (needed after loading *different* data into the source), and
 # training registers a new model version (@challenger if it passes the gates; @champion only for
-# the first model).
+# the first model), and scoring rebuilds the risk, alert, escalation and KPI tables with @champion.
 
 name: prod-run
 
@@ -27,6 +27,10 @@ on:
         default: false
       train:
         description: "Train and register the model on gold.training_set"
+        type: boolean
+        default: false
+      score:
+        description: "Score every patient-hour with @champion (risk, alerts, escalations, KPIs)"
         type: boolean
         default: false
 
@@ -81,3 +85,7 @@ jobs:
       - name: Train and register the model
         if: inputs.train
         run: databricks bundle run train -t prod
+
+      - name: Score every patient-hour with the champion
+        if: inputs.score
+        run: databricks bundle run score -t prod
