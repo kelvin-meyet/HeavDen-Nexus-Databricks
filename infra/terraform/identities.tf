@@ -6,13 +6,15 @@
 #
 #   dev                                                  -> heavden-ci-dev      (validates bundles)
 #   staging                                              -> heavden-ci-staging  (deploys and runs staging)
-#   prod-deploy, retrain-approval, production-approval   -> heavden-ci-prod     (behind Kelvin's approval)
+#   prod-deploy, prod-run, retrain-approval,
+#   production-approval                                   -> heavden-ci-prod     (behind Kelvin's approval)
 
 locals {
   github_environments = {
     "dev"                 = "dev"
     "staging"             = "staging"
     "prod-deploy"         = "prod"
+    "prod-run"            = "prod"
     "retrain-approval"    = "prod"
     "production-approval" = "prod"
   }

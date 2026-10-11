@@ -37,7 +37,7 @@ GitHub tag v* ── GitHub Actions, as heavden-ci-prod, after approval ──�
 |---|---|---|---|
 | dev | the developer, from a laptop | while building | anything, on small seeded data |
 | staging | CI ([`ci.yml`](../.github/workflows/ci.yml), job `staging`) | every merge to `main` | deploy, then Bronze → Silver → Gold on fixed seeded data |
-| prod | CI ([`release.yml`](../.github/workflows/release.yml)) | a `v*` release tag, after a required reviewer approves | deploy only; runs are started on demand |
+| prod | CI ([`release.yml`](../.github/workflows/release.yml)) | a `v*` release tag, after a required reviewer approves | deploy only; runs are started on demand with [`prod-run.yml`](../.github/workflows/prod-run.yml), also after approval |
 
 On every pull request, CI also validates the bundle for all three targets, signed in as `heavden-ci-dev`. That identity can't read or write any data.
 
@@ -49,7 +49,7 @@ GitHub Actions needs its own identity in Databricks, never a person's login. The
 |---|---|---|
 | `heavden-ci-dev` | `dev` | validate bundles; no data access |
 | `heavden-ci-staging` | `staging` (from `main` only) | deploy and run in `heavden_staging`; read the Azure SQL source |
-| `heavden-ci-prod` | `prod-deploy` (from `v*` tags), `retrain-approval`, `production-approval` (from `main`). Every run needs a reviewer's approval | deploy and run in `heavden_prod`; read the Azure SQL source |
+| `heavden-ci-prod` | `prod-deploy` (from `v*` tags), `prod-run`, `retrain-approval`, `production-approval` (from `main`). Every run needs a reviewer's approval | deploy and run in `heavden_prod`; read the Azure SQL source |
 
 ### The same job as "Generate secret", without the secret
 
