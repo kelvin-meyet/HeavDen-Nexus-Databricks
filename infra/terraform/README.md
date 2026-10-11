@@ -41,6 +41,8 @@ At the end of the project, `terraform destroy` removes everything except `heavde
 
 GitHub Actions signs in as one service principal per environment, with no secrets: each Entra ID app trusts the OIDC tokens GitHub issues to jobs in named environments of this repository.
 
+This replaces the usual manual setup (create a service principal in the Databricks UI, click **Generate secret**, paste the client ID and secret into a GitHub environment). Terraform creates the service principals and their grants; instead of a secret, each gets a *federated credential* trusting this repository's GitHub environment; GitHub stores only the client ID and tenant ID, as plain variables.
+
 | GitHub environment | Service principal | Can do | Approval |
 |---|---|---|---|
 | `dev` | `heavden-ci-dev` | validate bundles (no data access) | none |
