@@ -1,0 +1,68 @@
+# Runs prod's data jobs on demand, after Kelvin approves the run in the prod-run environment
+# (Plan.md §16.2). It runs what release.yml deployed; it never deploys. Started by hand:
+#
+#   Actions -> prod-run -> Run workflow   (or: gh workflow run prod-run.yml -f ingest_sql=true)
+#
+# Each step is optional: copying Azure SQL wakes the free database, and a full refresh rebuilds
+# every pipeline table from Bronze (needed after loading *different* data into the source).
+
+name: prod-run
+
+on:
+  workflow_dispatch:
+    inputs:
+      ingest_sql:
+        description: "Copy Azure SQL into Bronze first (wakes the database)"
+        type: boolean
+        default: true
+      full_refresh:
+        description: "Rebuild every pipeline table from Bronze (after reloading different data)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prod
+  cancel-in-progress: false
+
+jobs:
+  run-prod:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: prod-run
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DATABRICKS_AUTH_TYPE: azure-cli
+    defaults:
+      run:
+        working-directory: databricks
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - uses: databricks/setup-cli@v1.17.0
+        with:
+          version: 1.17.0
+
+      - name: Copy Azure SQL into Bronze
+        if: inputs.ingest_sql
+        run: databricks bundle run sql_ingest -t prod
+
+      - name: Run the pipeline
+        env:
+          FULL_REFRESH: ${{ inputs.full_refresh }}
+        run: |
+          if [ "$FULL_REFRESH" = "true" ]; then
+            databricks bundle run medallion -t prod --full-refresh-all
+          else
+            databricks bundle run medallion -t prod
+          fi

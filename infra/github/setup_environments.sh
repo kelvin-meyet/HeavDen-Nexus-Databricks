@@ -29,13 +29,14 @@ EOF
 gh api -X POST "repos/$REPO/environments/staging/deployment-branch-policies" -f name=main -f type=branch --silent || true
 
 # prod environments: Kelvin approves every run
-for env in prod-deploy retrain-approval production-approval; do
+for env in prod-deploy prod-run retrain-approval production-approval; do
   gh api -X PUT "repos/$REPO/environments/$env" --silent --input - <<EOF
 {"reviewers": [{"type": "User", "id": $KELVIN_ID}],
  "deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
 EOF
 done
 gh api -X POST "repos/$REPO/environments/prod-deploy/deployment-branch-policies" -f name='v*' -f type=tag --silent || true
+gh api -X POST "repos/$REPO/environments/prod-run/deployment-branch-policies" -f name=main -f type=branch --silent || true
 gh api -X POST "repos/$REPO/environments/retrain-approval/deployment-branch-policies" -f name=main -f type=branch --silent || true
 gh api -X POST "repos/$REPO/environments/production-approval/deployment-branch-policies" -f name=main -f type=branch --silent || true
 
@@ -43,7 +44,7 @@ gh api -X POST "repos/$REPO/environments/production-approval/deployment-branch-p
 gh variable set AZURE_TENANT_ID --repo "$REPO" --body "$TENANT"
 gh variable set AZURE_CLIENT_ID --repo "$REPO" --env dev --body "$(client_id dev)"
 gh variable set AZURE_CLIENT_ID --repo "$REPO" --env staging --body "$(client_id staging)"
-for env in prod-deploy retrain-approval production-approval; do
+for env in prod-deploy prod-run retrain-approval production-approval; do
   gh variable set AZURE_CLIENT_ID --repo "$REPO" --env "$env" --body "$(client_id prod)"
 done
 
