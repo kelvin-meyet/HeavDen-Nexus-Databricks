@@ -144,7 +144,7 @@ uv run pytest
 cd web && npm run typecheck && npm run build
 ```
 
-CI also validates the Databricks bundle on every pull request, deploys to **staging** and runs the pipeline there on every merge to `main`, and deploys to **prod** for a `v*` release tag once Kelvin approves the run. GitHub signs in as one service principal per environment through OpenID Connect, so no Databricks or Azure secret is stored anywhere ([`infra/terraform/identities.tf`](infra/terraform/identities.tf)).
+CI also validates the Databricks bundle on every pull request, deploys to **staging** and runs the pipeline there on every merge to `main`, and deploys to **prod** for a `v*` release tag once Kelvin approves the run. GitHub signs in as one service principal per environment through OpenID Connect, so no Databricks or Azure secret is stored anywhere ([`infra/terraform/identities.tf`](infra/terraform/identities.tf)). How code reaches Databricks, step by step: [`docs/how-code-reaches-databricks.md`](docs/how-code-reaches-databricks.md).
 
 More detail: [`backend/README.md`](backend/README.md) (endpoints, assistant safety, configuration) and [`web/README.md`](web/README.md) (design).
 
