@@ -78,7 +78,7 @@ jobs:
           .venv/bin/python -m pytest -q -W error::DeprecationWarning
           tests/test_features.py tests/test_train.py tests/test_evaluate_explain.py
           tests/test_scoring_gold.py tests/test_drift_metrics.py tests/test_package.py
-          tests/test_training.py
+          tests/test_training.py tests/test_batch_scoring.py
 
   web:
     runs-on: ubuntu-latest
@@ -193,3 +193,6 @@ jobs:
       # (load Gold, train, calibrate, MLflow, Unity Catalog registry) on the Databricks runtime.
       - name: Train and register the model
         run: databricks bundle run train -t staging
+
+      - name: Score every patient-hour with the newest model
+        run: databricks bundle run score -t staging

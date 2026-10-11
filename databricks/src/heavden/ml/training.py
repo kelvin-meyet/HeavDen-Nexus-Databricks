@@ -110,7 +110,7 @@ def run_training(
     )
 
 
-def _utc(df: pd.DataFrame, columns: tuple[str, ...]) -> pd.DataFrame:
+def to_utc(df: pd.DataFrame, columns: tuple[str, ...]) -> pd.DataFrame:
     """Spark hands timestamps to pandas without a time zone; the session is UTC."""
     for c in columns:
         df[c] = pd.to_datetime(df[c]).dt.tz_localize("UTC")
@@ -131,7 +131,7 @@ def main(argv: list[str] | None = None) -> None:
     spark = SparkSession.builder.getOrCreate()
     spark.conf.set("spark.sql.session.timeZone", "UTC")
     source = f"{args.catalog}.gold.training_set"
-    table = _utc(spark.read.table(source).toPandas(), ("prediction_ts", "label_known_at"))
+    table = to_utc(spark.read.table(source).toPandas(), ("prediction_ts", "label_known_at"))
 
     mlflow.set_tracking_uri("databricks")
     mlflow.set_registry_uri("databricks-uc")

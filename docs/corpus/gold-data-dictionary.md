@@ -51,7 +51,7 @@ Escalations are charted about 6 hours after they happen, so a 0 is only final on
 
 ## 3. `gold.risk_scores`
 
-One row per patient per hour, written by the hourly batch scoring job.
+One row per patient per hour, written by the batch scoring job (`heavden-score`) with the production model (`@champion`). It runs after new data arrives, not on a timer; the alert threshold is the one fixed when the model was trained.
 
 | Column | Meaning |
 |---|---|
@@ -84,7 +84,7 @@ One row per High alert. An alert fires when a patient **enters** the High band. 
 | `alert_id`, `encounter_id`, `patient_id`, `site_id`, `unit_id` | identifiers |
 | `alert_ts` | when the patient entered the High band |
 | `risk`, `news2_total`, `top_factors` | the score and reasons at alert time |
-| `escalated_within_6h` | whether an escalation followed (null until known) |
+| `escalated_within_6h` | whether an escalation followed. Null until known: escalations are recorded about 6 hours after they happen, so a "no" is final only 12 hours after the alert (unless an escalation is already recorded) |
 | `hours_to_escalation` | warning time, if escalated |
 
 ## 6. `gold.escalations_fact`
