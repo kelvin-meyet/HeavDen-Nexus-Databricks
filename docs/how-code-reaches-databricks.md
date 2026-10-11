@@ -74,6 +74,24 @@ How a workflow run signs in:
 
 Nothing reusable is stored anywhere, so there is nothing to leak, expire or rotate. A token from another repository, branch or environment is refused.
 
+### Setting it up (once)
+
+From the repository root:
+
+```bash
+# 1. The service principals, their permissions and their GitHub trust rules (Entra ID + Databricks)
+cd infra/terraform
+terraform plan -out tfplan        # review: only additions expected
+terraform apply tfplan
+cd ../..
+
+# 2. The GitHub environments, their approval and branch rules, and the AZURE_* variables
+gh auth status                    # signed in as a repository admin
+bash infra/github/setup_environments.sh
+```
+
+The script reads the client IDs from `terraform output`, so run it after step 1. It is safe to run again: it overwrites the same settings. Check the result under the repository's **Settings → Environments**. The first pull request then proves the setup works: its `bundle-validate` check signs in as `heavden-ci-dev`.
+
 ## Three different "GitHub ↔ Databricks" connections
 
 People often say "connect GitHub and Databricks". There are three separate connections:
