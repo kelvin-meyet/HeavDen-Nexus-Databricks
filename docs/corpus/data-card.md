@@ -18,7 +18,7 @@ audience: analysts, ML and data teams, reviewers
 |---|---|
 | Patients | ~2,000 synthetic adults from **Synthea** (Massachusetts population model, seed 42), of whom about 300 are in hospital at any time |
 | Hospitals | 3 sites, 360 monitored beds (see the *Site and Unit Handbook*) |
-| Vital signs | 6 vitals every 5 minutes from wearable monitors, about 86,000 messages per day |
+| Vital signs | 6 vitals every 5 minutes from wearable monitors: heart rate, breathing (respiratory) rate, oxygen saturation (SpO2), temperature, and systolic and diastolic blood pressure. About 86,000 messages per day |
 | Nurse observations | ACVPU consciousness and oxygen, every 1-4 hours depending on NEWS2 |
 | Outcomes | escalation events (rapid response call or ICU transfer), known 6 hours after each prediction |
 | Training table | one row per patient per hour (`gold.patient_hour_features`), ~1% positive |
