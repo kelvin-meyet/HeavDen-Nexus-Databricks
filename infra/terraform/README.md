@@ -12,6 +12,7 @@ Creates everything the platform needs around the existing Azure Databricks works
 | Storage credential, external locations `heavden-landing` / `heavden-catalogs` | Unity Catalog access to the containers |
 | Catalogs `heavden_dev` / `heavden_staging` / `heavden_prod`, each with `bronze`, `silver`, `gold`, `ml`, `monitoring` | the medallion layout, owned by the `heavden-admins` group |
 | External volume `heavden_<env>.bronze.landing` | the environment's landing folder, read by Auto Loader |
+| Service principals `heavden-ci-dev` / `-staging` / `-prod` (Entra ID + workspace), GitHub OIDC trust, catalog and connection grants | the identities GitHub Actions deploys as (`identities.tf`) |
 
 ## Use
 
@@ -35,3 +36,17 @@ At the end of the project, `terraform destroy` removes everything except `heavde
 - Azure SQL accepts connections from Azure services (Databricks serverless runs inside Azure) and from `my_ip`, for loading. The data is synthetic.
 - `azurerm` has no setting for the SQL free offer, so the database is created with `azapi` (`useFreeLimit`, `freeLimitExhaustionBehavior = AutoPause`). Only one free database is allowed per subscription.
 - External locations skip validation on create, because a new storage role can take a minute to apply; the first pipeline run proves access.
+
+## CI identities (`identities.tf`)
+
+GitHub Actions signs in as one service principal per environment, with no secrets: each Entra ID app trusts the OIDC tokens GitHub issues to jobs in named environments of this repository.
+
+| GitHub environment | Service principal | Can do | Approval |
+|---|---|---|---|
+| `dev` | `heavden-ci-dev` | validate bundles (no data access) | none |
+| `staging` | `heavden-ci-staging` | deploy and run in `heavden_staging`, read Azure SQL | none (`main` only) |
+| `prod-deploy`, `retrain-approval`, `production-approval` | `heavden-ci-prod` | deploy and run in `heavden_prod`, read Azure SQL | Kelvin |
+
+After `terraform apply`, create the GitHub environments and variables once (`terraform output ci_client_ids`, `terraform output tenant_id`). Client and tenant IDs aren't secrets: they name the identity, and only a token from this repository's environment can sign in as it.
+
+Each service principal can use only its own catalog. The connection `heavden_sql` still signs in to Azure SQL with the admin login; a read-only login (`db_datareader` + `VIEW CHANGE TRACKING`) is a planned follow-up.

@@ -1,0 +1,50 @@
+# Deploys to prod when a release tag (v*) is pushed, after Kelvin approves the run in the
+# prod-deploy environment (Plan.md §16.2). It only deploys: prod's ingestion, pipeline and drift
+# episodes run on demand (Phase 3), never on every release.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prod
+  cancel-in-progress: false
+
+jobs:
+  deploy-prod:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: prod-deploy
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DATABRICKS_AUTH_TYPE: azure-cli
+    defaults:
+      run:
+        working-directory: databricks
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - uses: databricks/setup-cli@v1.17.0
+        with:
+          version: 1.17.0
+
+      - name: Validate
+        run: databricks bundle validate --strict -t prod
+
+      - name: Deploy
+        run: databricks bundle deploy -t prod

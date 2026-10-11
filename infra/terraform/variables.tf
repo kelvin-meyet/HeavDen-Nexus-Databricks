@@ -52,3 +52,9 @@ variable "admin_group" {
   type        = string
   default     = "heavden-admins"
 }
+
+variable "github_repository" {
+  description = "GitHub repository (owner/name) whose Actions jobs may sign in as the CI service principals."
+  type        = string
+  default     = "kelvin-meyet/HeavDen-Nexus-Databricks"
+}
