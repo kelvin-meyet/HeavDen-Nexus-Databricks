@@ -51,4 +51,4 @@ This replaces the usual manual setup (create a service principal in the Databric
 
 After `terraform apply`, create the GitHub environments and variables once with `bash infra/github/setup_environments.sh` (it reads `terraform output ci_client_ids` and `tenant_id`). Client and tenant IDs aren't secrets: they name the identity, and only a token from this repository's environment can sign in as it.
 
-Each service principal can use only its own catalog. The connection `heavden_sql` still signs in to Azure SQL with the admin login; a read-only login (`db_datareader` + `VIEW CHANGE TRACKING`) is a planned follow-up.
+Each service principal can use only its own catalog. In staging and prod the service principal owns the tables its pipelines create, and owning a catalog doesn't grant reading tables someone else owns, so `heavden-admins` gets read-only access to those two catalogs (`admins_read`); their data changes only through CI. The connection `heavden_sql` still signs in to Azure SQL with the admin login; a read-only login (`db_datareader` + `VIEW CHANGE TRACKING`) is a planned follow-up.
