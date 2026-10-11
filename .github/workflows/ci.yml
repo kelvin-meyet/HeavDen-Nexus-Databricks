@@ -53,6 +53,31 @@ jobs:
       - name: Unit tests
         run: uv run pytest -q
 
+  # The ML code against the library versions Databricks serverless environment 6 provides (the
+  # training and scoring jobs run there), not just the newer ones in uv.lock: a model trained on
+  # Databricks must also be built, scored and explained by the versions installed there.
+  ml-on-databricks-libraries:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install the package with serverless environment 6 versions
+        run: |
+          uv venv
+          uv pip install -e . pytest -c databricks/requirements-serverless-env6.txt
+
+      - name: ML tests
+        run: >
+          .venv/bin/python -m pytest -q -W error::DeprecationWarning
+          tests/test_features.py tests/test_train.py tests/test_evaluate_explain.py
+          tests/test_scoring_gold.py tests/test_drift_metrics.py tests/test_package.py
+
   web:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -115,7 +140,7 @@ jobs:
   # Azure SQL is read only on the first run or on request: each read can wake the free database.
   staging:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: [lint-and-test, bundle-validate]
+    needs: [lint-and-test, ml-on-databricks-libraries, bundle-validate]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: staging
@@ -142,6 +167,8 @@ jobs:
       - uses: databricks/setup-cli@v1.17.0
         with:
           version: 1.17.0
+
+      - uses: astral-sh/setup-uv@v6 # bundle deploy builds the wheel with uv
 
       - name: Deploy
         run: databricks bundle deploy -t staging
