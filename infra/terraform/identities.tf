@@ -84,3 +84,14 @@ resource "databricks_grant" "sql_connection" {
   principal          = databricks_service_principal.ci[each.key].application_id
   privileges         = ["USE_CONNECTION"]
 }
+
+# In staging and prod the pipelines run as the service principal, which then owns the tables it
+# creates. Owning the catalog lets the admins manage it but not read tables owned by someone else,
+# so they get read access explicitly (to check runs and build dashboards). No write access: changes
+# to staging and prod data go through CI.
+resource "databricks_grant" "admins_read" {
+  for_each   = local.deploy_environments
+  catalog    = databricks_catalog.env[each.key].name
+  principal  = var.admin_group
+  privileges = ["USE_CATALOG", "USE_SCHEMA", "SELECT", "READ_VOLUME", "EXECUTE"]
+}
