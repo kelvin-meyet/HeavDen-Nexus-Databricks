@@ -36,10 +36,34 @@ GitHub tag v* ── GitHub Actions, as heavden-ci-prod, after approval ──�
 | Environment | Deployed by | When | What runs |
 |---|---|---|---|
 | dev | the developer, from a laptop | while building | anything, on small seeded data |
-| staging | CI ([`ci.yml`](../.github/workflows/ci.yml), job `staging`) | every merge to `main` | deploy, then Bronze → Silver → Gold on fixed seeded data |
+| staging | CI ([`ci.yml`](../.github/workflows/ci.yml), job `staging`) | every merge to `main` | deploy, then Bronze → Silver → Gold on fixed seeded data, then a training smoke test |
 | prod | CI ([`release.yml`](../.github/workflows/release.yml)) | a `v*` release tag, after a required reviewer approves | deploy only; runs are started on demand with [`prod-run.yml`](../.github/workflows/prod-run.yml), also after approval |
 
 On every pull request, CI also validates the bundle for all three targets, signed in as `heavden-ci-dev`. That identity can't read or write any data.
+
+## What happens automatically, and what needs a person
+
+Merging a pull request reaches **staging only**. Every change to **prod** waits for a person. That's not a first-time setup step; it's how prod always works.
+
+| You do | What runs, without further clicks | Needs your approval |
+|---|---|---|
+| Open or update a pull request | lint, tests (also on Databricks' library versions), bundle validation as `heavden-ci-dev` | no |
+| Merge to `main` | staging: deploy, pipeline, training (a smoke test on 2 days) as `heavden-ci-staging` | no |
+| Push a release tag (`git tag -a v0.x.0` and `git push origin v0.x.0`) | **prod deploy**: jobs and pipelines updated to that release's code, nothing run | **yes**, environment `prod-deploy` |
+| Start **prod-run** (Actions → prod-run → Run workflow; tick ingestion, pipeline and/or training) | **prod run** as `heavden-ci-prod` | **yes**, environment `prod-run` |
+| Phase 3: drift detected, a new model passes its gates | retraining, promotion of `@challenger` to `@champion` | **yes**, `retrain-approval`, `production-approval` |
+
+**Why prod isn't automatic on merge:**
+
+- **Deploying and running are different risks.** A deploy changes *what code* prod would run. A run changes *prod data and the registered model*. Each has its own gate and its own audit trail.
+- **Prod is where the decisions live.** Only prod trains the model that scores patients. A model that changes behaviour should reach production through a deliberate, recorded decision, never as a side effect of merging. This is human-in-the-loop MLOps.
+- **Staging has already proven the code.** By the time you tag a release, the same code has run end to end in staging on every merge.
+- **Cost and shared limits.** Prod runs process 14 days of data and can wake the free Azure SQL database (about 50 wake-ups a month), so they happen when someone chooses, not on every merge.
+- **Audit.** Every approval is recorded in GitHub (who, when, which environment, optional comment) and stays in the repository after the cloud workspace is gone.
+
+In a team, the approver would be someone other than the author (the four-eyes principle). In this solo project the author is the required reviewer, which GitHub allows for environment approvals.
+
+**Typical prod sequence after a change:** merge, staging goes green, tag `v0.x.0`, approve **prod-deploy**, then start **prod-run** with what needs to run (for example only *Train*) and approve it.
 
 ## Robot identities: service principals with OIDC, no secrets
 
