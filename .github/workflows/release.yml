@@ -43,6 +43,8 @@ jobs:
         with:
           version: 1.17.0
 
+      - uses: astral-sh/setup-uv@v6 # bundle deploy builds the wheel with uv
+
       - name: Validate
         run: databricks bundle validate --strict -t prod
 

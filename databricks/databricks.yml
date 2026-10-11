@@ -15,6 +15,17 @@ bundle:
 include:
   - resources/*.yml
 
+# The project as a Python wheel (generator, heavden, heavden_api), built on every deploy and
+# installed by jobs that need more than PySpark (training, scoring): resources reference it as
+# ../../dist/*.whl. dynamic_version stamps each build with its time, so serverless never reuses a
+# cached copy of an older wheel with the same version number.
+artifacts:
+  heavden:
+    type: whl
+    path: ..
+    build: uv build --wheel
+    dynamic_version: true
+
 # Upload the Databricks-track learning notebooks too, so they sit next to the code they import.
 sync:
   paths:

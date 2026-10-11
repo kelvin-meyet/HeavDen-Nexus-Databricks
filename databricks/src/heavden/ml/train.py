@@ -10,6 +10,7 @@ Rules learned in Phase 0 (Plan.md §8, NEWS2 fairness check):
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field
 
 import lightgbm as lgb
@@ -126,11 +127,16 @@ def fit_lightgbm(
         random_state=seed,
         verbose=-1,
     )
+    valid_x, valid_y = to_matrix(valid, columns), valid["label"].astype(int)
+    # LightGBM 4.7 renamed eval_set to eval_X/eval_y; Databricks serverless runs 4.6
+    if "eval_X" in inspect.signature(lgb.LGBMClassifier.fit).parameters:
+        evaluation = {"eval_X": valid_x, "eval_y": valid_y}
+    else:
+        evaluation = {"eval_set": [(valid_x, valid_y)]}
     return model.fit(
         to_matrix(train, columns),
         train["label"].astype(int),
-        eval_X=to_matrix(valid, columns),
-        eval_y=valid["label"].astype(int),
+        **evaluation,
         eval_metric="average_precision",
         callbacks=[lgb.early_stopping(100, verbose=False)],
     )

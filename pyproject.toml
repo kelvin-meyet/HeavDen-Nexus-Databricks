@@ -4,18 +4,25 @@ version = "0.1.0"
 description = "HeavDen-Nexus: end-to-end ML/AI analytics platform on Azure Databricks (synthetic healthcare data)"
 readme = "README.md"
 requires-python = ">=3.12"
+# Lower bounds are the versions in Databricks serverless environment 6, where the training and
+# scoring jobs run (databricks/requirements-serverless-env6.txt), so installing the package there
+# never upgrades the runtime's own libraries. Local development uses the newer versions in uv.lock;
+# CI runs the ML tests against both.
 dependencies = [
-    "lightgbm>=4.7.0",
-    "mlflow>=3.17.0",
-    "numpy>=2.0",
-    "pandas>=2.2",
-    "pyarrow>=25.0.1",
-    "pyyaml>=6.0",
-    "scikit-learn>=1.9.1",
+    "cloudpickle>=3.1.1",
+    "lightgbm>=4.6.0",
+    "mlflow-skinny>=3.12.0",
+    "numpy>=2.3.4",
+    "pandas>=2.3.3",
+    "pyarrow>=21.0.0",
+    "pyyaml>=6.0.3",
+    "scikit-learn>=1.7.2",
 ]
 
 [dependency-groups]
 dev = [
+    # full MLflow (SQLite tracking store and registry) for local runs; Databricks needs only skinny
+    "mlflow>=3.17.0",
     "pytest>=8.0",
     "ruff>=0.8",
     "nbstripout>=0.8",
