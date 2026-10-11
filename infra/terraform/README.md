@@ -49,6 +49,6 @@ This replaces the usual manual setup (create a service principal in the Databric
 | `staging` | `heavden-ci-staging` | deploy and run in `heavden_staging`, read Azure SQL | none (`main` only) |
 | `prod-deploy`, `retrain-approval`, `production-approval` | `heavden-ci-prod` | deploy and run in `heavden_prod`, read Azure SQL | Kelvin |
 
-After `terraform apply`, create the GitHub environments and variables once (`terraform output ci_client_ids`, `terraform output tenant_id`). Client and tenant IDs aren't secrets: they name the identity, and only a token from this repository's environment can sign in as it.
+After `terraform apply`, create the GitHub environments and variables once with `bash infra/github/setup_environments.sh` (it reads `terraform output ci_client_ids` and `tenant_id`). Client and tenant IDs aren't secrets: they name the identity, and only a token from this repository's environment can sign in as it.
 
 Each service principal can use only its own catalog. The connection `heavden_sql` still signs in to Azure SQL with the admin login; a read-only login (`db_datareader` + `VIEW CHANGE TRACKING`) is a planned follow-up.

@@ -60,7 +60,7 @@ The usual setup creates a service principal in the Databricks UI, clicks **Gener
 | Add a service principal (×3) | `terraform apply` creates them in Entra ID and adds them to the workspace ([`infra/terraform/identities.tf`](../infra/terraform/identities.tf)) |
 | Grant access to the catalog | The same Terraform grants each one only its own catalog |
 | Generate a secret | Nothing is generated. A **federated credential** tells Entra ID to trust GitHub tokens from this repository's environment X |
-| Paste the client ID and secret into the GitHub environment | Paste only the client ID (`AZURE_CLIENT_ID`), plus one repository variable, `AZURE_TENANT_ID`. Neither is a secret: they name the identity, they don't unlock it |
+| Create the GitHub environments and paste the client ID and secret | [`infra/github/setup_environments.sh`](../infra/github/setup_environments.sh) creates the environments, their approval and branch rules, and only the client ID (`AZURE_CLIENT_ID`) per environment plus one repository variable, `AZURE_TENANT_ID`. Neither is a secret: they name the identity, they don't unlock it |
 
 How a workflow run signs in:
 
