@@ -49,6 +49,12 @@ variables:
   secret_scope:
     description: Key Vault-backed secret scope (terraform output secret_scope).
     default: heavden-kv
+  train_days:
+    description: Days of labelled patient-hours the model trains on (then validation, then test).
+    default: 9
+  valid_days:
+    description: Days of validation, where calibration, the alert threshold and the champion are chosen.
+    default: 2
 
 targets:
   # Personal development: resources are prefixed with "[dev <user>]" and schedules are paused.
@@ -58,6 +64,9 @@ targets:
     variables:
       catalog: heavden_dev
       sql_schema: dev
+      # 2 days of data: 1 day train, half a day validation, the rest test (a smoke test)
+      train_days: 1
+      valid_days: 0.5
 
   # Production mode needs an explicit root_path: the deploying identity's home folder, which other
   # users can't write to. Once CI deploys as the target's service principal, this is its folder.
@@ -69,6 +78,9 @@ targets:
     variables:
       catalog: heavden_staging
       sql_schema: staging
+      # 2 days of data: 1 day train, half a day validation, the rest test (a smoke test)
+      train_days: 1
+      valid_days: 0.5
 
   # Deployed by CI (release.yml) for a v* tag, after approval in the prod-deploy GitHub environment.
   prod:
