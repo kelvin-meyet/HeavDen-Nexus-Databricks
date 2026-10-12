@@ -6,7 +6,8 @@
 # Each step is optional: copying Azure SQL wakes the free database, a full refresh rebuilds
 # every pipeline table from Bronze (needed after loading *different* data into the source), and
 # training registers a new model version (@challenger if it passes the gates; @champion only for
-# the first model), and scoring rebuilds the risk, alert, escalation and KPI tables with @champion.
+# the first model), scoring scores the new hours with @champion and rebuilds the alert,
+# escalation and KPI tables, and the drift check compares the latest data with the champion's.
 
 name: prod-run
 
@@ -30,9 +31,17 @@ on:
         type: boolean
         default: false
       score:
-        description: "Score every patient-hour with @champion (risk, alerts, escalations, KPIs)"
+        description: "Score the new patient-hours with @champion (risk, alerts, escalations, KPIs)"
         type: boolean
         default: false
+      drift_check:
+        description: "Check for drift (after scoring)"
+        type: boolean
+        default: false
+      episode:
+        description: "The drift episode just loaded, if any (recorded with the check)"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -86,6 +95,12 @@ jobs:
         if: inputs.train
         run: databricks bundle run train -t prod
 
-      - name: Score every patient-hour with the champion
+      - name: Score the new patient-hours with the champion
         if: inputs.score
         run: databricks bundle run score -t prod
+
+      - name: Check for drift
+        if: inputs.drift_check
+        env:
+          EPISODE: ${{ inputs.episode }}
+        run: databricks bundle run drift_check -t prod --params episode="$EPISODE"

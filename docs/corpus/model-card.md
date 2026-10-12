@@ -101,4 +101,4 @@ Grouped SHAP importance, largest first: patient background (age, long-term condi
 
 ## 8. Monitoring and updates
 
-Monitored hourly for feature drift (PSI), prediction drift (Jensen-Shannon), performance once outcomes arrive (6-hour delay), calibration and alert load. Retraining and promotion each need a human approval on GitHub. See the *Drift Incident Runbook*, HD-OPS-002.
+Checked after each new batch of data for feature drift (PSI), prediction drift (Jensen-Shannon), alert load, data quality, and performance and calibration once outcomes are known (about 12 hours later). Retraining and promotion each need a human approval on GitHub. See the *Drift Incident Runbook*, HD-OPS-002.

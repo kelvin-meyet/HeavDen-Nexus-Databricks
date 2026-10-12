@@ -1,0 +1,44 @@
+# Compare the latest day of data, predictions and alerts, and the latest labelled hours, with
+# the model's training data and validation scores; append every signal to
+# monitoring.drift_metrics and one summary row to monitoring.drift_checks (Plan.md §10; code in
+# src/heavden/monitoring/drift_check.py, run through src/jobs/check_drift.py). It reports, it
+# doesn't act: alerting and retraining come later (Phase 3). No schedule: staging checks after
+# every merge (CI), prod on demand (prod-run workflow) after each drift episode.
+resources:
+  jobs:
+    drift_check:
+      name: heavden-drift-check
+      description: Measures input, prediction, alert-load, performance and data-quality drift in ${var.catalog} against the model's training data, and logs it to the monitoring schema.
+      max_concurrent_runs: 1
+      parameters:
+        - name: episode
+          default: ""
+      performance_target: STANDARD
+      timeout_seconds: 1800
+      tags:
+        project: heavden
+        component: monitoring
+      tasks:
+        - task_key: check
+          environment_key: ml
+          spark_python_task:
+            python_file: ../src/jobs/check_drift.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --model-alias
+              - ${var.scoring_model}
+              - --train-days
+              - ${var.train_days}
+              - --valid-days
+              - ${var.valid_days}
+              - --episode
+              - "{{job.parameters.episode}}"
+      environments:
+        # The scoring environment: the check scores the training block with the model.
+        - environment_key: ml
+          spec:
+            environment_version: "6"
+            dependencies:
+              - ../../dist/*.whl
+              - lightgbm==4.6.0
