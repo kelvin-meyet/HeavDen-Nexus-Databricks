@@ -1,0 +1,21 @@
+# Drift episodes per environment, in the order they are loaded after the baseline (Plan.md §6).
+# Each episode continues the hospital from where the previous one stopped, and the history is
+# replayed from this file, so ONLY APPEND: never edit, reorder or remove a loaded episode.
+#
+# hours:      simulated hours (scenario timings are in generator/drift_config.yaml)
+# scenarios:  drift scenarios switched on during this episode only (none = a normal stretch)
+# seed:       the episode's random seed (unique per environment)
+# settings:   optional overrides of drift_config.yaml, e.g. {protocol_change: {start_after_hours: 0}}
+#             to keep a lasting change on from the start of a later episode
+
+dev: []
+
+staging:  # dry runs: each scenario must be caught by the expected check (Plan.md §17, Phase 3)
+  - {name: sensor-bias, hours: 48, scenarios: [spo2_sensor_bias], seed: 2001}
+  - {name: respiratory-outbreak, hours: 48, scenarios: [respiratory_outbreak], seed: 2002}
+  - {name: schema-change, hours: 48, scenarios: [firmware_schema_change], seed: 2003}
+  - {name: protocol-change, hours: 48, scenarios: [protocol_change], seed: 2004}
+
+prod:  # live episodes (Plan.md §6.4)
+  - {name: sensor-bias, hours: 48, scenarios: [spo2_sensor_bias], seed: 3001}
+  - {name: protocol-change, hours: 48, scenarios: [protocol_change], seed: 3002}

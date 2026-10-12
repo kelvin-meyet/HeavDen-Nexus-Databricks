@@ -460,6 +460,7 @@ def simulate_ward(
     measurement_offsets: dict[str, np.ndarray] | MeasurementOffsetFn | None = None,
     activity: HospitalActivity | None = None,
     bedside_care: bool = True,
+    carried_baselines: pd.DataFrame | None = None,
 ) -> WardResult:
     """Vitals + truth together: undisturbed physiology → trajectories → disturbed physiology →
     readings. The same seed always gives the same hospital.
@@ -470,6 +471,9 @@ def simulate_ward(
     Without `activity` the ward is static: `inpatients` stay for the whole period (one device
     each). With an `activity` schedule (generator.activity) patients come and go, devices are
     reused, and escalations end stays early.
+
+    `carried_baselines` (indexed by `encounter_id`, from an earlier period's `WardResult.stays`)
+    keeps the personal normal values of stays that continue from that period.
     """
     vitals_config = vitals_config or vitals.VitalsConfig()
     base_seed, phys_seed, truth_seed, measure_seed, care_seed = np.random.SeedSequence(seed).spawn(
@@ -486,6 +490,12 @@ def simulate_ward(
         stays, slot_devices, occupant, planned_end = _stays_from_activity(activity, timestamps)
 
     baselines = vitals.make_baselines(stays, np.random.default_rng(base_seed))
+    if carried_baselines is not None:  # drawn first, so the other stays' values don't change
+        known = stays["encounter_id"].isin(carried_baselines.index).to_numpy()
+        columns = [*vitals.VITALS, "hr_wander_scale"]
+        baselines.loc[known, columns] = carried_baselines.loc[
+            stays.loc[known, "encounter_id"], columns
+        ].to_numpy()
     stays = stays.join(baselines.drop(columns=["patient_id", "device_id"]))
 
     def physiology(offsets=None):  # same seed → same wander, so only the offsets differ

@@ -101,6 +101,11 @@ def test_tables_match_the_ddl_columns_in_load_order(tables):
 
 
 @pytest.mark.parametrize("table", source_db.TABLE_ORDER)
+def test_primary_keys_are_read_from_the_ddl(table):
+    assert source_db.primary_key(table) == PRIMARY_KEYS[table]
+
+
+@pytest.mark.parametrize("table", source_db.TABLE_ORDER)
 def test_primary_keys_are_unique(tables, table):
     assert not tables[table].duplicated(PRIMARY_KEYS[table]).any()
 
@@ -229,15 +234,18 @@ def test_connect_retries_on_the_drivers_wording_without_a_code():
 class _FakeCursor:
     def __init__(self, connection):
         self.connection = connection
+        self.rowcount = 1
 
     def execute(self, sql, params=None):
         self.connection.statements.append((sql, self.connection.autocommit))
+        self.connection.params.append(params)
 
 
 class _FakeConnection:
     def __init__(self):
         self.autocommit = False
         self.statements = []
+        self.params = []
         self.commits = 0
 
     def cursor(self):
@@ -276,3 +284,32 @@ def test_every_insert_stays_below_the_servers_parameter_limit(tables, table):
     # SQL Server refused a request with exactly 2100 parameters on 9 Oct.
     for _, params in source_db.insert_batches("dev", table, tables[table]):
         assert len(params) < 2100
+
+
+def test_table_changes_are_inserts_and_updates_and_never_deletes(ward, tables):
+    earlier = _tables(ward, ward.activity.start + pd.Timedelta(hours=24))
+    changes = source_db.table_changes(earlier, tables)
+    inserts, updates = changes["encounters"]
+    assert len(inserts) and len(updates)  # new admissions; discharges and transfers
+    assert set(updates["encounter_id"]) <= set(earlier["encounters"]["encounter_id"])
+    assert len(changes["sites"][0]) == len(changes["sites"][1]) == 0
+    with pytest.raises(ValueError, match="deleted"):
+        source_db.table_changes(tables, earlier)
+
+
+def test_apply_changes_updates_rows_by_primary_key(ward, tables):
+    earlier = _tables(ward, ward.activity.start + pd.Timedelta(hours=24))
+    changes = source_db.table_changes(earlier, tables)
+    connection = _FakeConnection()
+    source_db.apply_changes(connection, "dev", changes)
+    updates = [
+        (sql, params)
+        for (sql, _), params in zip(connection.statements, connection.params, strict=True)
+        if sql.startswith("UPDATE dev.encounters ")
+    ]
+    assert len(updates) == len(changes["encounters"][1])
+    sql, params = updates[0]
+    assert sql.endswith("WHERE encounter_id = ?") and "encounter_id = ?," not in sql
+    assert params[-1] == changes["encounters"][1]["encounter_id"].iloc[0]
+    assert len(params) == sql.count("?")
+    assert connection.commits == len(source_db.TABLE_ORDER)
