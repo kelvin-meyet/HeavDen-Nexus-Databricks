@@ -18,8 +18,8 @@ The deterioration risk model was trained on past data. When the data or the worl
 
 ## 2. How an alert is raised
 
-1. The `drift_check` task runs at the end of every scoring job in production.
-2. It compares recent data with the champion model's training data, and recent predictions with outcomes once their 6-hour label window has closed.
+1. The `drift_check` job runs in production after each new batch of data has been scored.
+2. It compares the latest day of data and predictions with the data the champion was trained and calibrated on, and the latest two days of predictions with their outcomes once known (about 12 hours later: the 6-hour window, then 6 hours until escalations are recorded). It checks all sites together and each site on its own.
 3. If a threshold below is breached, Databricks sends an **email alert** with a summary and a link to the *Model and Drift* dashboard, and calls GitHub to start the `retrain.yml` workflow.
 4. `retrain.yml` **waits for a human approval** in the GitHub `retrain-approval` environment. Nothing is retrained automatically.
 
@@ -28,15 +28,18 @@ The deterioration risk model was trained on past data. When the data or the worl
 | Signal | Warn | Act |
 |---|---|---|
 | PSI on a key feature (any slice, at least 500 samples) | > 0.10 | > 0.25 |
-| Jensen-Shannon distance on predictions | > 0.05 | > 0.10 |
+| Jensen-Shannon distance on predictions | > 0.08 | > 0.12 |
 | AUPRC drop against the champion's validation AUPRC | > 10% relative | > 20% relative |
 | Brier score (calibration) worsening | > 10% | > 20% |
-| Quarantine or null rate in silver vitals | > 2% | > 5% |
+| Share of readings quarantined in silver | > 2% | > 5% |
+| Change in a reading field's missing share since training | > 2 points | > 5 points |
 | Alert load against the budget of 2 alerts per nurse per shift | > 2.5 | > 3 |
 
 **Why PSI and not a KS test?** With thousands of readings a KS test flags tiny, harmless differences as "significant". PSI measures *how much* a distribution moved, and the minimum of 500 samples stops small slices from raising false alarms.
 
-**Why the alert load?** It needs no outcomes, so it is known immediately, while AUPRC and escalations flagged must wait 6 hours for labels.
+**Why the alert load?** It needs no outcomes, so it is known immediately, while AUPRC and escalations flagged must wait about 12 hours for labels.
+
+**Why a margin for chance on AUPRC and Brier?** Two days hold only about 20 escalations, so on normal days the AUPRC of a two-day window swings by a third either way. The check therefore uses the change it can be 95% sure of (a bootstrap over patient stays), and needs at least 10 escalations in the window; with fewer it reports "not enough data". The prediction thresholds were set so that normal days stay below warn (they reached 0.063 at one site).
 
 ## 4. Triage checklist
 
@@ -50,7 +53,7 @@ The deterioration risk model was trained on past data. When the data or the worl
 ## 5. Scenarios and correct responses
 
 ### 5.1 SpO2 sensor bias (data drift, gradual)
-- **Symptoms:** PSI on `spo2_*` features rises at **one site** (Site B), growing day by day. Other vitals unchanged. Alert load at that site rises. Calibration worsens there.
+- **Symptoms:** PSI on `spo2_*` features rises at **one site** (Site B), growing day by day. Other vitals unchanged. Prediction distribution and alert load at that site rise. Performance on outcomes changes little, because the patients haven't changed.
 - **Cause:** a device fault (see device manual, FSN-2026-11): SpO2 reads up to 3 points low.
 - **Correct response:** **do not retrain.** The patients haven't changed; the measurements are wrong. Retraining would teach the model to accept the faulty readings. Ask Clinical Engineering to fix the devices, add a temporary note on the ward board, and **reject** the retrain request with a reference to the notice. Consider excluding affected readings from future training data.
 
@@ -60,7 +63,7 @@ The deterioration risk model was trained on past data. When the data or the worl
 - **Correct response:** wait for labelled outcomes (at least 6 hours, ideally a day). If AUPRC and calibration on the new patients hold up, **no retrain** is needed: the model is seeing sicker patients and correctly scoring them higher. If performance drops, **approve a retrain** that includes the new cohort, and check the slice gates.
 
 ### 5.3 Protocol change (concept drift)
-- **Symptoms:** feature distributions look **normal**, but more patients are escalated than predicted. AUPRC may hold while **calibration** gets worse (predicted risks too low). Starts on the same day at all sites.
+- **Symptoms:** feature distributions look **normal**, but more patients are escalated than predicted. **AUPRC drops and calibration gets worse** (predicted risks too low), once the outcomes are known, about 12 hours after the change. Starts on the same day at all sites.
 - **Cause:** the escalation protocol changed (HD-CLIN-001 v2.0, effective 2026-11-09). The same vital signs now lead to escalation more often.
 - **Correct response:** this is the one case where **retraining is required**: the meaning of the label has changed. Approve the retrain once enough post-change outcomes exist (at least 48 hours), and train only on data from after the change, or weight it heavily. Check the alert budget with the wards, because escalations will rise.
 

@@ -196,3 +196,6 @@ jobs:
 
       - name: Score every patient-hour with the newest model
         run: databricks bundle run score -t staging
+
+      - name: Check for drift against the newest model's data
+        run: databricks bundle run drift_check -t staging
