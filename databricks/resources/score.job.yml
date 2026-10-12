@@ -1,6 +1,8 @@
-# Score every patient-hour with the registered model and rebuild the Gold tables that depend on
-# it: risk_scores, alerts_fact, escalations_fact, site_kpis_hourly (Plan.md §9; code in
-# src/heavden/ml/batch_scoring.py, run through src/jobs/score_model.py). No schedule: staging
+# Score the patient-hours not scored yet with the registered model and append them to the
+# prediction log gold.risk_scores; rebuild alerts_fact, escalations_fact and site_kpis_hourly from
+# the whole log (Plan.md §9; code in src/heavden/ml/batch_scoring.py, run through
+# src/jobs/score_model.py). Each hour keeps the model that scored it. Job parameter rescore=true
+# replaces the log with this model's scores for every hour. No schedule: staging
 # scores after every merge (CI), prod on demand (prod-run workflow, approved), and in Phase 3
 # after each drift episode. Prod uses @champion; dev and staging the newest version, because
 # their 2-day models rarely pass the gates.
@@ -8,8 +10,11 @@ resources:
   jobs:
     score:
       name: heavden-score
-      description: Scores ${var.catalog}.gold.patient_hour_features with the registered model and rebuilds the risk, alert, escalation and KPI tables.
-      max_concurrent_runs: 1 # each run replaces the four tables
+      description: Scores new patient-hours in ${var.catalog}.gold.patient_hour_features with the registered model, appends them to gold.risk_scores and rebuilds the alert, escalation and KPI tables.
+      max_concurrent_runs: 1 # two runs would score the same new hours twice
+      parameters:
+        - name: rescore
+          default: "false"
       performance_target: STANDARD
       timeout_seconds: 1800
       tags:
@@ -29,6 +34,8 @@ resources:
               - ${var.train_days}
               - --valid-days
               - ${var.valid_days}
+              - --rescore
+              - "{{job.parameters.rescore}}"
       environments:
         # Same environment as training, so the model loads with the libraries it was trained with.
         - environment_key: ml

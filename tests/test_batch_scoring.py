@@ -34,7 +34,14 @@ def test_every_patient_hour_is_scored_at_the_training_threshold(scored):
     table, _, _, bands, tables = scored
     risk = tables["risk_scores"]
     assert len(risk) == len(table)
-    assert set(tables) == {"risk_scores", "alerts_fact", "escalations_fact", "site_kpis_hourly"}
+    assert set(tables) == {
+        "risk_scores",
+        "alerts_fact",
+        "escalations_fact",
+        "site_kpis_hourly",
+        "new_scores",
+    }
+    pd.testing.assert_frame_equal(tables["new_scores"], risk)  # first run: every hour is new
     np.testing.assert_array_equal(risk["risk_band"] == "High", risk["risk"] >= bands.high)
     assert (risk["model_version"] == "7").all()
 
@@ -56,6 +63,39 @@ def test_escalations_are_matched_to_the_scores_before_them(scored):
     assert esc["flagged_6h_before"].dtype == bool
     kpis = tables["site_kpis_hourly"]
     assert kpis["escalations"].sum() == len(outcomes)
+
+
+def test_each_hour_is_scored_once_and_keeps_its_model(fitted):  # noqa: F811
+    table, tr, model, bands = fitted
+    as_of = table["prediction_ts"].max() + pd.Timedelta(hours=1)
+    cut = table["prediction_ts"].quantile(0.6).floor("h")
+    no_outcomes = pd.DataFrame(columns=["encounter_id", "event_ts", "event_type", "recorded_ts"])
+    early = table[table["prediction_ts"] < cut]
+    first = batch_scoring.score_hours(
+        early, no_outcomes, model, bands.high, "1", as_of, tr.head(500)
+    )
+    # a later run, with more hours and a different model whose alert threshold is lower
+    later = batch_scoring.score_hours(
+        table, no_outcomes, model, bands.high / 2, "2", as_of, tr.head(500), first["risk_scores"]
+    )
+    log, new = later["risk_scores"], later["new_scores"]
+    assert len(log) == len(table) and not log.duplicated(batch_scoring.KEYS).any()
+    assert (new["prediction_ts"] >= cut).all() and (new["model_version"] == "2").all()
+    old = log[log["prediction_ts"] < cut].reset_index(drop=True)
+    pd.testing.assert_frame_equal(old, first["risk_scores"])  # untouched: version 1, its bands
+    np.testing.assert_array_equal(old["risk_band"] == "High", old["risk"] >= bands.high)
+    np.testing.assert_array_equal(new["risk_band"] == "High", new["risk"] >= bands.high / 2)
+
+
+def test_a_run_with_nothing_new_changes_nothing(scored, fitted):  # noqa: F811
+    table, outcomes, as_of, bands, tables = scored
+    model, background = fitted[2], fitted[1].head(500)
+    again = batch_scoring.score_hours(
+        table, outcomes, model, bands.high, "8", as_of, background, tables["risk_scores"]
+    )
+    assert again["new_scores"].empty
+    for name in ("risk_scores", "alerts_fact", "escalations_fact", "site_kpis_hourly"):
+        pd.testing.assert_frame_equal(again[name], tables[name])
 
 
 def test_background_comes_from_the_training_block():
