@@ -1,7 +1,8 @@
-"""Batch scoring: score every patient-hour with a registered model and build the Gold tables
+"""Batch scoring: score new patient-hours with a registered model and build the Gold tables
 that depend on it (Plan.md §7.3, §9).
 
-    gold.risk_scores        one row per patient-hour: risk, band, top factors, model version
+    gold.risk_scores        the prediction log: one row per patient-hour, scored once (risk, band,
+                            top factors, model version, scored_at)
     gold.alerts_fact        a stay entering the High band (re-alerts suppressed for 6 h)
     gold.escalations_fact   each recorded escalation, and whether it was flagged beforehand
     gold.site_kpis_hourly   census, bands, alerts and escalations per unit and hour
@@ -15,9 +16,13 @@ the app shows the same numbers in demo and live mode. Differences, by design:
 * **The alert threshold is the one fixed at training** (the model run's `valid_threshold`), not
   refitted here: scoring must not move the alert budget.
 
-Each run rescores every hour with the chosen model version and replaces the four tables, so it
-can be re-run safely. When drift episodes add hours (Phase 3), scoring will append new hours only,
-so past scores stay those of the model that was live at the time.
+* **Each hour is scored once.** A run scores only the hours not yet in `risk_scores` and appends
+  them, so past scores stay those of the model that was live at the time (each row keeps its
+  model version and its band at that model's threshold). Monitoring reads this log. The other
+  three tables are rebuilt from the whole log every run, because outcomes keep arriving.
+  `--rescore` replaces the log with the chosen model's scores for every hour, e.g. after a bug.
+
+Re-running is safe: a second run finds no new hours and rebuilds the same three tables.
 """
 
 from __future__ import annotations
@@ -35,6 +40,46 @@ RECORDING_DELAY = pd.Timedelta(hours=6)
 BACKGROUND_ROWS = 2000  # training rows the explanations are measured against
 
 
+KEYS = ["encounter_id", "prediction_ts"]
+
+
+def unscored(features: pd.DataFrame, log: pd.DataFrame | None) -> pd.DataFrame:
+    """The patient-hours in `features` that the prediction log doesn't hold yet."""
+    if log is None or log.empty:
+        return features
+    seen = features[KEYS].merge(log[KEYS].drop_duplicates(), how="left", indicator=True)
+    return features[(seen["_merge"] == "left_only").to_numpy()]
+
+
+def score_new(
+    features: pd.DataFrame,
+    model,
+    threshold: float,
+    model_version: str,
+    background: pd.DataFrame,
+    scored_at: pd.Timestamp,
+) -> pd.DataFrame:
+    """Prediction-log rows for `features`, banded at the model's own alert threshold."""
+    risk = scoring.score_table(
+        model, features, scoring.RiskBands(high=threshold), background, model_version
+    )
+    return risk.assign(scored_at=scored_at)
+
+
+def derived_tables(
+    log: pd.DataFrame, outcomes: pd.DataFrame, as_of: pd.Timestamp
+) -> dict[str, pd.DataFrame]:
+    """alerts_fact, escalations_fact and site_kpis_hourly from the whole prediction log."""
+    outcomes = outcomes.sort_values("event_ts").drop_duplicates("encounter_id")
+    known_by = as_of - RECORDING_DELAY
+    alerts = gold.alerts_fact(log, outcomes, known_by)
+    return {
+        "alerts_fact": alerts,
+        "escalations_fact": gold.escalations_fact(log, outcomes, known_by),
+        "site_kpis_hourly": gold.site_kpis_hourly(log, alerts, outcomes),
+    }
+
+
 def score_hours(
     features: pd.DataFrame,
     outcomes: pd.DataFrame,
@@ -43,20 +88,23 @@ def score_hours(
     model_version: str,
     as_of: pd.Timestamp,
     background: pd.DataFrame,
+    log: pd.DataFrame | None = None,
+    scored_at: pd.Timestamp | None = None,
 ) -> dict[str, pd.DataFrame]:
-    """The four Gold tables for every patient-hour in `features`."""
-    outcomes = outcomes.sort_values("event_ts").drop_duplicates("encounter_id")
-    known_by = as_of - RECORDING_DELAY
-    risk = scoring.score_table(
-        model, features, scoring.RiskBands(high=threshold), background, model_version
-    )
-    alerts = gold.alerts_fact(risk, outcomes, known_by)
-    return {
-        "risk_scores": risk,
-        "alerts_fact": alerts,
-        "escalations_fact": gold.escalations_fact(risk, outcomes, known_by),
-        "site_kpis_hourly": gold.site_kpis_hourly(risk, alerts, outcomes),
-    }
+    """The four Gold tables after scoring the hours of `features` that `log` doesn't hold.
+
+    `risk_scores` is the whole log (old rows unchanged, new rows appended); `new_scores` is
+    just the rows this run added.
+    """
+    scored_at = scored_at if scored_at is not None else pd.Timestamp.now(tz="UTC")
+    new = unscored(features, log)
+    if new.empty:  # nothing new since the last run
+        new_scores = log.iloc[:0] if log is not None else pd.DataFrame()
+    else:
+        new_scores = score_new(new, model, threshold, model_version, background, scored_at)
+    parts = [df for df in (log, new_scores) if df is not None and not df.empty]
+    risk = pd.concat(parts, ignore_index=True) if parts else new_scores
+    return {"risk_scores": risk, **derived_tables(risk, outcomes, as_of), "new_scores": new_scores}
 
 
 def background_sample(training_set: pd.DataFrame, split: train.Split) -> pd.DataFrame:
@@ -98,7 +146,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--model-alias", default="champion", help='an alias, or "latest"')
     parser.add_argument("--train-days", type=float, default=train.Split.train_days)
     parser.add_argument("--valid-days", type=float, default=train.Split.valid_days)
+    parser.add_argument(
+        "--rescore", default="false", help='"true" replaces the log: every hour, this model'
+    )
     args = parser.parse_args(argv)
+    rescore = args.rescore.lower() == "true"
 
     import mlflow
     from pyspark.sql import SparkSession
@@ -122,16 +174,43 @@ def main(argv: list[str] | None = None) -> None:
     name = f"{c}.ml.deterioration_risk"
     model, threshold, version = load_registered_model(name, args.model_alias)
     split = train.Split(args.train_days, args.valid_days)
+    log_table = f"{c}.gold.risk_scores"
+    log = None
+    if not rescore and spark.catalog.tableExists(log_table):
+        log = read("gold.risk_scores", ("prediction_ts",))
+        if "scored_at" in log:
+            log = to_utc(log, ("scored_at",))
+        else:  # rows from before the log kept scoring times
+            log["scored_at"] = pd.Series(pd.NaT, index=log.index, dtype="datetime64[ns, UTC]")
     tables = score_hours(
-        features, outcomes, model, threshold, version, as_of, background_sample(training_set, split)
+        features,
+        outcomes,
+        model,
+        threshold,
+        version,
+        as_of,
+        background_sample(training_set, split),
+        log,
     )
-    for table, frame in tables.items():
-        to_spark(spark, frame).write.mode("overwrite").option(
+    new_scores = tables.pop("new_scores")
+    if log is None:  # first run, or --rescore: the log starts again
+        to_spark(spark, tables["risk_scores"]).write.mode("overwrite").option(
+            "overwriteSchema", "true"
+        ).saveAsTable(log_table)
+    elif not new_scores.empty:  # each hour once: append, never rewrite
+        to_spark(spark, new_scores).write.mode("append").option("mergeSchema", "true").saveAsTable(
+            log_table
+        )
+    for table in ("alerts_fact", "escalations_fact", "site_kpis_hourly"):
+        to_spark(spark, tables[table]).write.mode("overwrite").option(
             "overwriteSchema", "true"
         ).saveAsTable(f"{c}.gold.{table}")
     risk, alerts = tables["risk_scores"], tables["alerts_fact"]
     print(
         f"{name} v{version} ({args.model_alias}), alert threshold {threshold:.4f}, as of {as_of}: "
+        f"{len(new_scores):,} new hours scored"
+        + (" (log replaced)" if log is None else "")
+        + "; "
         + ", ".join(f"{t} {len(f):,}" for t, f in tables.items())
     )
     print(

@@ -53,6 +53,8 @@ Escalations are charted about 6 hours after they happen, so a 0 is only final on
 
 One row per patient per hour, written by the batch scoring job (`heavden-score`) with the production model (`@champion`). It runs after new data arrives, not on a timer; the alert threshold is the one fixed when the model was trained.
 
+Each hour is scored **once** and never rescored: when a new model is promoted, earlier hours keep the score, band and `model_version` of the model that was live at the time. The table is therefore a log of what the ward actually saw, which is what monitoring compares against outcomes.
+
 | Column | Meaning |
 |---|---|
 | `encounter_id`, `patient_id`, `site_id`, `unit_id`, `prediction_ts` | as above |
