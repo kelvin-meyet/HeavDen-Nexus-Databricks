@@ -10,14 +10,14 @@ HeavDen Nexus watches every inpatient across three fictional hospitals, hour by 
 
 ## Where it stands
 
-The project is built in phases. **Phase 0 (offline foundations) is complete**: everything below runs on a laptop, with no cloud spend. The Azure Databricks phases come next.
+The project is built in phases. **Phases 0–2 are complete**: the offline foundations, the data platform on Azure Databricks, and the model trained, registered and scoring there, with every change going through CI to staging and, after an approval, to production. Monitoring and MLOps come next.
 
 | Phase | Scope | Status |
 |---|---|---|
 | 0. Offline foundations | data generators, drift scenarios, features, model, evaluation, documents, API and web app in demo mode, learning notebooks, CI | **done** |
-| 1. Data platform | Terraform, Azure SQL, Lakeflow Connect and Auto Loader into Bronze, Silver and Gold pipelines with expectations, Unity Catalog | next |
-| 2. Model and serving | feature tables, MLflow on Unity Catalog (`@champion` / `@challenger`), batch scoring, a scale-to-zero serving endpoint | planned |
-| 3. Monitoring and MLOps | Lakehouse Monitoring, PSI and Jensen-Shannon drift metrics, email alerts, retraining and promotion approved in GitHub Actions | planned |
+| 1. Data platform | Terraform, Azure SQL with Change Tracking and Auto Loader into Bronze, Silver and Gold pipelines with expectations, Unity Catalog; dev, staging and prod deployed from GitHub Actions with OIDC (no stored secrets) | **done** |
+| 2. Model and scoring | training job with MLflow on Unity Catalog (`@champion` / `@challenger`), batch scoring into Gold, a Clinical Ops AI/BI dashboard | **done** |
+| 3. Monitoring and MLOps | Lakehouse Monitoring, PSI and Jensen-Shannon drift metrics, email alerts, retraining and promotion approved in GitHub Actions | next |
 | 4. AI assistant on Databricks | Genie, Vector Search and a Unity Catalog function behind one agent, gated by an MLflow evaluation set | planned |
 | 5–6. Live app, then maintenance mode | live mode for the app, then a low-cost steady state (about $10–20 a month): a weekly job refreshes the data and the app's snapshot, and nothing runs in between | planned |
 
@@ -46,9 +46,22 @@ The project is built in phases. **Phase 0 (offline foundations) is complete**: e
 | ![A patient's last 24 hours, the reasons behind the score, and a what-if panel](docs/images/patient.png) | ![Analytics: census, alert load, escalations flagged in advance and device health](docs/images/analytics.png) |
 | ![The assistant answering with the patient's risk factors and the escalation protocol, with citations](docs/images/assistant.png) | |
 
-## Results so far (Phase 0, synthetic test period)
+## Results on Databricks (production model, synthetic test period)
 
-On a held-out 2-day test period with 28 escalations, with both scores limited to **at most 2 alerts per nurse per 12-hour shift**:
+The production model (`heavden_prod.ml.deterioration_risk` version 1, logistic regression, `@champion`) was trained on 9 days, chosen on the next 2, and scored **once** on the last days, which it never saw. Both scores get the same alert budget: **at most about 2 alerts per nurse per 12-hour shift**.
+
+| Test block: 12–14 Nov, 26 escalations | Model | NEWS2 |
+|---|---|---|
+| Escalations flagged in the 6 hours before | **23 of 26 (88%)** | 19 of 26 (73%) |
+| Alerts followed by an escalation | 3.0% | 3.2% |
+| Alerts per nurse per shift | 2.1 | 1.8 |
+| AUPRC (hourly ranking) | **0.38** | 0.19 |
+
+Within the same alert budget, the model warns about **4 more of the 26** deteriorating patients than NEWS2, without giving nurses more alarms: about 1 in 33 alerts is followed by an escalation for both. The validation figures used to pick the model (79% for both) aren't reported as results, because picking on them makes them flattering. Every number is logged in MLflow with the run, and the chosen version's description in Unity Catalog repeats it.
+
+## Rehearsal results (Phase 0, offline)
+
+Before Databricks, the same code ran on a laptop. On a held-out 2-day test period with 28 escalations, with both scores limited to **at most 2 alerts per nurse per 12-hour shift**:
 
 | | Model | NEWS2 |
 |---|---|---|
@@ -73,23 +86,22 @@ flowchart LR
   end
 
   subgraph Databricks["Azure Databricks (Unity Catalog, serverless)"]
-    ASQL -- Lakeflow Connect --> B[Bronze]
+    ASQL -- JDBC + Change Tracking --> B[Bronze]
     ADLS -- Auto Loader --> B
     B -- Lakeflow pipelines<br/>+ expectations --> S[Silver]
     S --> G[Gold]
     G --> TR[Training<br/>MLflow]
     TR --> REG[UC model registry<br/>@champion / @challenger]
     REG --> BS[Batch scoring]
-    REG --> EP[Serving endpoint<br/>scale to zero]
     BS --> G
-    EP --> LM[Lakehouse Monitoring<br/>+ PSI / JS]
+    BS --> LM[Lakehouse Monitoring<br/>+ PSI / JS]
     G --> LM
     LM --> AL[Drift check<br/>+ SQL alert]
     VOL --> VSI[Vector Search]
     G --> GEN[Genie space]
     VSI --> AG[Agent]
     GEN --> AG
-    EP --> AG
+    G -- explain_patient_risk --> AG
   end
 
   AL -- email --> ME((Reviewer))
@@ -103,12 +115,12 @@ flowchart LR
     SNAP[(Snapshot: Parquet,<br/>DuckDB, FAISS)] --> API
   end
   G --> API
-  EP --> API
   AG --> API
 ```
 
 Key decisions:
-- **Serverless only, triggered runs, scale-to-zero endpoints**, to fit a $200, 30-day cloud budget. Dev and staging run only from CI, on small seeded data.
+- **Serverless only and triggered runs**, to fit a $200, 30-day cloud budget. Dev and staging run only from CI, on small seeded data.
+- **Batch scoring, no always-on serving endpoint.** Risk is needed hourly, not per request; an always-on endpoint would cost about $57 a month, and scale-to-zero has minutes-long cold starts. `gold.risk_scores` doubles as the prediction log for monitoring.
 - **Model deployment is an alias swap** (`@champion`), never Model Registry stages.
 - **Retraining and promotion need a human approval in GitHub Actions environments**, so the approval history stays in the repo after the cloud workspace is gone.
 - **The public app is not a Databricks App** (those can't be public). It runs on Vercel and Render. After the build period it serves a snapshot that a weekly Databricks job refreshes, so public traffic never wakes the cloud resources.
