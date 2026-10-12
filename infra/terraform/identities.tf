@@ -97,3 +97,19 @@ resource "databricks_grant" "admins_read" {
   principal  = var.admin_group
   privileges = ["USE_CATALOG", "USE_SCHEMA", "SELECT", "READ_VOLUME", "EXECUTE"]
 }
+
+# The staging and prod service principals publish the Clinical Ops dashboard with their own
+# credentials, so its queries run as them on the shared SQL warehouse. CAN_USE runs queries; it
+# grants no data access (that comes from the catalog grants above). The owner keeps CAN_MANAGE
+# and workspace admins keep theirs.
+resource "databricks_permissions" "warehouse" {
+  sql_endpoint_id = databricks_sql_endpoint.shared.id
+
+  dynamic "access_control" {
+    for_each = local.deploy_environments
+    content {
+      service_principal_name = databricks_service_principal.ci[access_control.value].application_id
+      permission_level       = "CAN_USE"
+    }
+  }
+}

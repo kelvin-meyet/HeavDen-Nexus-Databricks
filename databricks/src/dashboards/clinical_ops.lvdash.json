@@ -1,0 +1,1617 @@
+{
+  "datasets": [
+    {
+      "name": "ward_hourly",
+      "displayName": "Ward by unit and hour",
+      "queryLines": [
+        "SELECT hour_ts, site_id, unit_id, census, n_high, alerts_raised, escalations,\n",
+        "       mean_news2, census / 60.0 AS nurse_shifts  -- 1 nurse per 5 patients, 12 h\n",
+        "FROM site_kpis_hourly\n",
+        "ORDER BY hour_ts\n"
+      ],
+      "columns": [
+        {
+          "displayName": "Alerts per nurse per shift",
+          "description": "Alerts raised / nurse-shifts (1 nurse per 5 patients, 12-hour shifts)",
+          "expression": "SUM(`alerts_raised`) / SUM(`nurse_shifts`)"
+        }
+      ]
+    },
+    {
+      "name": "ward_now",
+      "displayName": "Patients at the latest hour",
+      "queryLines": [
+        "SELECT encounter_id, site_id, unit_id, prediction_ts, risk, risk_band,\n",
+        "       CASE WHEN risk_band = 'High' THEN 1 ELSE 0 END AS is_high, news2_total,\n",
+        "       get_json_object(top_factors, '$[0].factor') AS top_reason,\n",
+        "       get_json_object(top_factors, '$[0].driver') AS top_reason_reading,\n",
+        "       get_json_object(top_factors, '$[1].factor') AS second_reason\n",
+        "FROM risk_scores\n",
+        "WHERE prediction_ts = (SELECT max(prediction_ts) FROM risk_scores)\n",
+        "ORDER BY risk DESC\n"
+      ]
+    },
+    {
+      "name": "alerts",
+      "displayName": "Alerts and their outcomes",
+      "queryLines": [
+        "SELECT alert_ts, site_id, unit_id, risk, news2_total, hours_to_escalation,\n",
+        "       CASE WHEN escalated_within_6h IS NULL THEN 'Not known yet'\n",
+        "            WHEN escalated_within_6h = 1 THEN 'Escalated'\n",
+        "            ELSE 'No escalation' END AS outcome,\n",
+        "       CASE WHEN escalated_within_6h IS NULL THEN 0 ELSE 1 END AS outcome_known,\n",
+        "       coalesce(escalated_within_6h, 0) AS escalated\n",
+        "FROM alerts_fact\n",
+        "ORDER BY alert_ts\n"
+      ],
+      "columns": [
+        {
+          "displayName": "Alert precision",
+          "description": "Alerts followed by an escalation within 6 h, among alerts whose outcome is known",
+          "expression": "SUM(`escalated`) / SUM(`outcome_known`)"
+        }
+      ]
+    },
+    {
+      "name": "escalations",
+      "displayName": "Escalations and whether they were flagged",
+      "queryLines": [
+        "SELECT e.event_ts, e.site_id, e.unit_id, e.encounter_id,\n",
+        "       replace(e.event_type, '_', ' ') AS event_type,\n",
+        "       CASE WHEN e.flagged_6h_before THEN 1 ELSE 0 END AS flagged,\n",
+        "       CASE WHEN e.flagged_6h_before THEN 'Flagged in advance' ELSE 'Not flagged' END\n",
+        "         AS flagged_label,\n",
+        "       e.hours_flagged_before,\n",
+        "       max(CASE WHEN r.news2_total >= 5 THEN 1 ELSE 0 END) AS news2_5_before\n",
+        "FROM escalations_fact e\n",
+        "LEFT JOIN risk_scores r\n",
+        "  ON r.encounter_id = e.encounter_id\n",
+        " AND r.prediction_ts >= timestampadd(HOUR, -6, e.event_ts)\n",
+        " AND r.prediction_ts < e.event_ts\n",
+        "GROUP BY ALL\n",
+        "ORDER BY e.event_ts\n"
+      ]
+    },
+    {
+      "name": "devices",
+      "displayName": "Device health by day",
+      "queryLines": [
+        "SELECT date, site_id, device_id, uptime_pct / 100 AS uptime, battery_outages,\n",
+        "       stuck_minutes, messages_received, messages_expected\n",
+        "FROM device_health_daily\n",
+        "ORDER BY date\n"
+      ]
+    },
+    {
+      "name": "data_quality",
+      "displayName": "Pipeline expectations (latest run)",
+      "queryLines": [
+        "WITH latest AS (\n",
+        "  SELECT max_by(origin.update_id, timestamp) AS update_id\n",
+        "  FROM monitoring.medallion_event_log WHERE event_type = 'update_progress')\n",
+        "SELECT split_part(origin.flow_name, '.', 2) AS layer,\n",
+        "       split_part(origin.flow_name, '.', 3) AS table_name,\n",
+        "       e.name AS expectation, e.passed_records AS passed, e.failed_records AS failed,\n",
+        "       timestamp AS checked_at\n",
+        "FROM monitoring.medallion_event_log\n",
+        "LATERAL VIEW explode(from_json(details:flow_progress.data_quality.expectations,\n",
+        "  'array<struct<name:string,dataset:string,passed_records:bigint,failed_records:bigint>>'))\n",
+        "  x AS e\n",
+        "WHERE event_type = 'flow_progress' AND origin.update_id = (SELECT update_id FROM latest)\n",
+        "ORDER BY failed DESC, layer, table_name, expectation\n"
+      ]
+    },
+    {
+      "name": "reconciliation",
+      "displayName": "Readings reconciled, Bronze to Silver",
+      "queryLines": [
+        "SELECT bronze_rows, in_silver, quarantined, duplicates, missing_from_silver, linked,\n",
+        "       not_on_a_patient\n",
+        "FROM silver.vitals_reconciliation\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "ward",
+      "displayName": "Ward now",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Clinical Ops: deterioration early warning\n",
+                "\n",
+                "Synthetic data. Every patient and hospital is invented. Not a medical device. Scores come from the registered model (`@champion` in prod), refreshed by the scoring job."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "patients-now",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ward_now",
+                  "fields": [
+                    {
+                      "name": "count(encounter_id)",
+                      "expression": "COUNT(`encounter_id`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "count(encounter_id)",
+                  "displayName": "Patients"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Patients on the ward",
+                "showDescription": true,
+                "description": "At the latest scored hour"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "high-now",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ward_now",
+                  "fields": [
+                    {
+                      "name": "sum(is_high)",
+                      "expression": "SUM(`is_high`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(is_high)",
+                  "displayName": "High risk"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "High risk now",
+                "showDescription": true,
+                "description": "At or above the alert threshold, latest hour"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "alerts-per-nurse",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ward_hourly",
+                  "fields": [
+                    {
+                      "name": "measure(Alerts per nurse per shift)",
+                      "expression": "MEASURE(`Alerts per nurse per shift`)"
+                    },
+                    {
+                      "name": "daily(hour_ts)",
+                      "expression": "DATE_TRUNC(\"DAY\", `hour_ts`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(Alerts per nurse per shift)",
+                  "displayName": "Alerts per nurse per shift"
+                },
+                "period": {
+                  "fieldName": "daily(hour_ts)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Alerts per nurse per shift",
+                "showDescription": true,
+                "description": "Budget: about 2 (1 nurse per 5 patients, 12-hour shift)"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "flagged-in-advance",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "escalations",
+                  "fields": [
+                    {
+                      "name": "avg(flagged)",
+                      "expression": "AVG(`flagged`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(flagged)",
+                  "displayName": "Flagged in advance",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Escalations flagged in advance",
+                "showDescription": true,
+                "description": "High in the 6 h before. All hours scored; the honest test result is in the model card"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "high-risk-list",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ward_now",
+                  "fields": [
+                    {
+                      "name": "site_id",
+                      "expression": "`site_id`"
+                    },
+                    {
+                      "name": "unit_id",
+                      "expression": "`unit_id`"
+                    },
+                    {
+                      "name": "encounter_id",
+                      "expression": "`encounter_id`"
+                    },
+                    {
+                      "name": "risk",
+                      "expression": "`risk`"
+                    },
+                    {
+                      "name": "news2_total",
+                      "expression": "`news2_total`"
+                    },
+                    {
+                      "name": "top_reason",
+                      "expression": "`top_reason`"
+                    },
+                    {
+                      "name": "top_reason_reading",
+                      "expression": "`top_reason_reading`"
+                    },
+                    {
+                      "name": "second_reason",
+                      "expression": "`second_reason`"
+                    },
+                    {
+                      "name": "risk_band",
+                      "expression": "`risk_band`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "site_id",
+                    "displayName": "Site"
+                  },
+                  {
+                    "fieldName": "unit_id",
+                    "displayName": "Unit"
+                  },
+                  {
+                    "fieldName": "encounter_id",
+                    "displayName": "Stay"
+                  },
+                  {
+                    "fieldName": "risk",
+                    "displayName": "Risk (6 h)",
+                    "format": {
+                      "type": "number-percent",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 1
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "news2_total",
+                    "displayName": "NEWS2"
+                  },
+                  {
+                    "fieldName": "top_reason",
+                    "displayName": "Main reason"
+                  },
+                  {
+                    "fieldName": "top_reason_reading",
+                    "displayName": "Reading"
+                  },
+                  {
+                    "fieldName": "second_reason",
+                    "displayName": "Second reason"
+                  },
+                  {
+                    "fieldName": "risk_band",
+                    "displayName": "Band"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Patients at the latest hour, highest risk first",
+                "showDescription": true,
+                "description": "Band High = alert threshold fixed when the model was trained"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 12,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "alerts-by-site",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ward_hourly",
+                  "fields": [
+                    {
+                      "name": "daily(hour_ts)",
+                      "expression": "DATE_TRUNC(\"DAY\", `hour_ts`)"
+                    },
+                    {
+                      "name": "sum(alerts_raised)",
+                      "expression": "SUM(`alerts_raised`)"
+                    },
+                    {
+                      "name": "site_id",
+                      "expression": "`site_id`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "daily(hour_ts)",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Day"
+                },
+                "y": {
+                  "fieldName": "sum(alerts_raised)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Alerts"
+                },
+                "color": {
+                  "fieldName": "site_id",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Site"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Alerts raised per day",
+                "showDescription": true,
+                "description": "A patient entering High; re-alerts suppressed for 6 h"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "census-by-site",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ward_hourly",
+                  "fields": [
+                    {
+                      "name": "daily(hour_ts)",
+                      "expression": "DATE_TRUNC(\"DAY\", `hour_ts`)"
+                    },
+                    {
+                      "name": "avg(n_high)",
+                      "expression": "AVG(`n_high`)"
+                    },
+                    {
+                      "name": "site_id",
+                      "expression": "`site_id`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "daily(hour_ts)",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Day"
+                },
+                "y": {
+                  "fieldName": "avg(n_high)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "High-risk patients per unit (hourly average)"
+                },
+                "color": {
+                  "fieldName": "site_id",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Site"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "High-risk patients per unit",
+                "showDescription": true,
+                "description": "Hourly average per unit, by site"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 12,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ]
+    },
+    {
+      "name": "outcomes",
+      "displayName": "Alerts and escalations",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "outcomes-title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Alerts and escalations\n",
+                "\n",
+                "Escalations are recorded about 6 hours after they happen, so an alert's outcome is known only 12 hours later (or as soon as an escalation is recorded)."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "alert-precision",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "alerts",
+                  "fields": [
+                    {
+                      "name": "measure(Alert precision)",
+                      "expression": "MEASURE(`Alert precision`)"
+                    },
+                    {
+                      "name": "daily(alert_ts)",
+                      "expression": "DATE_TRUNC(\"DAY\", `alert_ts`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(Alert precision)",
+                  "displayName": "Alert precision",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                },
+                "period": {
+                  "fieldName": "daily(alert_ts)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Alert precision",
+                "showDescription": true,
+                "description": "Alerts followed by an escalation within 6 h (outcome known)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "escalations-total",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "escalations",
+                  "fields": [
+                    {
+                      "name": "count(encounter_id)",
+                      "expression": "COUNT(`encounter_id`)"
+                    },
+                    {
+                      "name": "daily(event_ts)",
+                      "expression": "DATE_TRUNC(\"DAY\", `event_ts`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "count(encounter_id)",
+                  "displayName": "Escalations"
+                },
+                "period": {
+                  "fieldName": "daily(event_ts)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Escalations recorded",
+                "showDescription": true,
+                "description": "Rapid response calls and ICU transfers"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "warning-time",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "escalations",
+                  "fields": [
+                    {
+                      "name": "avg(hours_flagged_before)",
+                      "expression": "AVG(`hours_flagged_before`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(hours_flagged_before)",
+                  "displayName": "Hours of warning",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    },
+                    "suffix": " h"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Average warning time",
+                "showDescription": true,
+                "description": "Hours between first High and the escalation, when flagged"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 2,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "alert-outcomes",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "alerts",
+                  "fields": [
+                    {
+                      "name": "daily(alert_ts)",
+                      "expression": "DATE_TRUNC(\"DAY\", `alert_ts`)"
+                    },
+                    {
+                      "name": "count(alert_ts)",
+                      "expression": "COUNT(`alert_ts`)"
+                    },
+                    {
+                      "name": "outcome",
+                      "expression": "`outcome`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "daily(alert_ts)",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Day"
+                },
+                "y": {
+                  "fieldName": "count(alert_ts)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Alerts"
+                },
+                "color": {
+                  "fieldName": "outcome",
+                  "displayName": "Outcome",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Escalated",
+                        "color": "#D55E00"
+                      },
+                      {
+                        "value": "No escalation",
+                        "color": "#009E73"
+                      },
+                      {
+                        "value": "Not known yet",
+                        "color": "#B4BCC4"
+                      }
+                    ]
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Alerts per day, by outcome",
+                "showDescription": false,
+                "description": ""
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "escalations-flagged",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "escalations",
+                  "fields": [
+                    {
+                      "name": "daily(event_ts)",
+                      "expression": "DATE_TRUNC(\"DAY\", `event_ts`)"
+                    },
+                    {
+                      "name": "count(encounter_id)",
+                      "expression": "COUNT(`encounter_id`)"
+                    },
+                    {
+                      "name": "flagged_label",
+                      "expression": "`flagged_label`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "daily(event_ts)",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Day"
+                },
+                "y": {
+                  "fieldName": "count(encounter_id)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Escalations"
+                },
+                "color": {
+                  "fieldName": "flagged_label",
+                  "displayName": "",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Flagged in advance",
+                        "color": "#0072B2"
+                      },
+                      {
+                        "value": "Not flagged",
+                        "color": "#D55E00"
+                      }
+                    ]
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Escalations per day: flagged in advance or not",
+                "showDescription": false,
+                "description": ""
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 5,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "escalation-list",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "escalations",
+                  "fields": [
+                    {
+                      "name": "event_ts",
+                      "expression": "`event_ts`"
+                    },
+                    {
+                      "name": "site_id",
+                      "expression": "`site_id`"
+                    },
+                    {
+                      "name": "unit_id",
+                      "expression": "`unit_id`"
+                    },
+                    {
+                      "name": "event_type",
+                      "expression": "`event_type`"
+                    },
+                    {
+                      "name": "flagged_label",
+                      "expression": "`flagged_label`"
+                    },
+                    {
+                      "name": "hours_flagged_before",
+                      "expression": "`hours_flagged_before`"
+                    },
+                    {
+                      "name": "news2_5_before",
+                      "expression": "`news2_5_before`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "event_ts",
+                    "displayName": "When"
+                  },
+                  {
+                    "fieldName": "site_id",
+                    "displayName": "Site"
+                  },
+                  {
+                    "fieldName": "unit_id",
+                    "displayName": "Unit"
+                  },
+                  {
+                    "fieldName": "event_type",
+                    "displayName": "Event"
+                  },
+                  {
+                    "fieldName": "flagged_label",
+                    "displayName": "Model"
+                  },
+                  {
+                    "fieldName": "hours_flagged_before",
+                    "displayName": "Hours of warning",
+                    "format": {
+                      "type": "number-plain",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 1
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "news2_5_before",
+                    "displayName": "NEWS2 >= 5 in the 6 h before (1 = yes)"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Every recorded escalation",
+                "showDescription": true,
+                "description": "NEWS2 >= 5 is the clinical urgent-response trigger, shown for context (not at the same alert budget)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 12,
+            "height": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "quality",
+      "displayName": "Devices and data quality",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "quality-title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Devices and data quality\n",
+                "\n",
+                "Wearable monitors send a reading every 5 minutes. The pipeline checks every reading and record against expectations; failing rows are quarantined, not lost."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "uptime",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "devices",
+                  "fields": [
+                    {
+                      "name": "avg(uptime)",
+                      "expression": "AVG(`uptime`)"
+                    },
+                    {
+                      "name": "daily(date)",
+                      "expression": "DATE_TRUNC(\"DAY\", `date`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(uptime)",
+                  "displayName": "Uptime",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                },
+                "period": {
+                  "fieldName": "daily(date)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Device uptime",
+                "showDescription": true,
+                "description": "Messages received / expected while worn"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "outages",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "devices",
+                  "fields": [
+                    {
+                      "name": "sum(battery_outages)",
+                      "expression": "SUM(`battery_outages`)"
+                    },
+                    {
+                      "name": "daily(date)",
+                      "expression": "DATE_TRUNC(\"DAY\", `date`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(battery_outages)",
+                  "displayName": "Outages",
+                  "format": {
+                    "type": "number",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                },
+                "period": {
+                  "fieldName": "daily(date)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Battery outages",
+                "showDescription": true,
+                "description": "Gaps of 25 minutes or more"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "missing",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "reconciliation",
+                  "fields": [
+                    {
+                      "name": "missing_from_silver",
+                      "expression": "`missing_from_silver`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "missing_from_silver",
+                  "displayName": "Missing"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Readings lost between Bronze and Silver",
+                "showDescription": true,
+                "description": "Should be 0; otherwise rerun with a full refresh"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "quarantined",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "reconciliation",
+                  "fields": [
+                    {
+                      "name": "quarantined",
+                      "expression": "`quarantined`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "quarantined",
+                  "displayName": "Quarantined"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Readings quarantined",
+                "showDescription": true,
+                "description": "Failed an expectation; kept with the rules they failed"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "uptime-by-site",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "devices",
+                  "fields": [
+                    {
+                      "name": "daily(date)",
+                      "expression": "DATE_TRUNC(\"DAY\", `date`)"
+                    },
+                    {
+                      "name": "avg(uptime)",
+                      "expression": "AVG(`uptime`)"
+                    },
+                    {
+                      "name": "site_id",
+                      "expression": "`site_id`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "daily(date)",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Day"
+                },
+                "y": {
+                  "fieldName": "avg(uptime)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Uptime",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "site_id",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Site"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Device uptime by site",
+                "showDescription": false,
+                "description": ""
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "stuck-by-site",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "devices",
+                  "fields": [
+                    {
+                      "name": "daily(date)",
+                      "expression": "DATE_TRUNC(\"DAY\", `date`)"
+                    },
+                    {
+                      "name": "sum(stuck_minutes)",
+                      "expression": "SUM(`stuck_minutes`)"
+                    },
+                    {
+                      "name": "site_id",
+                      "expression": "`site_id`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "daily(date)",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Day"
+                },
+                "y": {
+                  "fieldName": "sum(stuck_minutes)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Minutes"
+                },
+                "color": {
+                  "fieldName": "site_id",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Site"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Stuck-sensor minutes per day",
+                "showDescription": true,
+                "description": "Heart rate or blood pressure repeating 6+ identical values"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 5,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "expectations",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "data_quality",
+                  "fields": [
+                    {
+                      "name": "layer",
+                      "expression": "`layer`"
+                    },
+                    {
+                      "name": "table_name",
+                      "expression": "`table_name`"
+                    },
+                    {
+                      "name": "expectation",
+                      "expression": "`expectation`"
+                    },
+                    {
+                      "name": "passed",
+                      "expression": "`passed`"
+                    },
+                    {
+                      "name": "failed",
+                      "expression": "`failed`"
+                    },
+                    {
+                      "name": "checked_at",
+                      "expression": "`checked_at`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "layer",
+                    "displayName": "Layer"
+                  },
+                  {
+                    "fieldName": "table_name",
+                    "displayName": "Table"
+                  },
+                  {
+                    "fieldName": "expectation",
+                    "displayName": "Expectation"
+                  },
+                  {
+                    "fieldName": "passed",
+                    "displayName": "Passed"
+                  },
+                  {
+                    "fieldName": "failed",
+                    "displayName": "Failed"
+                  },
+                  {
+                    "fieldName": "checked_at",
+                    "displayName": "Checked at"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Pipeline expectations, latest run",
+                "showDescription": true,
+                "description": "From the pipeline's event log (monitoring.medallion_event_log)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 12,
+            "height": 8
+          }
+        }
+      ]
+    },
+    {
+      "name": "filters",
+      "displayName": "Filters",
+      "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "filter-site",
+            "queries": [
+              {
+                "name": "site_ward_hourly",
+                "query": {
+                  "datasetName": "ward_hourly",
+                  "fields": [
+                    {
+                      "name": "site_id",
+                      "expression": "`site_id`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "site_ward_now",
+                "query": {
+                  "datasetName": "ward_now",
+                  "fields": [
+                    {
+                      "name": "site_id",
+                      "expression": "`site_id`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "site_alerts",
+                "query": {
+                  "datasetName": "alerts",
+                  "fields": [
+                    {
+                      "name": "site_id",
+                      "expression": "`site_id`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "site_escalations",
+                "query": {
+                  "datasetName": "escalations",
+                  "fields": [
+                    {
+                      "name": "site_id",
+                      "expression": "`site_id`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "site_devices",
+                "query": {
+                  "datasetName": "devices",
+                  "fields": [
+                    {
+                      "name": "site_id",
+                      "expression": "`site_id`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "site_id",
+                    "displayName": "Site",
+                    "queryName": "site_ward_hourly"
+                  },
+                  {
+                    "fieldName": "site_id",
+                    "displayName": "Site",
+                    "queryName": "site_ward_now"
+                  },
+                  {
+                    "fieldName": "site_id",
+                    "displayName": "Site",
+                    "queryName": "site_alerts"
+                  },
+                  {
+                    "fieldName": "site_id",
+                    "displayName": "Site",
+                    "queryName": "site_escalations"
+                  },
+                  {
+                    "fieldName": "site_id",
+                    "displayName": "Site",
+                    "queryName": "site_devices"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Site"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        }
+      ]
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "canvasBackgroundColor": {
+        "light": "#F7F5F0",
+        "dark": "#14191F"
+      },
+      "widgetBackgroundColor": {
+        "light": "#FFFFFF",
+        "dark": "#1C232B"
+      },
+      "widgetBorderColor": {
+        "light": "#FFFFFF",
+        "dark": "#1C232B"
+      },
+      "fontColor": {
+        "light": "#1B2A3A",
+        "dark": "#E6EAEE"
+      },
+      "selectionColor": {
+        "light": "#0072B2",
+        "dark": "#56B4E9"
+      },
+      "visualizationColors": [
+        "#0072B2",
+        "#E69F00",
+        "#009E73",
+        "#CC79A7",
+        "#56B4E9",
+        "#D55E00",
+        "#F0E442"
+      ],
+      "widgetHeaderAlignment": "LEFT",
+      "widgetCornerRadius": 8
+    }
+  }
+}

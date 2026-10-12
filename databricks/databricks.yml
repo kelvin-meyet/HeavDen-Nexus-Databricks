@@ -58,6 +58,9 @@ variables:
   scoring_model:
     description: Which registered version scores the patient-hours (an alias, or "latest").
     default: champion
+  warehouse_id:
+    description: Shared SQL warehouse the dashboards run on (terraform output sql_warehouse_id).
+    default: 0a14d0d391ce8af6
 
 targets:
   # Personal development: resources are prefixed with "[dev <user>]" and schedules are paused.
