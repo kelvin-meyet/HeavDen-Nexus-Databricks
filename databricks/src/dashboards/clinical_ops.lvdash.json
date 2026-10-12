@@ -256,7 +256,7 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Alerts per nurse per shift",
+                "title": "Alerts per nurse per shift (latest day)",
                 "showDescription": true,
                 "description": "Budget: about 2 (1 nurse per 5 patients, 12-hour shift)"
               }
@@ -636,7 +636,7 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Alert precision",
+                "title": "Alert precision (latest day)",
                 "showDescription": true,
                 "description": "Alerts followed by an escalation within 6 h (outcome known)"
               }
@@ -685,7 +685,7 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Escalations recorded",
+                "title": "Escalations recorded (latest day)",
                 "showDescription": true,
                 "description": "Rapid response calls and ICU transfers"
               }
@@ -1074,7 +1074,7 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Device uptime",
+                "title": "Device uptime (latest day)",
                 "showDescription": true,
                 "description": "Messages received / expected while worn"
               }
@@ -1131,7 +1131,7 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Battery outages",
+                "title": "Battery outages (latest day)",
                 "showDescription": true,
                 "description": "Gaps of 25 minutes or more"
               }
