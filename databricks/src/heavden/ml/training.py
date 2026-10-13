@@ -16,7 +16,8 @@ A **retrain** (`--mode retrain`, started by an approved retrain request) differs
 the split is counted back from the newest labelled hour (`train.RecentSplit`), and the chosen
 model must also beat the current champion on the test block, at the same alert budget
 (`compare_with_champion`), to become `@challenger`. Promotion to `@champion` stays a separate,
-approved step.
+approved step (`heavden.ml.model_ops`). A retrain is a decision someone approved, so it writes a
+row to `<catalog>.ml.ops_audit`.
 
 On Databricks `main` reads `<catalog>.gold.training_set` with Spark, logs to the workspace
 experiment and registers in Unity Catalog as `<catalog>.ml.deterioration_risk`.
@@ -25,7 +26,6 @@ experiment and registers in Unity Catalog as `<catalog>.ml.deterioration_risk`.
 from __future__ import annotations
 
 import argparse
-import json
 from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path
@@ -33,7 +33,7 @@ from pathlib import Path
 import pandas as pd
 
 import heavden
-from heavden.ml import evaluate, tracking, train
+from heavden.ml import evaluate, model_ops, tracking, train
 
 # What the logged model needs to load: our code travels inside the model (code_paths), these
 # libraries are pinned to the versions it was trained with.
@@ -44,6 +44,9 @@ RESULT_MARKER = "TRAINING_RESULT"
 BETTER_SHARE = 0.75  # of paired resamples: flags at least as many escalations; higher AUROC
 NOT_WORSE_SHARE = 0.10  # of paired resamples in which its AUPRC is the higher (a guard)
 BRIER_SLACK = 1.10  # its Brier score may be at most 10% worse than the champion's
+# Spark returns rows in no promised order, and subsampling and resampling depend on it.
+# A fixed order makes a run repeatable: the same rows give the same model and gate numbers.
+ROW_ORDER = ["prediction_ts", "encounter_id"]
 
 
 @dataclass
@@ -182,6 +185,7 @@ def run_training(
     experiment must be set by the caller. With a `champion`, the chosen model must beat it on
     the test block too (a retrain)."""
     budget = budget or evaluate.AlertBudget()
+    table = table.sort_values(ROW_ORDER, ignore_index=True)
     train_df, valid, test = train.split_blocks(table, split)
     rows = {"train": len(train_df), "valid": len(valid), "test": len(test)}
     if min(rows.values()) == 0 or valid["label"].sum() == 0:
@@ -287,7 +291,30 @@ def result_line(model_name: str, outcome: TrainingOutcome) -> str:
         "news2_test_auprc": outcome.news2_test["auprc"],
         "vs_champion": outcome.vs_champion,
     }
-    return f"{RESULT_MARKER} {json.dumps(payload)}"
+    return f"{RESULT_MARKER} {model_ops.to_json(payload)}"
+
+
+def retrain_audit_row(
+    model_name: str, outcome: TrainingOutcome, champion_version: str, context: dict
+) -> dict:
+    """The retrain as a row of `ml.ops_audit`: the new version, the champion it was judged
+    against, whether it became the challenger, and the numbers the gates looked at."""
+    details = {
+        "model_type": outcome.chosen.name,
+        "rows": outcome.rows,
+        "valid_auprc": outcome.chosen.valid_metrics["auprc"],
+        "news2_valid_auprc": outcome.news2_valid["auprc"],
+        "vs_champion": outcome.vs_champion,
+    }
+    return model_ops.audit_row(
+        "retrain",
+        "challenger" if outcome.passed_gates else "failed_gates",
+        model_name,
+        str(outcome.version),
+        champion_version,
+        context,
+        details,
+    )
 
 
 def to_utc(df: pd.DataFrame, columns: tuple[str, ...]) -> pd.DataFrame:
@@ -309,6 +336,9 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--retrain-valid-days", type=float, default=train.RecentSplit.valid_days)
     parser.add_argument("--retrain-test-days", type=float, default=train.RecentSplit.test_days)
+    parser.add_argument(  # may arrive empty: the job parameter defaults to ""
+        "--context", nargs="?", default="", const="", help="who approved the retrain (base64)"
+    )
     args = parser.parse_args(argv)
 
     import mlflow
@@ -356,4 +386,8 @@ def main(argv: list[str] | None = None) -> None:
         f"vs NEWS2 {outcome.news2_valid['auprc']:.3f}; "
         f"test AUPRC {outcome.test['auprc']:.3f} vs NEWS2 {outcome.news2_test['auprc']:.3f}"
     )
+    if champion is not None:
+        context = model_ops.decode_context(args.context)
+        row = retrain_audit_row(model_name, outcome, champion.version, context)
+        model_ops.write_audit(spark, args.catalog, [row])
     print(result_line(model_name, outcome))

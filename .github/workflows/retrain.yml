@@ -6,11 +6,17 @@
 #
 # An approval runs prod's training job in retrain mode: the latest days are validation and test,
 # all earlier history trains, and the new model becomes @challenger only if it beats NEWS2 and
-# the current @champion (at the same alert budget: more escalations flagged, better ranking). Nothing is promoted here: @champion changes only in a separate, approved
-# step. The job can't know whether enough has happened since the drift began: approve only once
-# there are enough outcomes under the new conditions (the runbook says how long to wait).
+# the current @champion (at the same alert budget: more escalations flagged, better ranking).
+# The job can't know whether enough has happened since the drift began: approve only once there
+# are enough outcomes under the new conditions (the runbook says how long to wait). A request
+# can be held for days; prod-run opens no second one while it is open.
+#
+# Nothing is promoted here. A model that passes opens a promotion request (promote.yml), which
+# waits for its own approval. The retrain is recorded in ml.ops_audit with who approved it; a
+# rejection is copied there by the next prod-run (a rejected run never gets prod credentials).
 
 name: retrain
+run-name: "Retrain request: ${{ inputs.title || 'started by hand' }}"
 
 on:
   workflow_dispatch:
@@ -19,11 +25,15 @@ on:
         description: "The drift check's result (the JSON after DRIFT_CHECK_RESULT in the job's output)"
         type: string
         required: true
+      title:
+        description: "What the request is about, for the run's name (prod-run fills this in)"
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
-# One request at a time: a second "act" while one is waiting queues behind it.
+# A backstop for requests started by hand: a second one queues behind the first.
 concurrency:
   group: retrain
   cancel-in-progress: false
@@ -58,7 +68,9 @@ jobs:
             echo "| Inputs at **one site** (e.g. \`feature_psi spo2_mean_1h at SITE_B\`), performance fine | a device fault | **Reject**: fix the sensors |"
             echo "| \`missing_rate_change\` or \`quarantine_rate\` | a payload or pipeline change | **Reject**: fix the pipeline |"
             echo "| Inputs at **every site**, performance fine | a new mix of patients | **Reject** for now, check again when outcomes arrive |"
-            echo "| \`auprc_drop\` or \`brier_rise\`, inputs stable | outcomes changed (e.g. a new protocol) | **Approve** |"
+            echo "| \`auprc_drop\` or \`brier_rise\`, inputs stable | outcomes changed (e.g. a new protocol) | **Approve**, once about a week of outcomes under the new conditions exists |"
+            echo
+            echo "Give the reason in the review comment: it is recorded in \`ml.ops_audit\`. This request shows the check that opened it; later checks are in \`monitoring.drift_checks\`."
             echo
             echo "Details: notebook \`30_drift_check_and_psi\` and the Drift Incident Runbook (\`docs/corpus/drift-incident-runbook.md\`)."
           } >> "$GITHUB_STEP_SUMMARY"
@@ -71,11 +83,17 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      actions: read # who approved, for the audit trail
     env:
       DATABRICKS_AUTH_TYPE: azure-cli
+      GH_TOKEN: ${{ github.token }}
     defaults:
       run:
         working-directory: databricks
+    outputs:
+      passed: ${{ steps.train.outputs.passed }}
+      version: ${{ steps.train.outputs.version }}
+      result: ${{ steps.train.outputs.result }}
     steps:
       - uses: actions/checkout@v4
 
@@ -92,30 +110,34 @@ jobs:
       # The job prints its result on one line (TRAINING_RESULT {json}); without it this step
       # fails, so a run that said nothing is never reported as a new challenger.
       - name: Retrain on the latest data and compare with the champion
+        id: train
         shell: bash
+        env:
+          CHECK: ${{ inputs.check }}
         run: |
-          databricks bundle run train -t prod --params mode=retrain 2>&1 | tee "$RUNNER_TEMP/train.log"
-          result=$(grep -o 'TRAINING_RESULT {.*}' "$RUNNER_TEMP/train.log" | tail -1 | sed 's/^TRAINING_RESULT //')
-          jq -e .version <<<"$result" >/dev/null || { echo "::error::the training job printed no result line"; exit 1; }
-          {
-            echo "## Retrained: version $(jq -r .version <<<"$result") ($(jq -r .model_type <<<"$result"))"
-            echo
-            if [ "$(jq -r .passed_gates <<<"$result")" = "true" ]; then
-              echo "**Passed every gate: it is now \`@challenger\`.** \`@champion\` is unchanged until a promotion is approved."
-            else
-              echo "**Did not pass the gates: no alias.** \`@champion\` stays. The version is registered, so the attempt is on record."
-            fi
-            echo
-            echo "| On the latest days (test), same alert budget | New model | Champion | Gate |"
-            echo "|---|---|---|---|"
-            jq -r '.vs_champion | select(. != null) |
-              "| Escalations flagged | \(.escalations_flagged * 100 | round)% of \(.escalations) | \(.champion_escalations_flagged * 100 | round)% | at least as many in \(.flagged_at_least_share * 100 | round)% of resamples (needs 75%) |",
-              "| AUROC | \(.auroc * 1000 | round / 1000) | \(.champion_auroc * 1000 | round / 1000) | higher in \(.auroc_better_share * 100 | round)% of resamples (needs 75%) |",
-              "| AUPRC | \(.auprc * 1000 | round / 1000) | \(.champion_auprc * 1000 | round / 1000) | higher in \(.auprc_better_share * 100 | round)% of resamples (needs 10%: not clearly worse) |",
-              "| Brier score | \(.brier * 10000 | round / 10000) | \(.champion_brier * 10000 | round / 10000) | at most 10% worse |",
-              "| Alerts per nurse per shift | \(.alerts_per_nurse_shift * 100 | round / 100) | \(.champion_alerts_per_nurse_shift * 100 | round / 100) | |"' <<<"$result"
-            echo
-            echo "Resamples are of whole patient stays, the same ones for both models. The champion is given a fresh alert threshold from the same validation days, so the comparison is about the models, not about how old a threshold is."
-            echo
-            jq -r '"Validation AUPRC \(.valid_auprc * 1000 | round / 1000) vs NEWS2 \(.news2_valid_auprc * 1000 | round / 1000). Rows: train \(.rows.train), validation \(.rows.valid), test \(.rows.test)."' <<<"$result"
-          } >> "$GITHUB_STEP_SUMMARY"
+          context=$(bash ../.github/scripts/review.sh context retrain-approval "$(jq -c '{check_id, episode}' <<<"$CHECK")")
+          databricks bundle run train -t prod --params "mode=retrain,context=$context" 2>&1 | tee "$RUNNER_TEMP/train.log"
+          result=$(grep -o 'TRAINING_RESULT {.*}' "$RUNNER_TEMP/train.log" | tail -1 | sed 's/^TRAINING_RESULT //' || true)
+          jq -e .version <<<"$result" >/dev/null 2>&1 || { echo "::error::the training job printed no result line"; exit 1; }
+          echo "passed=$(jq -r .passed_gates <<<"$result")" >> "$GITHUB_OUTPUT"
+          echo "version=$(jq -r .version <<<"$result")" >> "$GITHUB_OUTPUT"
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+          bash ../.github/scripts/training_summary.sh "$result" >> "$GITHUB_STEP_SUMMARY"
+
+  request-promotion:
+    needs: retrain
+    if: needs.retrain.outputs.passed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write # start promote.yml with this run's own token
+      contents: read
+    steps:
+      - name: Open a promotion request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.retrain.outputs.version }}
+          RESULT: ${{ needs.retrain.outputs.result }}
+        run: |
+          gh workflow run promote.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f version="$VERSION" -f retrain="$RESULT"
+          echo "Promotion request opened for version $VERSION: Actions -> promote. It waits for approval." >> "$GITHUB_STEP_SUMMARY"

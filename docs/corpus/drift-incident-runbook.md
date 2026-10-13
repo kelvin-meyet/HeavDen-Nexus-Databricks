@@ -20,7 +20,7 @@ The deterioration risk model was trained on past data. When the data or the worl
 
 1. The `drift_check` job runs in production after each new batch of data has been scored.
 2. It compares the latest day of data and predictions with the data the champion was trained and calibrated on, and the latest two days of predictions with their outcomes once known (about 12 hours later: the 6-hour window, then 6 hours until escalations are recorded). It checks all sites together and each site on its own.
-3. If any signal reaches the **act** level below, the workflow that ran the check opens a **retrain request** on GitHub (the `retrain.yml` workflow), which lists the breaches. A **warn** is only recorded in the monitoring tables.
+3. If any signal reaches the **act** level below, the workflow that ran the check opens a **retrain request** on GitHub (the `retrain.yml` workflow), which lists the breaches. A **warn** is only recorded in the monitoring tables. While a request is open (it may be held for days), later checks that reach **act** open no second one.
 4. `retrain.yml` **waits for a human approval** in the GitHub `retrain-approval` environment, and GitHub **emails** the approver. Nothing is retrained automatically, and rejecting the request is a normal outcome (see section 5).
 
 ## 3. Thresholds
@@ -48,7 +48,7 @@ The deterioration risk model was trained on past data. When the data or the worl
 3. Which **features** moved? Only SpO2? All respiratory features? None (only outcomes)?
 4. Check the pipeline event log and `_rescued_data` for schema problems.
 5. Check the document library for recent **field safety notices** and **protocol changes**.
-6. Decide using section 5, record the decision in `ml.ops_audit`, and approve or reject the retrain request on GitHub with a comment.
+6. Decide using section 5, and approve or reject the retrain request on GitHub **with a comment giving the reason**. The decision, the reviewer and the comment are recorded in `ml.ops_audit`: an approved retrain, promotion or rollback at once, a rejection at the next production run (a rejected request is given no access to production, so it cannot record itself).
 
 ## 5. Scenarios and correct responses
 
@@ -74,7 +74,11 @@ The deterioration risk model was trained on past data. When the data or the worl
 
 ## 6. Promotion after a retrain
 
-A retrained model is registered as `@challenger`. It becomes `@challenger` only if it beats NEWS2 on validation and beats the current `@champion` on the most recent days, with both models held to the same alert budget. A few days hold too few escalations to trust a single comparison, so both are scored on the same resamples of patient stays, and the new model must flag at least as many escalations in at least 75% of them, have the higher AUROC in at least 75%, not be clearly worse on AUPRC, and have a Brier score no more than 10% worse. AUPRC alone is not the gate: after a protocol change it barely moves, because it is set by the highest-ranked patients, while the retrained model's gain is in the escalations further down the ranking. Promotion needs a second approval in the GitHub `production-approval` environment. Rollback is the `rollback.yml` workflow, which points `@champion` back at the previous version.
+A retrained model is registered as a new version. It becomes `@challenger` only if it beats NEWS2 on validation and beats the current `@champion` on the most recent days, with both models held to the same alert budget. A few days hold too few escalations to trust a single comparison, so both are scored on the same resamples of patient stays, and the new model must flag at least as many escalations in at least 75% of them, have the higher AUROC in at least 75%, not be clearly worse on AUPRC, and have a Brier score no more than 10% worse. AUPRC alone is not the gate: after a protocol change it barely moves, because it is set by the highest-ranked patients, while the retrained model's gain is in the escalations further down the ranking.
+
+**Promotion.** A model that passes opens a promotion request (the `promote.yml` workflow), which needs a second approval, in the GitHub `production-approval` environment. Approving points `@champion` at the new version. From the next scoring run, new patient-hours are scored by it, at its own alert threshold; hours already scored keep the version that scored them. The promotion is refused for a version that did not pass its gates, or that was compared with a champion other than the one in use.
+
+**Rollback.** The `rollback.yml` workflow, started by hand with a reason and approved in the same environment, points `@champion` back at the previous champion, which is kept as `@previous_champion`. Running it again undoes the rollback.
 
 ## 7. Communication
 

@@ -9,7 +9,11 @@
 # the first model), scoring scores the new hours with @champion and rebuilds the alert,
 # escalation and KPI tables, and the drift check compares the latest data with the champion's.
 # If the check reaches "act", this workflow opens a retrain request (retrain.yml), which waits
-# for Kelvin's approval; GitHub emails him. No stored token: it uses the run's own.
+# for Kelvin's approval; GitHub emails him. No stored token: it uses the run's own. While a
+# request is open (it may be held for days), a later "act" opens no second one.
+#
+# Every run also copies the requests rejected on GitHub into ml.ops_audit: a rejected run never
+# gets prod credentials, so it can't record itself.
 
 name: prod-run
 
@@ -60,6 +64,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      actions: read # the reviews of retrain, promotion and rollback requests
     env:
       DATABRICKS_AUTH_TYPE: azure-cli
     defaults:
@@ -80,6 +85,21 @@ jobs:
       - uses: databricks/setup-cli@v1.17.0
         with:
           version: 1.17.0
+
+      # The audit copy must never block the data jobs (GitHub keeps the record either way), so
+      # a failure here only shows as a warning. The job skips rejections it already holds.
+      - name: Record rejected requests in ml.ops_audit
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rejections=$(bash ../.github/scripts/review.sh rejections)
+          if [ -n "$rejections" ]; then
+            bash ../.github/scripts/model_ops.sh record-rejections "" "$rejections"
+          else
+            echo "No rejected requests on GitHub."
+          fi
 
       - name: Copy Azure SQL into Bronze
         if: inputs.ingest_sql
@@ -114,8 +134,8 @@ jobs:
           EPISODE: ${{ inputs.episode }}
         run: |
           databricks bundle run drift_check -t prod --params episode="$EPISODE" 2>&1 | tee "$RUNNER_TEMP/drift.log"
-          result=$(grep -o 'DRIFT_CHECK_RESULT {.*}' "$RUNNER_TEMP/drift.log" | tail -1 | sed 's/^DRIFT_CHECK_RESULT //')
-          jq -e .status <<<"$result" >/dev/null || { echo "::error::the drift check printed no result line"; exit 1; }
+          result=$(grep -o 'DRIFT_CHECK_RESULT {.*}' "$RUNNER_TEMP/drift.log" | tail -1 | sed 's/^DRIFT_CHECK_RESULT //' || true)
+          jq -e .status <<<"$result" >/dev/null 2>&1 || { echo "::error::the drift check printed no result line"; exit 1; }
           echo "status=$(jq -r .status <<<"$result")" >> "$GITHUB_OUTPUT"
           echo "result=$result" >> "$GITHUB_OUTPUT"
           {
@@ -132,10 +152,22 @@ jobs:
       actions: write # start retrain.yml with this run's own token
       contents: read
     steps:
-      - name: Open a retrain request
+      # One incident, one request: a request may be held until enough outcomes exist, and the
+      # checks run meanwhile would each open another. If the look-up itself fails, a request is
+      # opened anyway: a duplicate is better than a missed alert.
+      - name: Open a retrain request, unless one is open
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           CHECK: ${{ needs.run-prod.outputs.drift_result }}
         run: |
-          gh workflow run retrain.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f check="$CHECK"
+          open=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow retrain.yml --limit 20 \
+            --json status,url,displayTitle \
+            --jq '[.[] | select(.status != "completed")] | first // empty | "[\(.displayTitle)](\(.url))"') || open=""
+          if [ -n "$open" ]; then
+            echo "A retrain request is already open, so no second one was opened: $open. This check is recorded in \`monitoring.drift_checks\`." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          title=$(jq -r '(if .episode then "episode \(.episode), " else "" end) + "check \(.check_id)"' <<<"$CHECK")
+          gh workflow run retrain.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f check="$CHECK" -f title="$title"
           echo "Retrain request opened: Actions -> retrain. It waits for approval." >> "$GITHUB_STEP_SUMMARY"

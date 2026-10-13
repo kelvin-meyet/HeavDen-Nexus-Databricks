@@ -1,0 +1,53 @@
+# Move the registry's aliases, with an audit trail (Plan.md §10.4; code in
+# src/heavden/ml/model_ops.py, run through src/jobs/model_ops.py). Scoring and the drift check
+# load @champion, so moving that alias is the release and moving it back is the rollback.
+#
+# Job parameter action:
+#   status             (default) print the aliases and versions; changes nothing
+#   selftest           set, read and remove a throwaway alias (staging, after every merge)
+#   promote            @champion -> a challenger that beat the current champion (promote.yml)
+#   rollback           @champion -> @previous_champion, or a named version (rollback.yml)
+#   record-rejections  requests rejected on GitHub -> ml.ops_audit (prod-run)
+# promote, rollback and record-rejections write to <catalog>.ml.ops_audit. No schedule: prod runs
+# it only from a workflow that Kelvin approved.
+resources:
+  jobs:
+    model_ops:
+      name: heavden-model-ops
+      description: Promotes or rolls back ${var.catalog}.ml.deterioration_risk by moving its aliases, and records each decision in ${var.catalog}.ml.ops_audit.
+      max_concurrent_runs: 1
+      parameters:
+        - name: action
+          default: status
+        - name: version # empty: the alias (@challenger to promote, @previous_champion to roll back)
+          default: ""
+        - name: context # who decided and why, from the workflow (base64 JSON)
+          default: ""
+      performance_target: STANDARD
+      timeout_seconds: 900
+      tags:
+        project: heavden
+        component: model-ops
+      tasks:
+        - task_key: model_ops
+          environment_key: ml
+          spark_python_task:
+            python_file: ../src/jobs/model_ops.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --action
+              - "{{job.parameters.action}}"
+              - --version
+              - "{{job.parameters.version}}"
+              - --context
+              - "{{job.parameters.context}}"
+      environments:
+        # The other jobs' environment; this one loads no model, but the wheel asks for LightGBM,
+        # and pinning it here keeps pip from choosing a version.
+        - environment_key: ml
+          spec:
+            environment_version: "6"
+            dependencies:
+              - ../../dist/*.whl
+              - lightgbm==4.6.0
