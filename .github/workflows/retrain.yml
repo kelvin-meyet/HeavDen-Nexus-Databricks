@@ -1,0 +1,73 @@
+# A retrain request (Plan.md §10.4). Started by prod-run when a drift check reaches "act"; it can
+# also be started by hand with a check's result line. It shows what the check found, then waits
+# for Kelvin in the retrain-approval environment: GitHub emails the request, and approving or
+# rejecting it is the decision. Not every drift calls for a retrain (a sensor fault doesn't), so
+# rejecting is a normal outcome: see docs/corpus/drift-incident-runbook.md.
+#
+# Nothing here calls Databricks yet: the retraining job that an approval starts comes next.
+
+name: retrain
+
+on:
+  workflow_dispatch:
+    inputs:
+      check:
+        description: "The drift check's result (the JSON after DRIFT_CHECK_RESULT in the job's output)"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+# One request at a time: a second "act" while one is waiting queues behind it.
+concurrency:
+  group: retrain
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: What the drift check found
+        env:
+          CHECK: ${{ inputs.check }}
+        run: |
+          jq -e . <<<"$CHECK" >/dev/null || { echo "::error::the check input is not JSON"; exit 1; }
+          {
+            echo "## Drift check: $(jq -r '.status | ascii_upcase' <<<"$CHECK")"
+            echo
+            jq -r '"- **Catalog:** \(.catalog), model version \(.model_version)",
+                   "- **Episode:** \(.episode // "none")",
+                   "- **Data window:** \(.window_start) to \(.window_end)",
+                   "- **Outcomes known through:** \(.labels_through)",
+                   "- **Check:** `\(.check_id)` in `\(.catalog).monitoring.drift_checks`"' <<<"$CHECK"
+            echo
+            echo "### Breaches ($(jq -r .n_act <<<"$CHECK") act, $(jq -r .n_warn <<<"$CHECK") warn)"
+            echo
+            jq -r '.breaches[] | "- \(.)"' <<<"$CHECK"
+            echo
+            echo "### Before approving"
+            echo
+            echo "| What the breaches look like | Likely cause | Decision |"
+            echo "|---|---|---|"
+            echo "| Inputs at **one site** (e.g. \`feature_psi spo2_mean_1h at SITE_B\`), performance fine | a device fault | **Reject**: fix the sensors |"
+            echo "| \`missing_rate_change\` or \`quarantine_rate\` | a payload or pipeline change | **Reject**: fix the pipeline |"
+            echo "| Inputs at **every site**, performance fine | a new mix of patients | **Reject** for now, check again when outcomes arrive |"
+            echo "| \`auprc_drop\` or \`brier_rise\`, inputs stable | outcomes changed (e.g. a new protocol) | **Approve** |"
+            echo
+            echo "Details: notebook \`30_drift_check_and_psi\` and the Drift Incident Runbook (\`docs/corpus/drift-incident-runbook.md\`)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  retrain:
+    needs: report
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: retrain-approval # waits here for Kelvin; rejecting ends the request
+    steps:
+      - name: Approved
+        env:
+          CHECK: ${{ inputs.check }}
+        run: |
+          echo "Retraining approved for check $(jq -r .check_id <<<"$CHECK")." >> "$GITHUB_STEP_SUMMARY"
+          echo "The retraining job is not wired in yet (next step of Phase 3)." >> "$GITHUB_STEP_SUMMARY"

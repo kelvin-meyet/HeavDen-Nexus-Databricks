@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -131,3 +133,45 @@ def test_the_check_scores_with_the_model_it_judges_and_reports_the_worst_first()
     assert "feature_psi spo2_mean_1h at SITE_B" in " ".join(result["breaches"])
     # no escalations in the labelled window: performance can't be judged
     assert (metrics.loc[metrics["signal"] == "auprc_drop", "level"] == "not enough data").all()
+
+
+def test_the_result_line_is_one_line_of_json_a_workflow_can_read():
+    check = {
+        "check_id": "abc",
+        "checked_at": pd.Timestamp("2026-11-17", tz="UTC"),
+        "episode": None,
+        "model_version": "1",
+    }
+    result = {"status": "act", "n_warn": 1, "n_act": 2, "breaches": ["auprc_drop: 0.435 (act)"]}
+    line = dc.result_line(check, result)
+    marker, payload = line.split(" ", 1)
+    assert marker == dc.RESULT_MARKER and len(line.splitlines()) == 1
+    read = json.loads(payload)
+    assert read["status"] == "act" and read["n_act"] == 2 and read["episode"] is None
+    assert read["breaches"] == result["breaches"] and read["checked_at"].startswith("2026-11-17")
+
+
+def test_performance_is_judged_only_on_hours_after_the_models_own_data():
+    baseline = _hours(90, 48, seed=1)  # T0 .. T0 + 47 h
+    features = _hours(90, 24, seed=2, start=T0 + pd.Timedelta(days=3))
+    log = features.assign(risk=0.5, risk_band="Low")
+    quality = dc.ReadingQuality(1000, 0, pd.Series({"spo2": 0.0}), pd.Series({"spo2": 0.0}))
+    reference = {"auprc": 0.9, "brier": 0.001}  # far better than this model: a drop if judged
+
+    def judged(training_set: pd.DataFrame) -> pd.Series:
+        metrics = dc.run_check(
+            _SpO2Model(), features, log, training_set, baseline, reference, quality
+        )
+        return metrics[metrics["signal"] == "auprc_drop"].iloc[0]
+
+    def labelled(start: pd.Timestamp) -> pd.DataFrame:
+        df = _hours(150, 30, seed=4, start=start)
+        escalated = df["encounter_id"].isin(df["encounter_id"].unique()[:30])
+        return df.assign(
+            label=(escalated & (df["prediction_ts"] >= start + pd.Timedelta(hours=24))) * 1.0
+        )
+
+    inside = judged(labelled(T0))  # every labelled hour is one the model was built on
+    assert inside["level"] == "not enough data" and inside["n"] == 0
+    after = judged(labelled(T0 + pd.Timedelta(days=2)))
+    assert after["level"] == "act" and after["n"] == 30
