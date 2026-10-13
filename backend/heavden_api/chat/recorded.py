@@ -22,7 +22,7 @@ EXAMPLE_QUESTIONS = (
     "What share of escalations in the last 7 days were flagged in advance, by site?",
     "How did daily alerts change over the last week?",
     "What should a nurse do when a patient's risk band turns High?",
-    "What NEWS2 score triggers a rapid response call, and how did that change in November?",
+    "What NEWS2 score triggers a rapid response call, and how did that change in October?",
     "If SpO2 readings drift down at one site only, should we retrain the model?",
     "How much better than NEWS2 is the model, and what are its limitations?",
     "Why is the highest-risk patient flagged right now, and what does the protocol say to do?",

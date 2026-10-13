@@ -494,6 +494,9 @@ def main() -> None:
     if args.dry_run:
         return
 
+    from generator import clock
+
+    clock.require_past(ward.activity.end)
     out = terraform_outputs()
     target = f"{out['sql_server_fqdn']} / {out['sql_database']} / schema {args.env}"
     if not args.yes and input(f"Load into {target}? [y/N] ").strip().lower() != "y":

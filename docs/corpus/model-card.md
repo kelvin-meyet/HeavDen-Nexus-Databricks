@@ -3,7 +3,7 @@ doc_id: HD-ML-001
 title: "Model Card: deterioration_risk"
 version: "1.0"
 status: current
-effective_date: 2026-11-01
+effective_date: 2026-09-20
 owner: HeavDen ML Platform Team
 audience: clinicians, clinical safety officer, ML and data teams
 ---
@@ -95,8 +95,8 @@ Grouped SHAP importance, largest first: patient background (age, long-term condi
 - **Uneven alert load by age.** Wards with very old patients carry most of the alerts, mostly false alarms; younger patients rarely alert (section 5). Clinicians should not be reassured by a Low band in a young patient who looks unwell.
 - **Only six long-term conditions.** The model knows COPD, heart failure, diabetes, chronic kidney disease, hypertension and atrial fibrillation (plus beta-blockers), and `n_conditions` counts only these. Conditions that matter in real wards, such as ischaemic heart disease, anaemia, dementia or alcohol and drug dependence, are not represented, because the synthetic data gives them no effect.
 - **Sudden events.** Escalations without a gradual change in vital signs beforehand cannot be predicted.
-- **Measurement faults.** The model trusts the monitor. Faulty sensors (e.g. FSN-2026-11, SpO2 under-reading at Site B) produce wrong risks.
-- **Protocol dependence.** The model learned when staff escalated under protocol v1.0. After protocol v2.0 (2026-11-09) it under-predicts escalation until retrained (see the *Drift Incident Runbook*, scenario 5.3).
+- **Measurement faults.** The model trusts the monitor. Faulty sensors (e.g. FSN-2026-10, SpO2 under-reading at Site B) produce wrong risks.
+- **Protocol dependence.** The model learned when staff escalated under protocol v1.0. After protocol v2.0 (2026-10-06) it under-predicts escalation until retrained (see the *Drift Incident Runbook*, scenario 5.3).
 - **Alert-load drift.** On the test block the model raised 2.1 alerts per nurse per shift against a budget of 2 (fixed on validation, where it raised 1.9). The alert load needs no outcomes, so it is monitored continuously.
 
 ## 8. Monitoring and updates

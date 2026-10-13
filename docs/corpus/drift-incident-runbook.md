@@ -3,7 +3,7 @@ doc_id: HD-OPS-002
 title: Drift Incident Runbook
 version: "1.0"
 status: current
-effective_date: 2026-11-01
+effective_date: 2026-09-20
 owner: HeavDen ML Platform Team
 audience: ML platform on-call, data engineering, clinical safety officer
 ---
@@ -55,7 +55,7 @@ The deterioration risk model was trained on past data. When the data or the worl
 
 ### 5.1 SpO2 sensor bias (data drift, gradual)
 - **Symptoms:** PSI on `spo2_*` features rises at **one site** (Site B), growing day by day. Other vitals unchanged. Prediction distribution and alert load at that site rise. Performance on outcomes changes little, because the patients haven't changed.
-- **Cause:** a device fault (see device manual, FSN-2026-11): SpO2 reads up to 3 points low.
+- **Cause:** a device fault (see device manual, FSN-2026-10): SpO2 reads up to 3 points low.
 - **Correct response:** **do not retrain.** The patients haven't changed; the measurements are wrong. Retraining would teach the model to accept the faulty readings. Ask Clinical Engineering to fix the devices, add a temporary note on the ward board, and **reject** the retrain request with a reference to the notice. Consider excluding affected readings from future training data.
 
 ### 5.2 Respiratory outbreak (abrupt population drift)
@@ -65,7 +65,7 @@ The deterioration risk model was trained on past data. When the data or the worl
 
 ### 5.3 Protocol change (concept drift)
 - **Symptoms:** feature distributions look **normal**, but more patients are escalated than predicted. **AUPRC drops and calibration gets worse** (predicted risks too low), once the outcomes are known, about 12 hours after the change. Starts on the same day at all sites.
-- **Cause:** the escalation protocol changed (HD-CLIN-001 v2.0, effective 2026-11-09). The same vital signs now lead to escalation more often.
+- **Cause:** the escalation protocol changed (HD-CLIN-001 v2.0, effective 2026-10-06). The same vital signs now lead to escalation more often.
 - **Correct response:** this is the one case where **retraining is required**: the meaning of the label has changed. Approve the retrain only once enough post-change outcomes exist: **about a week**. With one or two days there is nothing to validate a new model on. Retraining uses the whole history, with the most recent days kept for calibration, the alert threshold and the comparison with the current champion; a model trained only on post-change data was usually worse than one trained on everything. If the new model does not pass the gates, the champion stays and the retrain is repeated when more outcomes exist. Check the alert budget with the wards, because escalations will rise.
 
 ### 5.4 Firmware schema change (schema drift)

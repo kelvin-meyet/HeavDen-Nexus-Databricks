@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 from test_source_db import HOURS, START, _population
 
-from generator import activity, hospital, landing, truth
+from generator import activity, clock, hospital, landing, truth
 from heavden.analytics import gold as gold_pandas
 from heavden.ml import features
 
@@ -80,9 +80,8 @@ def _spark(spark, df: pd.DataFrame):
     return out
 
 
-@pytest.fixture(scope="module")
-def silver(spark, ward):
-    """Silver-shaped Spark tables for the ward."""
+def _silver_frames(ward) -> dict[str, pd.DataFrame]:
+    """Silver-shaped pandas tables for the ward."""
     act = ward.activity
     linked = features.link_readings(ward.readings, act.device_assignments)
     enc = act.encounters[["encounter_id", "patient_id", "site_id", "admit_ts", "discharge_ts"]]
@@ -111,7 +110,13 @@ def silver(spark, ward):
         "outcomes": outcomes[["encounter_id", "event_type", "event_ts", "recorded_ts"]],
         "assignments": act.device_assignments,
     }
-    return {name: _spark(spark, df) for name, df in frames.items()}
+    return frames
+
+
+@pytest.fixture(scope="module")
+def silver(spark, ward):
+    """Silver-shaped Spark tables for the ward."""
+    return {name: _spark(spark, df) for name, df in _silver_frames(ward).items()}
 
 
 @pytest.fixture(scope="module")
@@ -147,6 +152,27 @@ def test_data_window_is_the_simulation_window(ward, built):
     w = _pandas(built["window"]).iloc[0]  # collect() would give local times; toPandas gives UTC
     assert w["data_start"] == ward.activity.start
     assert w["as_of"] == ward.activity.end
+
+
+def test_features_are_the_same_on_another_calendar(spark, ward, built):
+    """Loaded data is dated on the environment's calendar: every date moved by whole days
+    (`generator.clock`). The model must see exactly the same hospital."""
+    by = pd.Timedelta(days=-42)
+    s = {name: _spark(spark, clock.move(df, by)) for name, df in _silver_frames(ward).items()}
+    flags = gold.profile_flags(s["encounters"], s["conditions"], s["medications"])
+    moved = _pandas(
+        gold.patient_hour_features(
+            s["vitals"], s["encounters"], s["units"], s["patients"], flags, s["observations"]
+        )
+    )
+    moved["prediction_ts"] -= by
+    expected = _pandas(built["features"])
+    pd.testing.assert_frame_equal(
+        moved.sort_values(KEYS, ignore_index=True)[expected.columns],
+        expected.sort_values(KEYS, ignore_index=True),
+    )
+    window = _pandas(gold.data_window(s["vitals"])).iloc[0]
+    assert window["as_of"] == ward.activity.end + by
 
 
 def test_jobs_refuse_a_gold_that_is_behind_the_readings(spark, silver):

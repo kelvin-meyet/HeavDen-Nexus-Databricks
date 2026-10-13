@@ -3,7 +3,7 @@ doc_id: HD-DEV-001
 title: VitalBand VB-200 Wearable Monitor, User and Integration Manual
 version: "3.2"
 status: current
-effective_date: 2026-11-01
+effective_date: 2026-09-20
 owner: HeavDen Clinical Engineering
 audience: ward nurses, clinical engineering, data engineering
 ---
@@ -36,7 +36,7 @@ Firmware 3.1.x sends one JSON message per reading:
 ```json
 {
   "device_id": "DEV-B-0107",
-  "ts": "2026-11-03T14:35:00Z",
+  "ts": "2026-09-22T14:35:00Z",
   "heart_rate": 92.4,
   "resp_rate": 21.0,
   "spo2": 94.1,
@@ -76,15 +76,15 @@ The VB-200 shows a local amber light for low battery (below 15%) and sensor-off.
 - Stability fixes for Wi-Fi roaming between wards.
 - Message schema as in section 3.
 
-### 3.2.0 (staged rollout from November 2026)
+### 3.2.0 (staged rollout from October 2026)
 - **New field `etco2`**: end-tidal CO2 in mmHg from the optional nasal sampling line. It is null when no sampling line is attached.
 - **Removed field `motion`**: the activity index moves to a separate diagnostics stream and is no longer sent with vital-sign messages.
 - `firmware` reports `"3.2.0"`.
 - **Integration impact:** this is a **schema change**. Pipelines that require `motion` will fail or drop rows; `etco2` will appear in `_rescued_data` until the schema is updated. See the *Drift Incident Runbook*, scenario "firmware schema change".
 
-## 7. Field safety notice FSN-2026-11 (SpO2 under-reading)
+## 7. Field safety notice FSN-2026-10 (SpO2 under-reading)
 
-**Affects:** a batch of VB-200 units at **HeavDen Northshore Medical Center (Site B)** after a sensor-module update in November 2026.
+**Affects:** a batch of VB-200 units at **HeavDen Northshore Medical Center (Site B)** after a sensor-module update in October 2026.
 
 **Problem:** affected units gradually **under-read SpO2**, by about 1.5 percentage points per day, levelling off at about **3 points** low. Heart rate, respiration and the other vitals are not affected. The patients are not actually less well oxygenated.
 

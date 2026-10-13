@@ -33,12 +33,12 @@ questions:
     doc_id: HD-CLIN-001
     version: "1.0"
     section: Escalation by NEWS2
-    as_of: 2026-11-05
+    as_of: 2026-09-25
   - question: Did a High risk alert trigger a rapid response call?
     doc_id: HD-CLIN-001
     version: "1.0"
     section: Escalation by risk band
-    as_of: 2026-11-05
+    as_of: 2026-09-25
 
   # NEWS2 reference
   - question: How many NEWS2 points does a respiratory rate of 23 score?
@@ -66,7 +66,7 @@ questions:
     section: Firmware
   - question: Why are SpO2 readings low at Northshore?
     doc_id: HD-DEV-001
-    section: FSN-2026-11
+    section: FSN-2026-10
   - question: How often do device batteries run out?
     doc_id: HD-DEV-001
     section: Known measurement problems
@@ -130,9 +130,9 @@ questions:
     section: patient_hour_features
 
   # Exact codes and identifiers (where keyword search helps)
-  - question: What is FSN-2026-11?
+  - question: What is FSN-2026-10?
     doc_id: HD-DEV-001
-    section: FSN-2026-11
+    section: FSN-2026-10
   - question: Which site has RRT extension 3333?
     doc_id: HD-OPS-001
     section: Rapid response

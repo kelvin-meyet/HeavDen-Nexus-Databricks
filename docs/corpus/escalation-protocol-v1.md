@@ -4,7 +4,7 @@ title: Deteriorating Patient Escalation Protocol
 version: "1.0"
 status: superseded
 effective_date: 2026-03-01
-superseded_by: HD-CLIN-001 v2.0 (effective 2026-11-09)
+superseded_by: HD-CLIN-001 v2.0 (effective 2026-10-06)
 owner: HeavDen Network Clinical Governance Committee
 audience: ward nurses, ward doctors, rapid response team
 ---
@@ -13,7 +13,7 @@ audience: ward nurses, ward doctors, rapid response team
 
 > **Fictional document.** Written for the HeavDen-Nexus portfolio project, which uses fully synthetic patients. It is not clinical guidance and must not be used to care for real patients.
 
-> **Superseded.** This version applied until 2026-11-08. From **2026-11-09** use version 2.0, which escalates earlier. See *Escalation Protocol v2.0, section 1 "What changed"*.
+> **Superseded.** This version applied until 2026-10-05. From **2026-10-06** use version 2.0, which escalates earlier. See *Escalation Protocol v2.0, section 1 "What changed"*.
 
 ## 1. Purpose and scope
 

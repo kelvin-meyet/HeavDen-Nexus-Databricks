@@ -3,7 +3,7 @@ doc_id: HD-DATA-001
 title: Gold Data Dictionary
 version: "1.0"
 status: current
-effective_date: 2026-11-01
+effective_date: 2026-09-20
 owner: HeavDen Data Engineering
 audience: analysts, ML team, AI assistant (Genie space)
 ---

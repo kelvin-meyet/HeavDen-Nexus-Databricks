@@ -3,7 +3,7 @@ doc_id: HD-OPS-001
 title: Site and Unit Handbook
 version: "2.1"
 status: current
-effective_date: 2026-10-01
+effective_date: 2026-08-20
 owner: HeavDen Network Operations
 audience: all ward staff, analysts
 ---
@@ -56,7 +56,7 @@ Nurses chart a full set of observations, including consciousness (ACVPU) and cur
 ## 6. Site differences worth knowing
 
 - **General (SITE_A)** is the regional referral centre: older patients, more heart failure and step-down transfers.
-- **Northshore (SITE_B)** received the first batch of VitalBand units with the November 2026 sensor-module update (see the device manual's field safety notice FSN-2026-11).
+- **Northshore (SITE_B)** received the first batch of VitalBand units with the October 2026 sensor-module update (see the device manual's field safety notice FSN-2026-10).
 - **Valley (SITE_C)** is the smallest site, with the fewest escalations in absolute terms. Per-site metrics there are noisier.
 
 ## 7. Who to contact about the data platform

@@ -27,8 +27,12 @@ SITES: tuple[Site, ...] = (
     Site("SITE_C", "HeavDen Valley Community Hospital", "Worcester", 90),
 )
 
-# Start of simulated time: the moment the baseline history begins.
-SIM_START = pd.Timestamp("2026-11-01", tz="UTC")
+# The hospital's first day: the moment the baseline history begins. A real date in the recent
+# past, so that every table, dashboard and notebook shows dates a reader can place, and the
+# hospital's clock never runs ahead of the real one (see generator/clock.py). Prod's 14-day
+# baseline and its three episodes end on 14 Oct 2026. Each environment's history is replayed
+# from this date, so it must not change while any environment holds data.
+SIM_START = pd.Timestamp("2026-09-20", tz="UTC")
 
 # Units every site has, with the share of the site's beds in each.
 UNITS: dict[str, float] = {"general": 0.55, "step_down": 0.25, "respiratory": 0.20}
