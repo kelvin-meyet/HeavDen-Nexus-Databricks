@@ -29,6 +29,7 @@ bootstrap bound described in `performance`.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 import numpy as np
@@ -212,20 +213,24 @@ def run_check(
     """Every signal, one row each, for the latest `window` of patient-hours.
 
     The check judges one model, `model` (its validation scores are `reference`: `auprc` and
-    `brier`), so it scores its reference rows (`baseline`: the model's training and validation
-    rows), the latest window of `features` and the latest `label_window` of the labelled
-    `training_set` itself. The prediction log can hold older versions' scores (each hour is
-    scored once), which would compare one model's predictions with another's validation. Only
-    the alert load comes from the log (`gold.risk_scores`): it's what the nurses received."""
+    `brier`), and scores everything it compares itself: its reference rows (`baseline`: the
+    model's training and validation rows), the latest window of `features`, and the latest
+    `label_window` of the labelled `training_set` that comes after `baseline`. The prediction
+    log can hold older versions' scores (each hour is scored once), which would compare one
+    model's predictions with another's validation. Only the alert load comes from the log
+    (`gold.risk_scores`): it's what the nurses received."""
 
     def scored(df: pd.DataFrame) -> pd.DataFrame:
-        return df.assign(risk=model.predict_proba(df)[:, 1])
+        return df.assign(risk=model.predict_proba(df)[:, 1] if len(df) else [])
 
     start = features["prediction_ts"].max() - window + pd.Timedelta(hours=1)
     current = scored(features[features["prediction_ts"] >= start])
     reference_rows = scored(baseline)
-    newest = training_set["prediction_ts"].max()
-    labelled = scored(training_set[training_set["prediction_ts"] > newest - label_window])
+    # Performance is judged only on hours after the model's own data: on the hours it was fitted
+    # and calibrated on, it would be marking its own homework.
+    hours = training_set["prediction_ts"]
+    unseen = hours > max(hours.max() - label_window, baseline["prediction_ts"].max())
+    labelled = scored(training_set[unseen])
     rows = (
         input_drift(reference_rows, current)
         + prediction_drift(reference_rows, current)
@@ -248,6 +253,16 @@ def summary(metrics: pd.DataFrame) -> dict:
         "n_act": n_act,
         "breaches": [describe(r) for r in breaches.itertuples()],
     }
+
+
+RESULT_MARKER = "DRIFT_CHECK_RESULT"
+
+
+def result_line(check: dict, result: dict) -> str:
+    """The check on one line, as JSON after `RESULT_MARKER`: what the workflow that started the
+    job reads from its output to decide whether to open a retrain request (act)."""
+    payload = {k: v if isinstance(v, int | list | type(None)) else str(v) for k, v in check.items()}
+    return f"{RESULT_MARKER} {json.dumps(payload | result)}"
 
 
 def describe(r) -> str:
@@ -381,3 +396,4 @@ def main(argv: list[str] | None = None) -> None:
     )
     for line in result["breaches"]:
         print(" ", line)
+    print(result_line(check | {"catalog": c}, result))

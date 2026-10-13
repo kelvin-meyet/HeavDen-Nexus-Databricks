@@ -8,6 +8,8 @@
 # training registers a new model version (@challenger if it passes the gates; @champion only for
 # the first model), scoring scores the new hours with @champion and rebuilds the alert,
 # escalation and KPI tables, and the drift check compares the latest data with the champion's.
+# If the check reaches "act", this workflow opens a retrain request (retrain.yml), which waits
+# for Kelvin's approval; GitHub emails him. No stored token: it uses the run's own.
 
 name: prod-run
 
@@ -63,6 +65,9 @@ jobs:
     defaults:
       run:
         working-directory: databricks
+    outputs:
+      drift_status: ${{ steps.drift.outputs.status }}
+      drift_result: ${{ steps.drift.outputs.result }}
     steps:
       - uses: actions/checkout@v4
 
@@ -99,8 +104,38 @@ jobs:
         if: inputs.score
         run: databricks bundle run score -t prod
 
+      # The job prints its result on one line (DRIFT_CHECK_RESULT {json}); a run without that
+      # line fails here, so a check that said nothing is never taken for "stable".
       - name: Check for drift
+        id: drift
         if: inputs.drift_check
+        shell: bash
         env:
           EPISODE: ${{ inputs.episode }}
-        run: databricks bundle run drift_check -t prod --params episode="$EPISODE"
+        run: |
+          databricks bundle run drift_check -t prod --params episode="$EPISODE" 2>&1 | tee "$RUNNER_TEMP/drift.log"
+          result=$(grep -o 'DRIFT_CHECK_RESULT {.*}' "$RUNNER_TEMP/drift.log" | tail -1 | sed 's/^DRIFT_CHECK_RESULT //')
+          jq -e .status <<<"$result" >/dev/null || { echo "::error::the drift check printed no result line"; exit 1; }
+          echo "status=$(jq -r .status <<<"$result")" >> "$GITHUB_OUTPUT"
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Drift check: $(jq -r '.status | ascii_upcase' <<<"$result") ($(jq -r .n_act <<<"$result") act, $(jq -r .n_warn <<<"$result") warn)"
+            jq -r '.breaches[] | "- \(.)"' <<<"$result"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  request-retrain:
+    needs: run-prod
+    if: needs.run-prod.outputs.drift_status == 'act'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write # start retrain.yml with this run's own token
+      contents: read
+    steps:
+      - name: Open a retrain request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECK: ${{ needs.run-prod.outputs.drift_result }}
+        run: |
+          gh workflow run retrain.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f check="$CHECK"
+          echo "Retrain request opened: Actions -> retrain. It waits for approval." >> "$GITHUB_STEP_SUMMARY"
