@@ -257,6 +257,33 @@ def summary(metrics: pd.DataFrame) -> dict:
     }
 
 
+# What each signal says about the hospital, in the words of the runbook's triage.
+KIND = {
+    "feature_psi": "inputs",
+    "prediction_js": "predictions",
+    "alerts_per_nurse_shift": "alert-load",
+    "auprc_drop": "performance",
+    "brier_rise": "performance",
+    "quarantine_rate": "data-quality",
+    "missing_rate_change": "data-quality",
+}
+
+
+def act_kinds(metrics: pd.DataFrame) -> list[str]:
+    """What kind of drift the act-level signals show, and where: e.g. `["inputs@SITE_B",
+    "performance"]` (no site: all sites together).
+
+    Two checks with the same kinds show the same picture. The workflow that opens retrain
+    requests uses this to tell a problem that is still there (no second request while one is
+    held) from a different one (the open request is replaced, with the newer evidence)."""
+    acts = metrics[metrics["level"] == "act"]
+    kinds = {
+        KIND[signal] + ("" if site == ALL_SITES else f"@{site}")
+        for signal, site in zip(acts["signal"], acts["site_id"], strict=True)
+    }
+    return sorted(kinds)
+
+
 RESULT_MARKER = "DRIFT_CHECK_RESULT"
 
 
@@ -398,4 +425,4 @@ def main(argv: list[str] | None = None) -> None:
     )
     for line in result["breaches"]:
         print(" ", line)
-    print(result_line(check | {"catalog": c}, result))
+    print(result_line(check | {"catalog": c}, result | {"act_kinds": act_kinds(metrics)}))

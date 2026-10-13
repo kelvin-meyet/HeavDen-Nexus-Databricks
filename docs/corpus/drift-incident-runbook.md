@@ -20,7 +20,7 @@ The deterioration risk model was trained on past data. When the data or the worl
 
 1. The `drift_check` job runs in production after each new batch of data has been scored.
 2. It compares the latest day of data and predictions with the data the champion was trained and calibrated on, and the latest two days of predictions with their outcomes once known (about 12 hours later: the 6-hour window, then 6 hours until escalations are recorded). It checks all sites together and each site on its own.
-3. If any signal reaches the **act** level below, the workflow that ran the check opens a **retrain request** on GitHub (the `retrain.yml` workflow), which lists the breaches. A **warn** is only recorded in the monitoring tables. While a request is open (it may be held for days), later checks that reach **act** open no second one.
+3. If any signal reaches the **act** level below, the workflow that ran the check opens a **retrain request** on GitHub (the `retrain.yml` workflow), which lists the breaches. A **warn** is only recorded in the monitoring tables. A request may be held for days. While it is open, later checks that show the same kind of drift open no second one; a check that shows a different kind (for example outcomes changing while a sensor-fault request is still undecided) replaces it with a new request carrying the newer evidence, and the older one is cancelled.
 4. `retrain.yml` **waits for a human approval** in the GitHub `retrain-approval` environment, and GitHub **emails** the approver. Nothing is retrained automatically, and rejecting the request is a normal outcome (see section 5).
 
 ## 3. Thresholds

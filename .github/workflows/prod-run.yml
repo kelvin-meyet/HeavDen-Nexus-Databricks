@@ -10,7 +10,8 @@
 # escalation and KPI tables, and the drift check compares the latest data with the champion's.
 # If the check reaches "act", this workflow opens a retrain request (retrain.yml), which waits
 # for Kelvin's approval; GitHub emails him. No stored token: it uses the run's own. While a
-# request is open (it may be held for days), a later "act" opens no second one.
+# request for the same kind of drift is open (it may be held for days), a later "act" opens no
+# second one; a different kind of drift replaces the open request with a new one.
 #
 # Every run also copies the requests rejected on GitHub into ml.ops_audit: a rejected run never
 # gets prod credentials, so it can't record itself.
@@ -149,25 +150,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      actions: write # start retrain.yml with this run's own token
+      actions: write # start retrain.yml, and cancel a request it replaces, with this run's own token
       contents: read
     steps:
-      # One incident, one request: a request may be held until enough outcomes exist, and the
-      # checks run meanwhile would each open another. If the look-up itself fails, a request is
-      # opened anyway: a duplicate is better than a missed alert.
-      - name: Open a retrain request, unless one is open
-        shell: bash
+      - uses: actions/checkout@v4
+
+      # One open request per kind of drift (.github/scripts/retrain_request.py): nothing new
+      # while a request for the same kind is held; a different kind replaces the open request,
+      # so the reviewer is emailed about it and a retrain is recorded against the right check.
+      - name: Open a retrain request, unless one for this kind of drift is open
         env:
           GH_TOKEN: ${{ github.token }}
           CHECK: ${{ needs.run-prod.outputs.drift_result }}
-        run: |
-          open=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow retrain.yml --limit 20 \
-            --json status,url,displayTitle \
-            --jq '[.[] | select(.status != "completed")] | first // empty | "[\(.displayTitle)](\(.url))"') || open=""
-          if [ -n "$open" ]; then
-            echo "A retrain request is already open, so no second one was opened: $open. This check is recorded in \`monitoring.drift_checks\`." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          title=$(jq -r '(if .episode then "episode \(.episode), " else "" end) + "check \(.check_id)"' <<<"$CHECK")
-          gh workflow run retrain.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f check="$CHECK" -f title="$title"
-          echo "Retrain request opened: Actions -> retrain. It waits for approval." >> "$GITHUB_STEP_SUMMARY"
+        run: python3 .github/scripts/retrain_request.py

@@ -20,7 +20,9 @@ def _version(
             mlflow.set_tag("compared_with_version", compared_with)
         mlflow.log_metrics({f"vs_champion_{k}": v for k, v in (gates or {}).items()})
         model = DummyClassifier(strategy="prior").fit(np.zeros((4, 1)), [0, 0, 0, 1])
-        logged = mlflow.sklearn.log_model(model, name="model")
+        # Requirements are given, as the training job gives them: left to infer them, MLflow
+        # may check its guess with `pip`, which CI's uv-built environment doesn't have.
+        logged = mlflow.sklearn.log_model(model, name="model", pip_requirements=["scikit-learn"])
     client = mlflow.MlflowClient()
     version = str(mlflow.register_model(logged.model_uri, NAME).version)
     assert client.get_model_version(NAME, version).run_id == run.info.run_id

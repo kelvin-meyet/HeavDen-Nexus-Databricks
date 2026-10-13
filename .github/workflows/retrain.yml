@@ -9,7 +9,8 @@
 # the current @champion (at the same alert budget: more escalations flagged, better ranking).
 # The job can't know whether enough has happened since the drift began: approve only once there
 # are enough outcomes under the new conditions (the runbook says how long to wait). A request
-# can be held for days; prod-run opens no second one while it is open.
+# can be held for days: prod-run opens no second one for the same kind of drift, and replaces it
+# (this run is then cancelled) when a later check shows a different kind.
 #
 # Nothing is promoted here. A model that passes opens a promotion request (promote.yml), which
 # waits for its own approval. The retrain is recorded in ml.ops_audit with who approved it; a
