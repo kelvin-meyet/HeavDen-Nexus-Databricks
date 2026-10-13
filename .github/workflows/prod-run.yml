@@ -9,7 +9,12 @@
 # the first model), scoring scores the new hours with @champion and rebuilds the alert,
 # escalation and KPI tables, and the drift check compares the latest data with the champion's.
 # If the check reaches "act", this workflow opens a retrain request (retrain.yml), which waits
-# for Kelvin's approval; GitHub emails him. No stored token: it uses the run's own.
+# for Kelvin's approval; GitHub emails him. No stored token: it uses the run's own. While a
+# request for the same kind of drift is open (it may be held for days), a later "act" opens no
+# second one; a different kind of drift replaces the open request with a new one.
+#
+# Every run also copies the requests rejected on GitHub into ml.ops_audit: a rejected run never
+# gets prod credentials, so it can't record itself.
 
 name: prod-run
 
@@ -60,6 +65,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      actions: read # the reviews of retrain, promotion and rollback requests
     env:
       DATABRICKS_AUTH_TYPE: azure-cli
     defaults:
@@ -80,6 +86,21 @@ jobs:
       - uses: databricks/setup-cli@v1.17.0
         with:
           version: 1.17.0
+
+      # The audit copy must never block the data jobs (GitHub keeps the record either way), so
+      # a failure here only shows as a warning. The job skips rejections it already holds.
+      - name: Record rejected requests in ml.ops_audit
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rejections=$(bash ../.github/scripts/review.sh rejections)
+          if [ -n "$rejections" ]; then
+            bash ../.github/scripts/model_ops.sh record-rejections "" "$rejections"
+          else
+            echo "No rejected requests on GitHub."
+          fi
 
       - name: Copy Azure SQL into Bronze
         if: inputs.ingest_sql
@@ -114,8 +135,8 @@ jobs:
           EPISODE: ${{ inputs.episode }}
         run: |
           databricks bundle run drift_check -t prod --params episode="$EPISODE" 2>&1 | tee "$RUNNER_TEMP/drift.log"
-          result=$(grep -o 'DRIFT_CHECK_RESULT {.*}' "$RUNNER_TEMP/drift.log" | tail -1 | sed 's/^DRIFT_CHECK_RESULT //')
-          jq -e .status <<<"$result" >/dev/null || { echo "::error::the drift check printed no result line"; exit 1; }
+          result=$(grep -o 'DRIFT_CHECK_RESULT {.*}' "$RUNNER_TEMP/drift.log" | tail -1 | sed 's/^DRIFT_CHECK_RESULT //' || true)
+          jq -e .status <<<"$result" >/dev/null 2>&1 || { echo "::error::the drift check printed no result line"; exit 1; }
           echo "status=$(jq -r .status <<<"$result")" >> "$GITHUB_OUTPUT"
           echo "result=$result" >> "$GITHUB_OUTPUT"
           {
@@ -129,13 +150,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      actions: write # start retrain.yml with this run's own token
+      actions: write # start retrain.yml, and cancel a request it replaces, with this run's own token
       contents: read
     steps:
-      - name: Open a retrain request
+      - uses: actions/checkout@v4
+
+      # One open request per kind of drift (.github/scripts/retrain_request.py): nothing new
+      # while a request for the same kind is held; a different kind replaces the open request,
+      # so the reviewer is emailed about it and a retrain is recorded against the right check.
+      - name: Open a retrain request, unless one for this kind of drift is open
         env:
           GH_TOKEN: ${{ github.token }}
           CHECK: ${{ needs.run-prod.outputs.drift_result }}
-        run: |
-          gh workflow run retrain.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f check="$CHECK"
-          echo "Retrain request opened: Actions -> retrain. It waits for approval." >> "$GITHUB_STEP_SUMMARY"
+        run: python3 .github/scripts/retrain_request.py

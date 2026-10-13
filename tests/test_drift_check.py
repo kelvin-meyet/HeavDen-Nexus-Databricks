@@ -175,3 +175,19 @@ def test_performance_is_judged_only_on_hours_after_the_models_own_data():
     assert inside["level"] == "not enough data" and inside["n"] == 0
     after = judged(labelled(T0 + pd.Timedelta(days=2)))
     assert after["level"] == "act" and after["n"] == 30
+
+
+def test_act_kinds_say_what_kind_of_drift_and_where():
+    rows = [
+        dc._row("feature_psi", 1.2, 2000, "spo2_mean_1h", "SITE_B"),
+        dc._row("feature_psi", 0.4, 2000, "news2_total", "SITE_B"),  # same kind, same site
+        dc._row("prediction_js", 0.17, 2000, site="SITE_B"),
+        dc._row("alerts_per_nurse_shift", 2.6, 6000),  # only a warn
+        dc._row("auprc_drop", 0.44, 30),
+        dc._row("brier_rise", 0.36, 30),  # the same kind as the AUPRC drop
+        dc._row("feature_psi", 0.01, 2000, "sbp_mean_1h", "SITE_A"),  # stable
+    ]
+    metrics = pd.DataFrame(rows)
+    assert dc.act_kinds(metrics) == ["inputs@SITE_B", "performance", "predictions@SITE_B"]
+    assert dc.act_kinds(metrics[metrics["level"] != "act"]) == []
+    assert set(dc.KIND) == set(dc.THRESHOLDS)  # every signal has a kind

@@ -17,6 +17,8 @@ resources:
       parameters:
         - name: mode
           default: initial
+        - name: context # who approved a retrain, from the workflow (base64 JSON), for ml.ops_audit
+          default: ""
       performance_target: STANDARD # cost-efficient serverless; a slower start is fine for training
       timeout_seconds: 3600
       tags:
@@ -44,6 +46,8 @@ resources:
               - ${var.retrain_valid_days}
               - --retrain-test-days
               - ${var.retrain_test_days}
+              - --context
+              - "{{job.parameters.context}}"
       environments:
         # Serverless environment 6 already has pandas, numpy, scikit-learn and MLflow at the
         # versions our package asks for (databricks/requirements-serverless-env6.txt); we add

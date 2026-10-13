@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 from test_train import _table
 
-from heavden.ml import batch_scoring, tracking, train, training
+from heavden.ml import batch_scoring, evaluate, tracking, train, training
 
 NAME = "deterioration_risk_test"
 
@@ -175,3 +175,61 @@ def test_the_exclusions_file_lists_every_catalog_with_valid_entries():
             assert set(entry) == {"site_id", "from", "to", "reason"}
             assert pd.Timestamp(entry["from"]).tz is not None  # UTC, written with a Z
             assert pd.Timestamp(entry["from"]) < pd.Timestamp(entry["to"])
+
+
+def test_a_retrain_writes_what_was_decided_and_why(store, table):
+    weak = training.Champion(_FixedModel(table, oracle=False), 0.5, "1")
+    outcome = training.run_training(table, NAME, train.RecentSplit(2, 2), champion=weak)
+    context = {
+        "actor": "kelvin-meyet",
+        "reason": "protocol v2.0",
+        "check_id": "abc",
+        "run_url": "u",
+    }
+    row = training.retrain_audit_row(NAME, outcome, weak.version, context)
+    assert (row["event"], row["outcome"]) == ("retrain", "challenger")
+    assert (row["version"], row["from_version"]) == (str(outcome.version), "1")
+    assert (row["actor"], row["reason"], row["check_id"]) == (
+        "kelvin-meyet",
+        "protocol v2.0",
+        "abc",
+    )
+    details = json.loads(row["details"])
+    assert details["vs_champion"]["beats_champion"] == 1.0 and details["rows"] == outcome.rows
+    unbeatable = training.Champion(_FixedModel(table, oracle=True), 0.5, "1")
+    lost = training.run_training(table, NAME, train.RecentSplit(2, 2), champion=unbeatable)
+    assert training.retrain_audit_row(NAME, lost, "1", {})["outcome"] == "failed_gates"
+
+
+def test_a_versions_gate_numbers_can_be_rebuilt_from_the_registry(store, table):
+    """What notebook 32 does: reload both models, find the blocks from the recorded window,
+    give the champion a fresh threshold, and compare again."""
+    training.run_training(table, NAME)
+    champion = training.Champion(*batch_scoring.load_registered_model(NAME, "champion"))
+    shuffled = table.sample(frac=1, random_state=1)  # the row order must not matter
+    outcome = training.run_training(shuffled, NAME, train.RecentSplit(2, 2), champion=champion)
+
+    version = str(outcome.version)
+    blocks = tracking.data_blocks(NAME, version)
+    ordered = table.sort_values(training.ROW_ORDER, ignore_index=True)
+    ts = ordered["prediction_ts"]
+    valid, test = (ordered[ts.between(*blocks[b])] for b in ("valid", "test"))
+    assert (len(valid), len(test)) == (outcome.rows["valid"], outcome.rows["test"])
+    client = mlflow.MlflowClient()
+    new = mlflow.sklearn.load_model(f"models:/{NAME}/{version}")
+    old = mlflow.sklearn.load_model(f"models:/{NAME}/{champion.version}")
+    budget = evaluate.AlertBudget()
+    thresholds = {
+        "challenger": client.get_run(client.get_model_version(NAME, version).run_id).data.metrics[
+            "valid_threshold"
+        ],
+        "champion": evaluate.threshold_for_alert_budget(
+            valid, old.predict_proba(valid)[:, 1], budget
+        ),
+    }
+    scores = {
+        "challenger": new.predict_proba(test)[:, 1],
+        "champion": old.predict_proba(test)[:, 1],
+    }
+    again = training.compare_with_champion(test, scores, thresholds, budget)
+    assert again == pytest.approx(outcome.vs_champion, nan_ok=True)

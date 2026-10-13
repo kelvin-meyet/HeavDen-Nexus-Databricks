@@ -78,7 +78,7 @@ jobs:
           .venv/bin/python -m pytest -q -W error::DeprecationWarning
           tests/test_features.py tests/test_train.py tests/test_evaluate_explain.py
           tests/test_scoring_gold.py tests/test_drift_metrics.py tests/test_package.py
-          tests/test_training.py tests/test_batch_scoring.py
+          tests/test_training.py tests/test_batch_scoring.py tests/test_model_ops.py
 
   web:
     runs-on: ubuntu-latest
@@ -199,3 +199,8 @@ jobs:
 
       - name: Check for drift against the newest model's data
         run: databricks bundle run drift_check -t staging
+
+      # A promotion or a rollback is an alias moved in the registry. This sets, reads and removes
+      # a throwaway alias, so the first real one in prod is not also the first try.
+      - name: Check that model aliases can be moved
+        run: databricks bundle run model_ops -t staging --params action=selftest
