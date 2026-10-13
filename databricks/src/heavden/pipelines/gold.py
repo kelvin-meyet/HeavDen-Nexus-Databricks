@@ -72,6 +72,40 @@ def data_window(vitals: DataFrame) -> DataFrame:
     )
 
 
+class GoldBehind(RuntimeError):
+    """Gold was built from fewer readings than Silver holds."""
+
+
+def require_current(readings: DataFrame, vitals: DataFrame) -> None:
+    """Fail when the linked readings (`silver.vitals`) end before the readings themselves.
+
+    Gold is built from the linked readings. On 13 Oct 2026 a pipeline update refreshed them
+    before its own new readings had reached `silver.device_readings`: 150,456 readings landed,
+    none was linked to a stay, Gold gained no hours, and the update succeeded. A second update
+    links them. Jobs that read Gold call this first, so they stop instead of quietly scoring,
+    training on or checking the day before.
+    """
+    row = (
+        data_window(readings)
+        .select(F.col("as_of").alias("readings"))
+        .crossJoin(data_window(vitals).select(F.col("as_of").alias("linked")))
+        .select(
+            # No linked readings at all is behind too, unless there are no readings either.
+            F.coalesce(F.col("linked") < F.col("readings"), F.col("readings").isNotNull()).alias(
+                "behind"
+            ),
+            *(F.date_format(c, "d MMM yyyy HH:mm").alias(c) for c in ("readings", "linked")),
+        )
+        .first()
+    )
+    if row["behind"]:
+        raise GoldBehind(
+            f"Gold is behind: device readings run to {row['readings']}, but the readings linked "
+            f"to stays (silver.vitals) stop at {row['linked'] or 'nothing'}. Run the pipeline "
+            "again: a second update links them."
+        )
+
+
 def unit_history(encounters_scd2: DataFrame) -> DataFrame:
     """Each stay's unit and when that version was recorded, from Silver encounters (SCD 2)."""
     return encounters_scd2.select(

@@ -43,12 +43,13 @@ The deterioration risk model was trained on past data. When the data or the worl
 
 ## 4. Triage checklist
 
-1. Open the *Model and Drift* dashboard. Which signal fired: features, predictions, performance, or data quality?
-2. Is it **one site** or **all sites**? One site points to devices or local practice. All sites points to patients or protocol.
-3. Which **features** moved? Only SpO2? All respiratory features? None (only outcomes)?
-4. Check the pipeline event log and `_rescued_data` for schema problems.
-5. Check the document library for recent **field safety notices** and **protocol changes**.
-6. Decide using section 5, and approve or reject the retrain request on GitHub **with a comment giving the reason**. The decision, the reviewer and the comment are recorded in `ml.ops_audit`: an approved retrain, promotion or rollback at once, a rejection at the next production run (a rejected request is given no access to production, so it cannot record itself).
+1. Check the request's **data window**: it should be the latest day that was loaded. If it is an older day, the pipeline had not finished linking the new readings to patient stays when the check ran. A data run updates the pipeline twice for this reason, and scoring, training and the drift check stop with "Gold is behind" when the linked readings end before the readings themselves. Run the pipeline again before deciding.
+2. Open the *Model and Drift* dashboard. Which signal fired: features, predictions, performance, or data quality?
+3. Is it **one site** or **all sites**? One site points to devices or local practice. All sites points to patients or protocol.
+4. Which **features** moved? Only SpO2? All respiratory features? None (only outcomes)?
+5. Check the pipeline event log and `_rescued_data` for schema problems.
+6. Check the document library for recent **field safety notices** and **protocol changes**.
+7. Decide using section 5, and approve or reject the retrain request on GitHub **with a comment giving the reason**. The decision, the reviewer and the comment are recorded in `ml.ops_audit`: an approved retrain, promotion or rollback at once, a rejection at the next production run (a rejected request is given no access to production, so it cannot record itself).
 
 ## 5. Scenarios and correct responses
 

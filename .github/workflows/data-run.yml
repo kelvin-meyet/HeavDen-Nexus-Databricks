@@ -2,7 +2,8 @@
 # for prod (after Kelvin's approval) and staging-run.yml for staging, so a drift episode is
 # rehearsed in staging with exactly the steps prod will run.
 #
-# Each step is optional: copying Azure SQL wakes the free database, a full refresh rebuilds
+# Each step is optional: copying Azure SQL wakes the free database, the pipeline is updated
+# twice (the second update links the readings the first one loaded), a full refresh rebuilds
 # every pipeline table from Bronze (needed after loading *different* data into the source),
 # training registers a new model version, scoring scores the new hours with the model in use and
 # rebuilds the alert, escalation and KPI tables, and the drift check compares the latest data
@@ -101,6 +102,12 @@ jobs:
         if: inputs.ingest_sql
         run: databricks bundle run sql_ingest -t "$TARGET"
 
+      # Two updates, on purpose. New readings pass through two streaming tables (Bronze, then
+      # Silver) before they are linked to stays, and an update can refresh the linked table
+      # before the second one has written them: on 13 Oct 2026 an update loaded 150,456 readings,
+      # linked none, and succeeded. The second update finds them already in Silver, so its
+      # order can't matter. The jobs below refuse to run if Gold is still behind
+      # (heavden.pipelines.gold.require_current), so this can't pass unnoticed again.
       - name: Run the pipeline
         if: inputs.run_pipeline
         env:
@@ -111,6 +118,8 @@ jobs:
           else
             databricks bundle run medallion -t "$TARGET"
           fi
+          echo "Second update: link the readings the first one loaded, then rebuild Gold."
+          databricks bundle run medallion -t "$TARGET"
 
       - name: Train and register the model
         if: inputs.train
@@ -118,7 +127,11 @@ jobs:
 
       - name: Score the new patient-hours with the model in use
         if: inputs.score
-        run: databricks bundle run score -t "$TARGET"
+        shell: bash
+        run: |
+          databricks bundle run score -t "$TARGET" 2>&1 | tee "$RUNNER_TEMP/score.log"
+          scored=$(grep -o '[^ ]* v[0-9]* (.*new hours scored' "$RUNNER_TEMP/score.log" | tail -1 || true)
+          echo "**Scoring ($TARGET):** ${scored:-the job printed no summary line}" >> "$GITHUB_STEP_SUMMARY"
 
       # The job prints its result on one line (DRIFT_CHECK_RESULT {json}); a run without that
       # line fails here, so a check that said nothing is never taken for "stable".
@@ -136,6 +149,8 @@ jobs:
           echo "result=$result" >> "$GITHUB_OUTPUT"
           {
             echo "## Drift check ($TARGET): $(jq -r '.status | ascii_upcase' <<<"$result") ($(jq -r .n_act <<<"$result") act, $(jq -r .n_warn <<<"$result") warn)"
+            jq -r '"Day judged: \(.window_start[0:16]) to \(.window_end[0:16]) UTC, model version \(.model_version)."' <<<"$result"
+            echo
             jq -r '.breaches[] | "- \(.)"' <<<"$result"
           } >> "$GITHUB_STEP_SUMMARY"
 
