@@ -1,6 +1,7 @@
 # A promotion request (Plan.md §10.4). Opened by retrain.yml when a retrained model passes its
 # gates; it can also be started by hand for a version. It shows the gate results, then waits for
-# Kelvin in the production-approval environment: GitHub emails the request.
+# Kelvin in the production-approval environment (staging-approval for staging): GitHub emails
+# the request.
 #
 # An approval points @champion at the version (job model_ops, action promote). That is the
 # release: from the next scoring run, new patient-hours are scored by it at its own alert
@@ -9,10 +10,10 @@
 # compared with a champion other than the one in use now.
 #
 # The model it replaces stays as @previous_champion; rollback.yml puts it back. The promotion is
-# recorded in ml.ops_audit with who approved it; a rejection is copied there by the next prod-run.
+# recorded in ml.ops_audit with who approved it; a rejection is copied there by the next data run.
 
-name: promote
-run-name: "Promotion request: version ${{ inputs.version || 'the current challenger' }}"
+name: Promotion request
+run-name: "Promotion request${{ inputs.target == 'staging' && ' (staging)' || '' }}: version ${{ inputs.version || 'the current challenger' }}"
 
 on:
   workflow_dispatch:
@@ -25,12 +26,17 @@ on:
         description: "The retrain's result (the JSON after TRAINING_RESULT), shown to the approver"
         type: string
         default: ""
+      target:
+        description: "prod, or staging to rehearse the same steps there"
+        type: choice
+        options: [prod, staging]
+        default: prod
 
 permissions:
   contents: read
 
 concurrency:
-  group: promote
+  group: promote-${{ inputs.target }}
   cancel-in-progress: false
 
 jobs:
@@ -65,7 +71,8 @@ jobs:
     needs: report
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: production-approval # waits here for Kelvin; rejecting leaves @champion as it is
+    # waits here for Kelvin; rejecting leaves @champion as it is
+    environment: ${{ inputs.target == 'staging' && 'staging-approval' || 'production-approval' }}
     permissions:
       contents: read
       id-token: write
@@ -73,6 +80,8 @@ jobs:
     env:
       DATABRICKS_AUTH_TYPE: azure-cli
       GH_TOKEN: ${{ github.token }}
+      TARGET: ${{ inputs.target }}
+      APPROVAL: ${{ inputs.target == 'staging' && 'staging-approval' || 'production-approval' }}
     defaults:
       run:
         working-directory: databricks
@@ -94,7 +103,7 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
         run: |
-          context=$(bash ../.github/scripts/review.sh context production-approval)
+          context=$(bash ../.github/scripts/review.sh context "$APPROVAL")
           result=$(bash ../.github/scripts/model_ops.sh promote "$VERSION" "$context")
           {
             echo "## Promoted: version $(jq -r .version <<<"$result") is now \`@champion\`"
@@ -103,5 +112,5 @@ jobs:
                    "- It replaces version \(.from_version // "none"), kept as `@previous_champion`",
                    "- Recorded in `\(.model | split(".")[0]).ml.ops_audit`"' <<<"$result"
             echo
-            echo "New patient-hours are scored by this version from the next scoring run (prod-run with *Score* ticked). To undo: Actions -> rollback."
+            echo "New patient-hours are scored by this version from the next scoring run. To undo: Actions -> Rollback request."
           } >> "$GITHUB_STEP_SUMMARY"

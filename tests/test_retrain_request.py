@@ -16,14 +16,18 @@ SENSOR = ["alert-load@SITE_B", "inputs@SITE_B", "predictions@SITE_B"]
 PROTOCOL = ["performance"]
 
 
-def _run(run_id: int, kinds: list[str] | None, status: str = "waiting") -> dict:
+def _run(
+    run_id: int, kinds: list[str] | None, status: str = "waiting", target: str = "prod"
+) -> dict:
+    """An open run of retrain.yml, named as the workflow's run-name names it."""
     check = {"episode": "some-episode", "check_id": CHECK, "act_kinds": kinds}
     name = "started by hand" if kinds is None else request.title(check)
+    mark = " (staging)" if target == "staging" else ""
     return {
         "databaseId": run_id,
         "status": status,
         "url": f"https://github.com/o/r/actions/runs/{run_id}",
-        "displayTitle": f"Retrain request: {name}",
+        "displayTitle": f"Retrain request{mark}: {name}",
     }
 
 
@@ -71,6 +75,15 @@ def test_requests_started_by_hand_and_running_retrains_are_never_cancelled():
     assert request.decide([running], SENSOR) == ("skip", [running])  # being retrained already
 
 
+def test_staging_and_prod_requests_never_see_each_other():
+    prod, staging = _run(1, PROTOCOL), _run(2, PROTOCOL, target="staging")
+    assert request.for_target([prod, staging], "prod") == [prod]
+    assert request.for_target([prod, staging], "staging") == [staging]
+    assert request.kinds_in(staging["displayTitle"]) == {"performance"}
+    # a rehearsal held in staging must not swallow, or be cancelled by, a prod request
+    assert request.decide(request.for_target([staging], "prod"), PROTOCOL) == ("open", [])
+
+
 def test_a_check_without_kinds_always_opens_a_request():
     """A missed alert is worse than a duplicate request."""
     assert request.decide([_run(1, SENSOR)], [])[0] == "open"
@@ -96,6 +109,7 @@ def test_main_opens_before_it_cancels(monkeypatch, tmp_path, open_runs, kinds, c
             return json.dumps(open_runs)
         if args[0] == "workflow":
             assert f"title={request.title(check)}" in args and f"check={raw}" in args
+            assert "target=prod" in args
         return ""
 
     check = {"episode": "protocol-change", "check_id": CHECK, "act_kinds": kinds}
@@ -105,9 +119,30 @@ def test_main_opens_before_it_cancels(monkeypatch, tmp_path, open_runs, kinds, c
     monkeypatch.setenv("CHECK", raw)
     monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
     monkeypatch.setenv("GITHUB_REF_NAME", "main")
+    monkeypatch.delenv("TARGET", raising=False)  # prod is the default
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
     request.main()
     assert made == calls
     text = summary.read_text(encoding="utf-8")
     assert ("already open" in text) == (calls == ["list"])
     assert ("replaces" in text) == ("cancel" in calls)
+
+
+def test_a_staging_rehearsal_opens_a_staging_request(monkeypatch, tmp_path):
+    made = []
+
+    def fake_gh(*args):
+        made.append(args)
+        # a prod request for the same kind of drift is open: it is not staging's business
+        return json.dumps([_run(1, PROTOCOL)]) if args[:2] == ("run", "list") else ""
+
+    check = {"episode": "protocol-change", "check_id": CHECK, "act_kinds": PROTOCOL}
+    monkeypatch.setattr(request, "gh", fake_gh)
+    monkeypatch.setenv("CHECK", json.dumps(check))
+    monkeypatch.setenv("TARGET", "staging")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
+    monkeypatch.setenv("GITHUB_REF_NAME", "main")
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "summary.md"))
+    request.main()
+    assert [a[:2] for a in made] == [("run", "list"), ("workflow", "run")]
+    assert "target=staging" in made[1]

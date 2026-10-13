@@ -6,8 +6,9 @@
 #   review.sh context <environment> [json]
 #       Who approved this run ($GITHUB_RUN_ID) in <environment>, their comment and the run's
 #       URL, merged over [json] (e.g. the drift check that led to the request).
-#   review.sh rejections
-#       Requests rejected in the latest runs of the retrain, promote and rollback workflows.
+#   review.sh rejections [target]
+#       Requests rejected in the latest runs of the retrain, promote and rollback workflows, for
+#       prod (the default) or for staging (rehearsals: "(staging)" in the run's name).
 #       Prints nothing when there are none.
 set -euo pipefail
 
@@ -32,11 +33,16 @@ case "${1:-}" in
     ;;
 
   rejections)
+    if [ "${2:-prod}" = "staging" ]; then
+      requests='^(Retrain|Promotion|Rollback) request [(]staging[)]:'
+    else
+      requests='^(Retrain|Promotion|Rollback) request:'
+    fi
     reviews='[]'
     for workflow in retrain promote rollback; do
       # a rejected request ends its run as a failure; requests are told from other runs by title
       runs=$(gh api "$api/workflows/$workflow.yml/runs?status=failure&per_page=15" | jq -c \
-        '[.workflow_runs[] | select(.display_title | test("^(Retrain|Promotion|Rollback) request:"))
+        --arg requests "$requests" '[.workflow_runs[] | select(.display_title | test($requests))
           | {run_id: .id, title: .display_title, run_url: .html_url, decided_at: .updated_at}]')
       while IFS= read -r run; do
         [ -n "$run" ] || continue
@@ -55,7 +61,7 @@ case "${1:-}" in
     ;;
 
   *)
-    echo "usage: review.sh context <environment> [json] | rejections" >&2
+    echo "usage: review.sh context <environment> [json] | rejections [target]" >&2
     exit 2
     ;;
 esac

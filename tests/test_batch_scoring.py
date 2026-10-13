@@ -130,6 +130,10 @@ def test_registered_model_comes_with_its_training_threshold(store):
     training.run_training(table, NAME)
     assert batch_scoring.load_registered_model(NAME, "latest")[2] == "2"
     assert batch_scoring.load_registered_model(NAME, "champion")[2] == "1"
+    # staging and dev: the champion once there is one, the newest version until then
+    assert batch_scoring.load_registered_model(NAME, "champion_or_latest")[2] == "1"
+    mlflow.MlflowClient().delete_registered_model_alias(NAME, "champion")
+    assert batch_scoring.load_registered_model(NAME, "champion_or_latest")[2] == "2"
 
 
 def test_to_spark_turns_missing_numbers_into_nulls(spark):

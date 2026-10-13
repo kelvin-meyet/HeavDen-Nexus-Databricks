@@ -3,18 +3,9 @@
 #
 #   Actions -> prod-run -> Run workflow   (or: gh workflow run prod-run.yml -f ingest_sql=true)
 #
-# Each step is optional: copying Azure SQL wakes the free database, a full refresh rebuilds
-# every pipeline table from Bronze (needed after loading *different* data into the source), and
-# training registers a new model version (@challenger if it passes the gates; @champion only for
-# the first model), scoring scores the new hours with @champion and rebuilds the alert,
-# escalation and KPI tables, and the drift check compares the latest data with the champion's.
-# If the check reaches "act", this workflow opens a retrain request (retrain.yml), which waits
-# for Kelvin's approval; GitHub emails him. No stored token: it uses the run's own. While a
-# request for the same kind of drift is open (it may be held for days), a later "act" opens no
-# second one; a different kind of drift replaces the open request with a new one.
-#
-# Every run also copies the requests rejected on GitHub into ml.ops_audit: a rejected run never
-# gets prod credentials, so it can't record itself.
+# The steps live in data-run.yml, shared with staging-run.yml, so what runs here has been
+# rehearsed in staging first: copy Azure SQL into Bronze, run the pipeline, train, score with
+# @champion, check for drift, and open a retrain request when the check reaches "act".
 
 name: prod-run
 
@@ -58,108 +49,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  run-prod:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    environment: prod-run
+  prod:
+    uses: ./.github/workflows/data-run.yml
     permissions:
       contents: read
       id-token: write
-      actions: read # the reviews of retrain, promotion and rollback requests
-    env:
-      DATABRICKS_AUTH_TYPE: azure-cli
-    defaults:
-      run:
-        working-directory: databricks
-    outputs:
-      drift_status: ${{ steps.drift.outputs.status }}
-      drift_result: ${{ steps.drift.outputs.result }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: azure/login@v3.1.0
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          allow-no-subscriptions: true
-
-      - uses: databricks/setup-cli@v1.17.0
-        with:
-          version: 1.17.0
-
-      # The audit copy must never block the data jobs (GitHub keeps the record either way), so
-      # a failure here only shows as a warning. The job skips rejections it already holds.
-      - name: Record rejected requests in ml.ops_audit
-        continue-on-error: true
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          rejections=$(bash ../.github/scripts/review.sh rejections)
-          if [ -n "$rejections" ]; then
-            bash ../.github/scripts/model_ops.sh record-rejections "" "$rejections"
-          else
-            echo "No rejected requests on GitHub."
-          fi
-
-      - name: Copy Azure SQL into Bronze
-        if: inputs.ingest_sql
-        run: databricks bundle run sql_ingest -t prod
-
-      - name: Run the pipeline
-        if: inputs.run_pipeline
-        env:
-          FULL_REFRESH: ${{ inputs.full_refresh }}
-        run: |
-          if [ "$FULL_REFRESH" = "true" ]; then
-            databricks bundle run medallion -t prod --full-refresh-all
-          else
-            databricks bundle run medallion -t prod
-          fi
-
-      - name: Train and register the model
-        if: inputs.train
-        run: databricks bundle run train -t prod
-
-      - name: Score the new patient-hours with the champion
-        if: inputs.score
-        run: databricks bundle run score -t prod
-
-      # The job prints its result on one line (DRIFT_CHECK_RESULT {json}); a run without that
-      # line fails here, so a check that said nothing is never taken for "stable".
-      - name: Check for drift
-        id: drift
-        if: inputs.drift_check
-        shell: bash
-        env:
-          EPISODE: ${{ inputs.episode }}
-        run: |
-          databricks bundle run drift_check -t prod --params episode="$EPISODE" 2>&1 | tee "$RUNNER_TEMP/drift.log"
-          result=$(grep -o 'DRIFT_CHECK_RESULT {.*}' "$RUNNER_TEMP/drift.log" | tail -1 | sed 's/^DRIFT_CHECK_RESULT //' || true)
-          jq -e .status <<<"$result" >/dev/null 2>&1 || { echo "::error::the drift check printed no result line"; exit 1; }
-          echo "status=$(jq -r .status <<<"$result")" >> "$GITHUB_OUTPUT"
-          echo "result=$result" >> "$GITHUB_OUTPUT"
-          {
-            echo "## Drift check: $(jq -r '.status | ascii_upcase' <<<"$result") ($(jq -r .n_act <<<"$result") act, $(jq -r .n_warn <<<"$result") warn)"
-            jq -r '.breaches[] | "- \(.)"' <<<"$result"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  request-retrain:
-    needs: run-prod
-    if: needs.run-prod.outputs.drift_status == 'act'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      actions: write # start retrain.yml, and cancel a request it replaces, with this run's own token
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-
-      # One open request per kind of drift (.github/scripts/retrain_request.py): nothing new
-      # while a request for the same kind is held; a different kind replaces the open request,
-      # so the reviewer is emailed about it and a retrain is recorded against the right check.
-      - name: Open a retrain request, unless one for this kind of drift is open
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CHECK: ${{ needs.run-prod.outputs.drift_result }}
-        run: python3 .github/scripts/retrain_request.py
+      actions: write # the request job starts retrain.yml; the run job reads reviews
+    with:
+      target: prod
+      environment: prod-run # waits here for Kelvin
+      ingest_sql: ${{ inputs.ingest_sql }}
+      run_pipeline: ${{ inputs.run_pipeline }}
+      full_refresh: ${{ inputs.full_refresh }}
+      train: ${{ inputs.train }}
+      score: ${{ inputs.score }}
+      drift_check: ${{ inputs.drift_check }}
+      episode: ${{ inputs.episode }}

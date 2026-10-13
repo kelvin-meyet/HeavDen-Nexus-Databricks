@@ -130,11 +130,17 @@ def background_sample(train_rows: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_registered_model(name: str, alias: str):
-    """(model, alert threshold, version) for `name@alias`, or the newest version if `alias` is
-    "latest" (dev and staging, whose 2-day models rarely pass the gates)."""
+    """(model, alert threshold, version) for `name@alias`. Two values aren't aliases: "latest"
+    is the newest version, and "champion_or_latest" is `@champion` once there is one and the
+    newest version until then (dev and staging: their 2-day models rarely pass the gates, so
+    they have no champion until a retrain makes one; from then on they behave like prod)."""
     import mlflow
 
+    from heavden.ml import model_ops
+
     client = mlflow.MlflowClient()
+    if alias == "champion_or_latest":
+        alias = "champion" if "champion" in model_ops.aliases(client, name) else "latest"
     if alias == "latest":
         versions = client.search_model_versions(f"name = '{name}'")
         if not versions:
@@ -159,7 +165,9 @@ def to_spark(spark, df: pd.DataFrame):
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--catalog", required=True, help="e.g. heavden_prod")
-    parser.add_argument("--model-alias", default="champion", help='an alias, or "latest"')
+    parser.add_argument(
+        "--model-alias", default="champion", help='an alias, "latest" or "champion_or_latest"'
+    )
     parser.add_argument("--train-days", type=float, default=train.Split.train_days)
     parser.add_argument("--valid-days", type=float, default=train.Split.valid_days)
     parser.add_argument(

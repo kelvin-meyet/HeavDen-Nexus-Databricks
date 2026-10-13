@@ -1,17 +1,17 @@
 # Roll the champion back (Plan.md §10.4). Started by hand, with a reason:
 #
-#   Actions -> rollback -> Run workflow   (or: gh workflow run rollback.yml -f reason="...")
+#   Actions -> Rollback request -> Run workflow   (or: gh workflow run rollback.yml -f reason="...")
 #
-# After Kelvin approves it in the production-approval environment, @champion points at
-# @previous_champion again (or at a named version that passed its gates). Nothing is rebuilt:
+# After Kelvin approves it in the production-approval environment (staging-approval for
+# staging), @champion points at @previous_champion again (or at a named version that passed its gates). Nothing is rebuilt:
 # from the next scoring run, new patient-hours are scored by that version; hours already scored
 # keep the version that scored them. The version rolled back from becomes @previous_champion, so
 # running this again undoes the rollback. It never waits behind a promotion request.
 #
 # The rollback is recorded in ml.ops_audit with the reason and who approved it.
 
-name: rollback
-run-name: "Rollback request: ${{ inputs.reason }}"
+name: Rollback request
+run-name: "Rollback request${{ inputs.target == 'staging' && ' (staging)' || '' }}: ${{ inputs.reason }}"
 
 on:
   workflow_dispatch:
@@ -24,19 +24,25 @@ on:
         description: "Version to go back to (empty: @previous_champion)"
         type: string
         default: ""
+      target:
+        description: "prod, or staging to rehearse the same steps there"
+        type: choice
+        options: [prod, staging]
+        default: prod
 
 permissions:
   contents: read
 
 concurrency:
-  group: rollback
+  group: rollback-${{ inputs.target }}
   cancel-in-progress: false
 
 jobs:
   rollback:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: production-approval # waits here for Kelvin
+    # waits here for Kelvin
+    environment: ${{ inputs.target == 'staging' && 'staging-approval' || 'production-approval' }}
     permissions:
       contents: read
       id-token: write
@@ -44,6 +50,8 @@ jobs:
     env:
       DATABRICKS_AUTH_TYPE: azure-cli
       GH_TOKEN: ${{ github.token }}
+      TARGET: ${{ inputs.target }}
+      APPROVAL: ${{ inputs.target == 'staging' && 'staging-approval' || 'production-approval' }}
     defaults:
       run:
         working-directory: databricks
@@ -66,7 +74,7 @@ jobs:
           VERSION: ${{ inputs.version }}
           REASON: ${{ inputs.reason }}
         run: |
-          context=$(bash ../.github/scripts/review.sh context production-approval "$(jq -cn --arg reason "$REASON" '{reason: $reason}')")
+          context=$(bash ../.github/scripts/review.sh context "$APPROVAL" "$(jq -cn --arg reason "$REASON" '{reason: $reason}')")
           result=$(bash ../.github/scripts/model_ops.sh rollback "$VERSION" "$context")
           {
             echo "## Rolled back: version $(jq -r .version <<<"$result") is \`@champion\` again"
@@ -75,5 +83,5 @@ jobs:
                    "- It replaces version \(.from_version // "none"), now `@previous_champion` (run this workflow again to undo)",
                    "- Recorded in `\(.model | split(".")[0]).ml.ops_audit`"' <<<"$result"
             echo
-            echo "New patient-hours are scored by this version from the next scoring run (prod-run with *Score* ticked)."
+            echo "New patient-hours are scored by this version from the next scoring run."
           } >> "$GITHUB_STEP_SUMMARY"

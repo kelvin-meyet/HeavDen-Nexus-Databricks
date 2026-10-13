@@ -50,8 +50,11 @@ Merging a pull request reaches **staging only**. Every change to **prod** waits 
 | Open or update a pull request | lint, tests (also on Databricks' library versions), bundle validation as `heavden-ci-dev` | no |
 | Merge to `main` | staging: deploy, pipeline, training (a smoke test on 2 days) as `heavden-ci-staging` | no |
 | Push a release tag (`git tag -a v0.x.0` and `git push origin v0.x.0`) | **prod deploy**: jobs and pipelines updated to that release's code, nothing run | **yes**, environment `prod-deploy` |
-| Start **prod-run** (Actions → prod-run → Run workflow; tick ingestion, pipeline and/or training) | **prod run** as `heavden-ci-prod` | **yes**, environment `prod-run` |
-| Phase 3: drift detected, a new model passes its gates | retraining, promotion of `@challenger` to `@champion` | **yes**, `retrain-approval`, `production-approval` |
+| Start **prod-run** (Actions → prod-run → Run workflow; tick ingestion, pipeline, scoring, drift check and/or training) | **prod run** as `heavden-ci-prod` | **yes**, environment `prod-run` |
+| Start **staging-run** (the same steps against staging, to rehearse a drift episode) | **staging run** as `heavden-ci-staging` | no |
+| A drift check reaches "act" | a **retrain request** opens and waits | **yes**, `retrain-approval` (rehearsals in staging: `staging-approval`) |
+| A retrained model passes its gates | a **promotion request** opens and waits; approving moves `@champion` | **yes**, `production-approval` (staging: `staging-approval`) |
+| Start **rollback** with a reason | `@champion` goes back to the previous champion | **yes**, `production-approval` (staging: `staging-approval`) |
 
 **Why prod isn't automatic on merge:**
 
@@ -72,7 +75,7 @@ GitHub Actions needs its own identity in Databricks, never a person's login. The
 | Service principal | GitHub environment(s) | May do |
 |---|---|---|
 | `heavden-ci-dev` | `dev` | validate bundles; no data access |
-| `heavden-ci-staging` | `staging` (from `main` only) | deploy and run in `heavden_staging`; read the Azure SQL source |
+| `heavden-ci-staging` | `staging` (from `main` only), and `staging-approval` (from `main`, needs a reviewer's approval: rehearsals of retrain, promote and rollback) | deploy and run in `heavden_staging`; read the Azure SQL source |
 | `heavden-ci-prod` | `prod-deploy` (from `v*` tags), `prod-run`, `retrain-approval`, `production-approval` (from `main`). Every run needs a reviewer's approval | deploy and run in `heavden_prod`; read the Azure SQL source |
 
 ### The same job as "Generate secret", without the secret
