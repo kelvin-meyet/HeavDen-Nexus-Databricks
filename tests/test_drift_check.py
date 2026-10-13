@@ -103,19 +103,31 @@ def test_a_dropped_field_and_quarantined_readings_are_flagged():
     assert rows.loc[("missing_rate_change", "etco2"), "level"] == "act"
 
 
-def test_the_check_reports_its_worst_signals_first():
+class _SpO2Model:
+    """Risk falls as SpO2 rises, like the real model's strongest factor."""
+
+    def predict_proba(self, df: pd.DataFrame) -> np.ndarray:
+        p = 1 / (1 + np.exp(5 + (df["spo2_mean_1h"].to_numpy() - 50) / 10))
+        return np.column_stack([1 - p, p])
+
+
+def test_the_check_scores_with_the_model_it_judges_and_reports_the_worst_first():
     baseline = _hours(90, 48, seed=1)
     features = _hours(90, 24, seed=2, start=T0 + pd.Timedelta(days=3), spo2_shift={"SITE_B": -12})
-    log = features.assign(risk_band="Low")
-    training_set = _labelled(5, signal=3.0)
+    # the log was scored by an older model whose scores have nothing to do with these
+    log = features.assign(risk=0.5, risk_band="Low")
+    training_set = _hours(90, 48, seed=3, start=T0 + pd.Timedelta(days=2))
+    training_set["label"] = 0.0
     quality = dc.ReadingQuality(1000, 0, pd.Series({"spo2": 0.0}), pd.Series({"spo2": 0.0}))
     metrics = dc.run_check(
-        features, log, training_set, baseline, {"auprc": 0.5, "brier": 0.01}, quality
+        _SpO2Model(), features, log, training_set, baseline, {"auprc": 0.5, "brier": 0.01}, quality
     )
     assert set(metrics["signal"]) == set(dc.THRESHOLDS)
+    js = metrics[metrics["signal"] == "prediction_js"].set_index("site_id")
+    assert js.loc["SITE_A", "level"] == "stable"  # the log's 0.5s would be "act" everywhere
+    assert js.loc["SITE_B", "level"] == "act"
     result = dc.summary(metrics)
-    assert result["status"] == "act" and result["n_act"] >= 2
-    assert result["breaches"][0].endswith("(act)")
+    assert result["status"] == "act" and result["breaches"][0].endswith("(act)")
     assert "feature_psi spo2_mean_1h at SITE_B" in " ".join(result["breaches"])
-    # the labelled window doesn't overlap the log here, so performance can't be judged
+    # no escalations in the labelled window: performance can't be judged
     assert (metrics.loc[metrics["signal"] == "auprc_drop", "level"] == "not enough data").all()
