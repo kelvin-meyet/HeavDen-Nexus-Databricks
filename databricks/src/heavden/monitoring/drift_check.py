@@ -17,12 +17,14 @@ The check measures and reports; it doesn't decide. A sensor fault (inputs drift 
 needs the sensors fixed, not a new model; a change in outcomes (performance drops while the
 inputs stay put) is what retraining is for. A person reads the report and chooses (§10.4).
 
-Thresholds start from Plan.md §10.3 and were checked offline (12 Oct) by replaying prod's
-history with its two episodes (`generator.episode.history`), scoring it with the Phase 0
-champion and checking every 12 hours: on normal days nothing reaches act (at most a warn, Site
-B's SpO2 PSI up to 0.15); the sensor bias reaches act on Site B's SpO2 PSI (1.2), prediction
-JS and alert load (3.3), with performance unchanged; the protocol change reaches act on AUPRC
-(-44%) and Brier (+36%) while the inputs stay stable. Two changes from §10.3: prediction JS
+Thresholds start from Plan.md §10.3 and were checked offline (12 Oct) on a rehearsal: prod's
+baseline followed by a sensor-bias and a protocol-change episode (`generator.episode`, seeds
+3001 and 3002; prod's live episodes use other seeds, so they test these thresholds rather than
+repeat the rehearsal), scored with the Phase 0 champion and checked every 12 hours: on normal
+days nothing reaches act (at most a warn, Site B's SpO2 PSI up to 0.15); the sensor bias
+reaches act on Site B's SpO2 PSI (1.2), prediction JS and alert load (3.3), with performance
+unchanged; the protocol change reaches act on AUPRC (-44%) and Brier (+36%) while the inputs
+stay stable. Two changes from §10.3: prediction JS
 0.08 / 0.12 (normal days reached 0.063 per site), and the performance signals use the
 bootstrap bound described in `performance`.
 """

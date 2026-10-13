@@ -15,7 +15,24 @@ staging:  # dry runs: each scenario must be caught by the expected check (Plan.m
   - {name: respiratory-outbreak, hours: 48, scenarios: [respiratory_outbreak], seed: 2002}
   - {name: schema-change, hours: 48, scenarios: [firmware_schema_change], seed: 2003}
   - {name: protocol-change, hours: 48, scenarios: [protocol_change], seed: 2004}
+  - name: protocol-settled  # the new protocol stays: data for the retrain dry run
+    hours: 144
+    scenarios: [protocol_change]
+    seed: 2005
+    settings: {protocol_change: {start_after_hours: 0}}
 
+# Prod's seeds were used by no offline rehearsal. The drift thresholds were designed on a
+# rehearsal with seeds 3001 and 3002 for the first two episodes, the champion gates on one with
+# 3003-3005 for the third; with those seeds prod's live checks would only repeat what was
+# already seen. Don't replay a prod episode offline before it has run.
 prod:  # live episodes (Plan.md §6.4)
-  - {name: sensor-bias, hours: 48, scenarios: [spo2_sensor_bias], seed: 3001}
-  - {name: protocol-change, hours: 48, scenarios: [protocol_change], seed: 3002}
+  - {name: sensor-bias, hours: 48, scenarios: [spo2_sensor_bias], seed: 3115}
+  - {name: protocol-change, hours: 48, scenarios: [protocol_change], seed: 3116}
+  # The new protocol stays. A day and a half after the change there is nothing to validate a new
+  # model on; these 6 days make 7.5, where a retrain passed the champion gates for 3 of 3 seeds
+  # in the offline rehearsal (heavden.ml.training.compare_with_champion).
+  - name: protocol-settled
+    hours: 144
+    scenarios: [protocol_change]
+    seed: 3117
+    settings: {protocol_change: {start_after_hours: 0}}
