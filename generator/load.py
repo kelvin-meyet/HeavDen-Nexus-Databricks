@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import argparse
 
-from generator import landing, source_db
+from generator import clock, landing, source_db
 
 LOCAL_ROOT = source_db.ROOT / "data" / "landing"
 
@@ -45,7 +45,7 @@ def main() -> None:
     vitals = [p for p in files if "/vitals/" in p]
     outcomes = [p for p in files if "/outcomes/" in p]
     recorded = sum(files[p].count("\n") for p in outcomes)
-    print(f"{days} simulated days, as of {as_of}:")
+    print(f"{days} simulated days, {ward.activity.start} -> {as_of}:")
     for name, df in tables.items():
         print(f"  sql {name}: {len(df):,} rows")
     print(f"  landing vitals: {len(ward.readings):,} readings in {len(vitals)} files")
@@ -57,6 +57,7 @@ def main() -> None:
     if args.dry_run:
         return
 
+    clock.require_past(as_of)
     out = source_db.terraform_outputs()
     action = "REPLACE" if args.replace else "load into"
     targets = (

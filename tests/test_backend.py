@@ -100,7 +100,7 @@ def test_document_search_cites_and_filters_versions(client):
     assert any(r["doc_id"] == "HD-OPS-001" for r in body["results"])
     old = client.get(
         "/documents/search",
-        params={"q": "NEWS2 escalation protocol", "k": 5, "as_of": "2026-11-05"},
+        params={"q": "NEWS2 escalation protocol", "k": 5, "as_of": "2026-09-25"},
     ).json()["results"]
     assert {r["version"] for r in old if r["doc_id"] == "HD-CLIN-001"} == {"1.0"}
     assert client.get("/documents/search", params={"q": "x"}).status_code == 422

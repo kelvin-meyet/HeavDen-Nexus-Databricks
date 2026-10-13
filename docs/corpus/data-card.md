@@ -3,7 +3,7 @@ doc_id: HD-ML-002
 title: "Data Card: HeavDen synthetic inpatient data"
 version: "1.0"
 status: current
-effective_date: 2026-11-01
+effective_date: 2026-09-20
 owner: HeavDen ML Platform Team
 audience: analysts, ML and data teams, reviewers
 ---

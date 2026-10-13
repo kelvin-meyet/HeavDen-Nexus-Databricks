@@ -2,7 +2,9 @@
 # Each episode continues the hospital from where the previous one stopped, and the history is
 # replayed from this file, so ONLY APPEND: never edit, reorder or remove a loaded episode.
 #
-# hours:      simulated hours (scenario timings are in generator/drift_config.yaml)
+# hours:      simulated hours (scenario timings are in generator/drift_config.yaml). The
+#             hospital starts on hospital.SIM_START and never runs ahead of the real
+#             calendar: an episode can be loaded once its last hour has passed.
 # scenarios:  drift scenarios switched on during this episode only (none = a normal stretch)
 # seed:       the episode's random seed (unique per environment)
 # settings:   optional overrides of drift_config.yaml, e.g. {protocol_change: {start_after_hours: 0}}

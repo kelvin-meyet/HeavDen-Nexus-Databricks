@@ -7,7 +7,7 @@ credits end, the backend serves this FAISS index instead.
 * `FastEmbedder`: a small ONNX sentence-embedding model (BAAI/bge-small-en-v1.5, 384 dims) via
   `fastembed`, no PyTorch. Install the `rag` dependency group.
 * `HashingEmbedder`: a dependency-free bag-of-words embedder for tests and for learning.
-* `BM25`: classic keyword ranking; good at exact terms (`etco2`, `FSN-2026-11`, `SITE_B`).
+* `BM25`: classic keyword ranking; good at exact terms (`etco2`, `FSN-2026-10`, `SITE_B`).
 * `Retriever`: vector, BM25 or **hybrid** search (reciprocal rank fusion), with version
   filtering (current documents, or what was in force on a date) and a similarity floor so the
   assistant can say "not in the documents" instead of answering from a weak match.
@@ -39,7 +39,7 @@ _STOPWORDS = frozenset(
 
 
 def tokenize(text: str) -> list[str]:
-    """Lower-case word tokens; keeps codes like `fsn-2026-11`, `site_b` and `3.2.0` intact."""
+    """Lower-case word tokens; keeps codes like `fsn-2026-10`, `site_b` and `3.2.0` intact."""
     return [t for t in _TOKEN.findall(text.lower()) if t not in _STOPWORDS]
 
 

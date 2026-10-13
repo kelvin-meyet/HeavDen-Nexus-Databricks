@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from generator import clock
+
 _JAVA_EXE = "java.exe" if os.name == "nt" else "java"
 DEFAULT_JAVA = Path.home() / "tools" / "jdk-21" / "bin" / _JAVA_EXE
 DEFAULT_SYNTHEA_JAR = Path.home() / "tools" / "synthea" / "synthea-with-dependencies.jar"
@@ -42,7 +44,11 @@ class SyntheaRun:
 
     population: int = 2000
     seed: int = 42
-    reference_date: str = "20261101"  # YYYYMMDD: the "today" of the generated histories
+    reference_date: str = "20260920"  # YYYYMMDD: the "today" of the histories as loaded,
+    # which is the hospital's first day (hospital.SIM_START)
+    generated_for: str = "20261101"  # the "today" Synthea itself is run with. With the seed
+    # it decides who the patients are, so it stays as it was when they were first generated;
+    # `load_tables` moves every date so that the histories end on `reference_date`.
     min_age: int = 18
     max_age: int = 95
     state: str = "Massachusetts"
@@ -68,7 +74,7 @@ def build_command(run: SyntheaRun, java: Path, jar: Path) -> list[str]:
         "-cs",
         str(run.seed),
         "-r",
-        run.reference_date,
+        run.generated_for,
         "-a",
         f"{run.min_age}-{run.max_age}",
         "--exporter.csv.export=true",
@@ -99,8 +105,15 @@ def run_synthea(run: SyntheaRun, work_dir: Path, *, force: bool = False) -> Path
     return csv_dir
 
 
-def load_tables(csv_dir: Path) -> dict[str, pd.DataFrame]:
-    """Load the Synthea CSVs the platform uses."""
+def load_tables(csv_dir: Path, run: SyntheaRun | None = None) -> dict[str, pd.DataFrame]:
+    """Load the Synthea CSVs the platform uses, dated on the hospital's calendar.
+
+    Synthea wrote the histories as of `run.generated_for`. Every date is moved by the same whole
+    number of days so that they end on `run.reference_date`: the same patients, ages and
+    conditions, on the calendar the hospital runs on.
+    """
+    run = run or SyntheaRun()
+    by = pd.Timestamp(run.reference_date, tz="UTC") - pd.Timestamp(run.generated_for, tz="UTC")
     date_cols = {
         "patients": ["BIRTHDATE", "DEATHDATE"],
         "conditions": ["START", "STOP"],
@@ -112,7 +125,7 @@ def load_tables(csv_dir: Path) -> dict[str, pd.DataFrame]:
         df = pd.read_csv(csv_dir / f"{name}.csv", dtype=str)
         for col in date_cols[name]:
             df[col] = pd.to_datetime(df[col], utc=True, errors="coerce")
-        tables[name] = df
+        tables[name] = clock.move(df, by)
     return tables
 
 

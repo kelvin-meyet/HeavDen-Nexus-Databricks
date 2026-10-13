@@ -70,5 +70,8 @@ def test_command_is_seeded_and_exports_only_needed_csvs():
     cmd = build_command(SyntheaRun(population=10, seed=7), Path("java"), Path("s.jar"))
     assert cmd[cmd.index("-s") + 1] == "7"
     assert cmd[cmd.index("-p") + 1] == "10"
+    # Synthea is always run for the date the patients were first generated for; the histories
+    # are moved onto the hospital's calendar when they are loaded.
+    assert cmd[cmd.index("-r") + 1] == SyntheaRun().generated_for == "20261101"
     included = next(c for c in cmd if c.startswith("--exporter.csv.included_files="))
     assert "patients.csv" in included and "observations.csv" not in included

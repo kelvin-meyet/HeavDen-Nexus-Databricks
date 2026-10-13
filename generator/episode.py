@@ -10,6 +10,9 @@ The simulator draws its random numbers per period, so a longer run is not the sh
 more hours. Each environment's history is therefore replayed period by period from
 `episodes.yaml` (seconds per period), which must only ever be appended to.
 
+The hospital runs on the real calendar and never ahead of it (`generator.clock`), so an
+episode can be loaded once its last hour has passed.
+
 The seam: stays that cross into an episode keep their personal normal values (resting heart
 rate, blood pressure, ...), but their short-term wander starts afresh, and a deterioration under
 way at the episode start stops there.
@@ -28,7 +31,7 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
-from generator import drift, landing, source_db, vitals
+from generator import clock, drift, landing, source_db, vitals
 from generator.activity import HospitalActivity
 
 EPISODES_PATH = Path(__file__).with_name("episodes.yaml")
@@ -217,6 +220,7 @@ def main() -> None:
     if args.dry_run:
         return
 
+    clock.require_past(period.end)
     out = source_db.terraform_outputs()
     question = (
         f"Load episode {args.episode} '{period.name}' into:\n"

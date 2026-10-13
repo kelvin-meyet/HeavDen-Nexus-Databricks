@@ -9,7 +9,7 @@ Differences from the pandas reference, by design:
   so a negative label at `t` is final only once `t + 6 h` (the window) `+ 6 h` (the recording
   delay) has passed the data's as-of time. A recorded escalation settles a positive at once.
 * **Age and condition flags are taken at admission**, from Silver patients, conditions and
-  medications (pandas reads a profile fixed at 1 Nov 2026).
+  medications (pandas reads a profile fixed at the hospital's first day).
 * **Unit history comes from Silver encounters (SCD type 2)**: a transfer inside one load window
   is invisible there, so those hours carry the later unit (CLAUDE.md, known issues).
 
