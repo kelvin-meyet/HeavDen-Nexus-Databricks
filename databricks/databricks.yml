@@ -55,6 +55,12 @@ variables:
   valid_days:
     description: Days of validation, where calibration, the alert threshold and the champion are chosen.
     default: 2
+  retrain_valid_days:
+    description: In a retrain, the days of validation just before the test days.
+    default: 2
+  retrain_test_days:
+    description: In a retrain, the latest days, where the new model is compared with the champion.
+    default: 2
   scoring_model:
     description: Which registered version scores the patient-hours (an alias, or "latest").
     default: champion

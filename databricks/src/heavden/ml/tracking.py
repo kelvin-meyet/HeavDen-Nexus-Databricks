@@ -106,6 +106,20 @@ def register_version(
     return version, aliases
 
 
+def data_blocks(name: str, version: str) -> dict[str, tuple[pd.Timestamp, pd.Timestamp]] | None:
+    """First and last hour of the version's train / validation / test blocks, as its training
+    run recorded them (`training.block_windows`). None for versions trained before runs
+    recorded their window."""
+    client = mlflow.MlflowClient()
+    tags = client.get_run(client.get_model_version(name, version).run_id).data.tags
+    if "train_from" not in tags:
+        return None
+    return {
+        block: (pd.Timestamp(tags[f"{block}_from"]), pd.Timestamp(tags[f"{block}_to"]))
+        for block in ("train", "valid", "test")
+    }
+
+
 def has_alias(name: str, alias: str) -> bool:
     try:
         mlflow.MlflowClient().get_model_version_by_alias(name, alias)

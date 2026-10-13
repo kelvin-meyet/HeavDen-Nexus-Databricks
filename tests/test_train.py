@@ -132,3 +132,17 @@ def test_no_champion_when_nothing_beats_news2():
     weak = train.CandidateResult("weak", None, {"auprc": 0.1, "escalations_flagged": 0.9})
     misses_more = train.CandidateResult("x", None, {"auprc": 0.4, "escalations_flagged": 0.5})
     assert train.select_champion([weak, misses_more], baseline) is None
+
+
+def test_recent_split_counts_back_from_the_newest_hour():
+    table = _table()
+    tr, va, te = train.recent_split(table, train.RecentSplit(valid_days=2, test_days=3))
+    newest = table["prediction_ts"].max()
+    assert te["prediction_ts"].max() == newest
+    assert te["prediction_ts"].min() == newest - pd.Timedelta(days=3) + pd.Timedelta(hours=1)
+    assert tr["prediction_ts"].min() == table["prediction_ts"].min()
+    # 6-hour gaps, so no label window straddles two blocks
+    assert te["prediction_ts"].min() - va["prediction_ts"].max() > train.GAP
+    assert va["prediction_ts"].min() - tr["prediction_ts"].max() > train.GAP
+    assert train.split_blocks(table, train.RecentSplit(2, 3))[2].equals(te)
+    assert train.split_blocks(table)[0].equals(train.time_split(table)[0])

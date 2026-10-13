@@ -65,7 +65,7 @@ The deterioration risk model was trained on past data. When the data or the worl
 ### 5.3 Protocol change (concept drift)
 - **Symptoms:** feature distributions look **normal**, but more patients are escalated than predicted. **AUPRC drops and calibration gets worse** (predicted risks too low), once the outcomes are known, about 12 hours after the change. Starts on the same day at all sites.
 - **Cause:** the escalation protocol changed (HD-CLIN-001 v2.0, effective 2026-11-09). The same vital signs now lead to escalation more often.
-- **Correct response:** this is the one case where **retraining is required**: the meaning of the label has changed. Approve the retrain once enough post-change outcomes exist (at least 48 hours), and train only on data from after the change, or weight it heavily. Check the alert budget with the wards, because escalations will rise.
+- **Correct response:** this is the one case where **retraining is required**: the meaning of the label has changed. Approve the retrain only once enough post-change outcomes exist: **at least a week, and expect to need more**. With one or two days there is nothing to validate a new model on, and in testing a retrain after one week beat the current champion only about half the time. Retraining uses the whole history, with the most recent days kept for calibration, the alert threshold and the comparison with the current champion; a model trained only on post-change data was usually worse than one trained on everything. If the new model does not pass the gates, the champion stays and the retrain is repeated when more outcomes exist. Check the alert budget with the wards, because escalations will rise.
 
 ### 5.4 Firmware schema change (schema drift)
 - **Symptoms:** a new column `etco2` appears in `_rescued_data`; `motion` becomes null; expectations on `motion` fail or rows are dropped; the quarantine rate rises.
@@ -74,7 +74,7 @@ The deterioration risk model was trained on past data. When the data or the worl
 
 ## 6. Promotion after a retrain
 
-A retrained model is registered as `@challenger`. It is promoted only if it beats the current `@champion` on a recent labelled window, its calibration is acceptable, no large slice gets more than 5% worse, and it still beats NEWS2. Promotion needs a second approval in the GitHub `production-approval` environment. Rollback is the `rollback.yml` workflow, which points `@champion` back at the previous version.
+A retrained model is registered as `@challenger`. It becomes `@challenger` only if it beats NEWS2 on validation and beats the current `@champion` on the most recent days: a higher AUPRC in at least 75% of paired resamples of patient stays (a few days hold too few escalations to trust a single comparison), at least as many escalations flagged within the alert budget, and a Brier score no more than 10% worse. Promotion needs a second approval in the GitHub `production-approval` environment. Rollback is the `rollback.yml` workflow, which points `@champion` back at the previous version.
 
 ## 7. Communication
 

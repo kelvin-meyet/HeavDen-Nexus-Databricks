@@ -101,7 +101,7 @@ def test_a_run_with_nothing_new_changes_nothing(scored, fitted):  # noqa: F811
 def test_background_comes_from_the_training_block():
     table = _table()
     split = train.Split()
-    background = batch_scoring.background_sample(table, split)
+    background = batch_scoring.background_sample(train.time_split(table, split)[0])
     cut = table["prediction_ts"].min().floor("D") + pd.Timedelta(days=split.train_days)
     assert len(background) == batch_scoring.BACKGROUND_ROWS
     assert (background["prediction_ts"] < cut - split.gap).all()

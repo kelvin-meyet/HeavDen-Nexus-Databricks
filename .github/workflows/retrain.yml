@@ -4,7 +4,11 @@
 # rejecting it is the decision. Not every drift calls for a retrain (a sensor fault doesn't), so
 # rejecting is a normal outcome: see docs/corpus/drift-incident-runbook.md.
 #
-# Nothing here calls Databricks yet: the retraining job that an approval starts comes next.
+# An approval runs prod's training job in retrain mode: the latest days are validation and test,
+# all earlier history trains, and the new model becomes @challenger only if it beats NEWS2 and
+# the current @champion. Nothing is promoted here: @champion changes only in a separate, approved
+# step. The job can't know whether enough has happened since the drift began: approve only once
+# there are enough outcomes under the new conditions (the runbook says how long to wait).
 
 name: retrain
 
@@ -62,12 +66,56 @@ jobs:
   retrain:
     needs: report
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 75
     environment: retrain-approval # waits here for Kelvin; rejecting ends the request
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DATABRICKS_AUTH_TYPE: azure-cli
+    defaults:
+      run:
+        working-directory: databricks
     steps:
-      - name: Approved
-        env:
-          CHECK: ${{ inputs.check }}
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - uses: databricks/setup-cli@v1.17.0
+        with:
+          version: 1.17.0
+
+      # The job prints its result on one line (TRAINING_RESULT {json}); without it this step
+      # fails, so a run that said nothing is never reported as a new challenger.
+      - name: Retrain on the latest data and compare with the champion
+        shell: bash
         run: |
-          echo "Retraining approved for check $(jq -r .check_id <<<"$CHECK")." >> "$GITHUB_STEP_SUMMARY"
-          echo "The retraining job is not wired in yet (next step of Phase 3)." >> "$GITHUB_STEP_SUMMARY"
+          databricks bundle run train -t prod --params mode=retrain 2>&1 | tee "$RUNNER_TEMP/train.log"
+          result=$(grep -o 'TRAINING_RESULT {.*}' "$RUNNER_TEMP/train.log" | tail -1 | sed 's/^TRAINING_RESULT //')
+          jq -e .version <<<"$result" >/dev/null || { echo "::error::the training job printed no result line"; exit 1; }
+          {
+            echo "## Retrained: version $(jq -r .version <<<"$result") ($(jq -r .model_type <<<"$result"))"
+            echo
+            if [ "$(jq -r .passed_gates <<<"$result")" = "true" ]; then
+              echo "**Passed every gate: it is now \`@challenger\`.** \`@champion\` is unchanged until a promotion is approved."
+            else
+              echo "**Did not pass the gates: no alias.** \`@champion\` stays. The version is registered, so the attempt is on record."
+            fi
+            echo
+            echo "| On the latest days (test) | New model | Champion |"
+            echo "|---|---|---|"
+            jq -r '.vs_champion | select(. != null) |
+              "| AUPRC | \(.auprc * 1000 | round / 1000) | \(.champion_auprc * 1000 | round / 1000) |",
+              "| Escalations flagged within the alert budget | \(.escalations_flagged * 100 | round)% of \(.escalations) | \(.champion_escalations_flagged * 100 | round)% |",
+              "| Alerts per nurse per shift | \(.alerts_per_nurse_shift * 100 | round / 100) | \(.champion_alerts_per_nurse_shift * 100 | round / 100) |",
+              "| Brier score | \(.brier * 10000 | round / 10000) | \(.champion_brier * 10000 | round / 10000) |"' <<<"$result"
+            echo
+            jq -r '.vs_champion | select(. != null) |
+              "The new model has the higher AUPRC in **\(.auprc_better_share * 100 | round)%** of paired resamples of patient stays (gate: at least 75%)."' <<<"$result"
+            echo
+            jq -r '"Validation AUPRC \(.valid_auprc * 1000 | round / 1000) vs NEWS2 \(.news2_valid_auprc * 1000 | round / 1000). Rows: train \(.rows.train), validation \(.rows.valid), test \(.rows.test)."' <<<"$result"
+          } >> "$GITHUB_STEP_SUMMARY"
