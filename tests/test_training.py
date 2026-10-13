@@ -97,17 +97,16 @@ def test_spark_timestamps_become_utc():
 
 
 class _FixedModel:
-    """A stand-in champion: `oracle` knows the labels, otherwise every hour gets the same risk."""
+    """A stand-in champion: `oracle` knows the labels, otherwise it scores at random."""
 
     def __init__(self, table: pd.DataFrame, oracle: bool):
-        self.labels = table.set_index(["encounter_id", "prediction_ts"])["label"]
-        self.oracle = oracle
+        labels = table.set_index(["encounter_id", "prediction_ts"])["label"]
+        guesses = np.random.default_rng(0).uniform(0.001, 0.05, len(labels))
+        self.risk = labels * 0.9 + 0.05 if oracle else pd.Series(guesses, index=labels.index)
 
     def predict_proba(self, df: pd.DataFrame) -> np.ndarray:
         keys = pd.MultiIndex.from_frame(df[["encounter_id", "prediction_ts"]])
-        p = np.full(len(df), 0.01)
-        if self.oracle:
-            p = self.labels.reindex(keys).to_numpy() * 0.9 + 0.05
+        p = self.risk.reindex(keys).to_numpy()
         return np.column_stack([1 - p, p])
 
 
@@ -121,7 +120,8 @@ def test_a_retrain_uses_the_latest_days_and_must_beat_the_champion(store, table)
     assert blocks["test"][0] > newest - pd.Timedelta(days=2) > blocks["valid"][1]
     assert blocks["train"][0] == table["prediction_ts"].min()  # all earlier history trains
     assert retrained.vs_champion["beats_champion"] == 1.0
-    assert retrained.vs_champion["auprc_better_share"] >= training.BETTER_SHARE
+    assert retrained.vs_champion["auroc_better_share"] >= training.BETTER_SHARE
+    assert retrained.vs_champion["flagged_at_least_share"] >= training.BETTER_SHARE
     assert retrained.passed_gates and retrained.aliases == ["challenger"]
     client = mlflow.MlflowClient()
     assert int(client.get_model_version_by_alias(NAME, "champion").version) == first.version

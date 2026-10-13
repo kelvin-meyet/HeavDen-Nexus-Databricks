@@ -14,8 +14,9 @@ train_model.py`) and the tests run the same code:
 
 A **retrain** (`--mode retrain`, started by an approved retrain request) differs in two ways:
 the split is counted back from the newest labelled hour (`train.RecentSplit`), and the chosen
-model must also beat the current champion on the test block (`compare_with_champion`) to
-become `@challenger`. Promotion to `@champion` stays a separate, approved step.
+model must also beat the current champion on the test block, at the same alert budget
+(`compare_with_champion`), to become `@challenger`. Promotion to `@champion` stays a separate,
+approved step.
 
 On Databricks `main` reads `<catalog>.gold.training_set` with Spark, logs to the workspace
 experiment and registers in Unity Catalog as `<catalog>.ml.deterioration_risk`.
@@ -40,13 +41,15 @@ MODEL_LIBRARIES = ("cloudpickle", "lightgbm", "numpy", "pandas", "scikit-learn",
 
 
 RESULT_MARKER = "TRAINING_RESULT"
-BETTER_SHARE = 0.75  # of paired resamples in which the new model's AUPRC must be the higher
+BETTER_SHARE = 0.75  # of paired resamples: flags at least as many escalations; higher AUROC
+NOT_WORSE_SHARE = 0.10  # of paired resamples in which its AUPRC is the higher (a guard)
 BRIER_SLACK = 1.10  # its Brier score may be at most 10% worse than the champion's
 
 
 @dataclass
 class Champion:
-    """The model a retrain has to beat."""
+    """The model a retrain has to beat. Its deployed alert `threshold` isn't used in the
+    comparison: both models get a threshold fitted on the same recent validation days."""
 
     model: object
     threshold: float
@@ -73,36 +76,59 @@ def compare_with_champion(
     budget: evaluate.AlertBudget,
     n_boot: int = 300,
 ) -> dict[str, float]:
-    """The new model ("challenger") against the champion on the same test block.
+    """The new model ("challenger") against the champion on the same test block, both at the
+    same alert budget (`thresholds` fitted on the same validation days).
 
-    A recent test block holds only 20-30 escalations, so "0.21 beats 0.17" proves little. Both
-    models are scored on the same resamples of whole stays (a paired bootstrap), and the new
-    model must have the higher AUPRC in at least `BETTER_SHARE` of them. It must also flag at
-    least as many escalations (each model at its own alert threshold) and not be clearly worse
-    calibrated. The gate is hard to pass by luck: measured offline with 5 to 11 days of data
-    after the protocol change (3 seeds), a retrain passed it in 6 of 12 runs, because a week of
-    new data rarely makes a clearly better model."""
+    A recent test block holds only 20-30 escalations, so a single comparison proves little.
+    Both models are scored on the same resamples of whole stays (a paired bootstrap). The new
+    model must, in at least `BETTER_SHARE` of them, flag at least as many escalations and have
+    the higher AUROC; its AUPRC must not be clearly worse (higher in at least
+    `NOT_WORSE_SHARE`); and its Brier score at most `BRIER_SLACK` times the champion's.
+
+    Why these and not "higher AUPRC": measured offline after the protocol change (3 seeds, 5 to
+    17 days of new data), a retrain on all history flagged more escalations at the same alert
+    budget and had the higher AUROC in nearly every run, while AUPRC moved either way. AUPRC is
+    set by the top of the ranking, where both models place the classic deteriorations; what the
+    retrain learns (the new protocol's reviews of mildly abnormal patients) sits lower down.
+    Re-fitting only the champion's threshold gave none of the gain. On the same runs these
+    gates passed 13 of 15 retrains on all history (3 of 3 at 7.5 days) and stopped all 9
+    retrains on post-change data alone at 5.5, 7.5 and 13.5 days.
+
+    The limits were chosen on that rehearsal, after seeing its results (`NOT_WORSE_SHARE` with
+    one passing run at 0.13), so its pass rates describe the design, not a test of it. The
+    test is prod's retrain, on an episode whose seed no rehearsal used."""
     point = {k: evaluate.evaluate(test, s, thresholds[k], True, budget) for k, s in scores.items()}
     replicates = evaluate.cluster_bootstrap(test, scores, thresholds, n_boot=n_boot, budget=budget)
-    auprc = evaluate.paired_difference(replicates, "challenger", "champion").loc["auprc"]
+    wide = replicates.pivot_table(index=["rep", "metric"], columns="model", values="value")
+
+    def share(metric: str, strictly: bool) -> float:
+        new, old = (
+            wide.xs(metric, level="metric")["challenger"],
+            wide.xs(metric, level="metric")["champion"],
+        )
+        return float((new > old).mean() if strictly else (new >= old).mean())
+
     new, old = point["challenger"], point["champion"]
     out = {
-        "auprc": new["auprc"],
-        "champion_auprc": old["auprc"],
-        "auprc_better_share": float(auprc["share_model_better"]),
-        "auprc_diff_low": float(auprc["low"]),
-        "auprc_diff_high": float(auprc["high"]),
         "escalations": new["escalations"],
         "escalations_flagged": new["escalations_flagged"],
         "champion_escalations_flagged": old["escalations_flagged"],
+        "flagged_at_least_share": share("escalations_flagged", strictly=False),
+        "auroc": new["auroc"],
+        "champion_auroc": old["auroc"],
+        "auroc_better_share": share("auroc", strictly=True),
+        "auprc": new["auprc"],
+        "champion_auprc": old["auprc"],
+        "auprc_better_share": share("auprc", strictly=True),
         "brier": new["brier"],
         "champion_brier": old["brier"],
         "alerts_per_nurse_shift": new["alerts_per_nurse_shift"],
         "champion_alerts_per_nurse_shift": old["alerts_per_nurse_shift"],
     }
     out["beats_champion"] = float(
-        out["auprc_better_share"] >= BETTER_SHARE
-        and new["escalations_flagged"] >= old["escalations_flagged"]
+        out["flagged_at_least_share"] >= BETTER_SHARE
+        and out["auroc_better_share"] >= BETTER_SHARE
+        and out["auprc_better_share"] >= NOT_WORSE_SHARE
         and new["brier"] <= old["brier"] * BRIER_SLACK
     )
     return out
@@ -180,7 +206,12 @@ def run_training(
         vs_champion = compare_with_champion(
             test,
             {"challenger": test_scores, "champion": champion.model.predict_proba(test)[:, 1]},
-            {"challenger": chosen.valid_metrics["threshold"], "champion": champion.threshold},
+            {
+                "challenger": chosen.valid_metrics["threshold"],
+                "champion": evaluate.threshold_for_alert_budget(
+                    valid, champion.model.predict_proba(valid)[:, 1], budget
+                ),
+            },
             budget,
         )
         passed = passed and bool(vs_champion["beats_champion"])
@@ -215,11 +246,13 @@ def run_training(
     )
     if vs_champion is not None:
         description += (
-            f" Against champion v{champion.version} on the same test block: AUPRC "
-            f"{vs_champion['auprc']:.3f} vs {vs_champion['champion_auprc']:.3f} (higher in "
-            f"{vs_champion['auprc_better_share']:.0%} of resamples), escalations flagged "
-            f"{vs_champion['escalations_flagged']:.0%} vs "
-            f"{vs_champion['champion_escalations_flagged']:.0%}."
+            f" Against champion v{champion.version} on the same test block and alert budget: "
+            f"escalations flagged {vs_champion['escalations_flagged']:.0%} vs "
+            f"{vs_champion['champion_escalations_flagged']:.0%} (at least as many in "
+            f"{vs_champion['flagged_at_least_share']:.0%} of resamples), AUROC "
+            f"{vs_champion['auroc']:.3f} vs {vs_champion['champion_auroc']:.3f} (higher in "
+            f"{vs_champion['auroc_better_share']:.0%}), AUPRC {vs_champion['auprc']:.3f} vs "
+            f"{vs_champion['champion_auprc']:.3f}."
         )
     description += f" Passed gates: {passed}."
     version_number, aliases = tracking.register_version(
