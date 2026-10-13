@@ -344,9 +344,16 @@ def main(argv: list[str] | None = None) -> None:
     import mlflow
     from pyspark.sql import SparkSession
 
+    from heavden.pipelines.gold import require_current
+
     spark = SparkSession.builder.getOrCreate()
     spark.conf.set("spark.sql.session.timeZone", "UTC")
-    source = f"{args.catalog}.gold.training_set"
+    c = args.catalog
+    # A model trained on a Gold that is missing the latest readings is tested on old days.
+    require_current(
+        spark.read.table(f"{c}.silver.device_readings"), spark.read.table(f"{c}.silver.vitals")
+    )
+    source = f"{c}.gold.training_set"
     table = to_utc(spark.read.table(source).toPandas(), ("prediction_ts", "label_known_at"))
     exclusions = load_exclusions(args.catalog)
     rows_read = len(table)

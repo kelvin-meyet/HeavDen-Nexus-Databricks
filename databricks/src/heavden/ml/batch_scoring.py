@@ -23,6 +23,9 @@ the app shows the same numbers in demo and live mode. Differences, by design:
   `--rescore` replaces the log with the chosen model's scores for every hour, e.g. after a bug.
 
 Re-running is safe: a second run finds no new hours and rebuilds the same three tables.
+
+It refuses to run when Gold is behind the readings (`heavden.pipelines.gold.require_current`):
+otherwise "0 new hours scored" after a load would look like a normal quiet run.
 """
 
 from __future__ import annotations
@@ -179,11 +182,14 @@ def main(argv: list[str] | None = None) -> None:
     import mlflow
     from pyspark.sql import SparkSession
 
-    from heavden.pipelines.gold import data_window
+    from heavden.pipelines.gold import data_window, require_current
 
     spark = SparkSession.builder.getOrCreate()
     spark.conf.set("spark.sql.session.timeZone", "UTC")
     c = args.catalog
+    require_current(
+        spark.read.table(f"{c}.silver.device_readings"), spark.read.table(f"{c}.silver.vitals")
+    )
 
     def read(table: str, times: tuple[str, ...]) -> pd.DataFrame:
         return to_utc(spark.read.table(f"{c}.{table}").toPandas(), times)

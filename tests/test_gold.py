@@ -18,6 +18,8 @@ from heavden.analytics import gold as gold_pandas
 from heavden.ml import features
 
 pytest.importorskip("pyspark")
+from pyspark.sql import functions as F  # noqa: E402
+
 from heavden.pipelines import gold  # noqa: E402  (needs pyspark)
 
 KEYS = ["encounter_id", "prediction_ts"]
@@ -145,6 +147,21 @@ def test_data_window_is_the_simulation_window(ward, built):
     w = _pandas(built["window"]).iloc[0]  # collect() would give local times; toPandas gives UTC
     assert w["data_start"] == ward.activity.start
     assert w["as_of"] == ward.activity.end
+
+
+def test_jobs_refuse_a_gold_that_is_behind_the_readings(spark, silver):
+    """13 Oct 2026: an update linked none of 150,456 new readings and still succeeded."""
+    readings, linked = silver["readings"], silver["vitals"]
+    gold.require_current(readings, linked)  # the same data, linked: nothing to say
+    # The linked table missed the last hour (compared inside Spark: first() gives local times).
+    last_hour = readings.agg(F.date_trunc("hour", F.max("ts")).alias("last_hour"))
+    stale = linked.crossJoin(last_hour).where(F.col("ts") < F.col("last_hour")).drop("last_hour")
+    with pytest.raises(gold.GoldBehind, match="Run the pipeline again"):
+        gold.require_current(readings, stale)
+    with pytest.raises(gold.GoldBehind, match="stop at nothing"):
+        gold.require_current(readings, linked.limit(0))
+    gold.require_current(readings.limit(0), linked.limit(0))  # an empty environment is not behind
+    gold.require_current(stale, linked)  # linked readings never run past the readings; not an error
 
 
 def test_flags_follow_the_inclusion_rule(ward, built):

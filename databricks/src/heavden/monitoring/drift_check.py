@@ -359,6 +359,7 @@ def main(argv: list[str] | None = None) -> None:
 
     from heavden.ml import batch_scoring, train
     from heavden.ml.training import to_utc
+    from heavden.pipelines.gold import require_current
 
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--catalog", required=True, help="e.g. heavden_prod")
@@ -375,6 +376,10 @@ def main(argv: list[str] | None = None) -> None:
     spark = SparkSession.builder.getOrCreate()
     spark.conf.set("spark.sql.session.timeZone", "UTC")
     c = args.catalog
+    # A check on a Gold that is missing the latest readings would report on the day before.
+    require_current(
+        spark.read.table(f"{c}.silver.device_readings"), spark.read.table(f"{c}.silver.vitals")
+    )
 
     def read(table: str, times: tuple[str, ...]) -> pd.DataFrame:
         return to_utc(spark.read.table(f"{c}.{table}").toPandas(), times)
