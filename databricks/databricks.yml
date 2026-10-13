@@ -62,7 +62,8 @@ variables:
     description: In a retrain, the latest days, where the new model is compared with the champion.
     default: 2
   scoring_model:
-    description: Which registered version scores the patient-hours (an alias, or "latest").
+    description: Which registered version is in use (scored with, checked for drift, and to
+      beat in a retrain). An alias, "latest", or "champion_or_latest".
     default: champion
   warehouse_id:
     description: Shared SQL warehouse the dashboards run on (terraform output sql_warehouse_id).
@@ -79,7 +80,8 @@ targets:
       # 2 days of data: 1 day train, half a day validation, the rest test (a smoke test)
       train_days: 1
       valid_days: 0.5
-      scoring_model: latest # 2-day models rarely pass the gates, so there may be no champion
+      # 2-day models rarely pass the gates, so there is no champion until a retrain makes one
+      scoring_model: champion_or_latest
 
   # Production mode needs an explicit root_path: the deploying identity's home folder, which other
   # users can't write to. Once CI deploys as the target's service principal, this is its folder.
@@ -94,7 +96,8 @@ targets:
       # 2 days of data: 1 day train, half a day validation, the rest test (a smoke test)
       train_days: 1
       valid_days: 0.5
-      scoring_model: latest # 2-day models rarely pass the gates, so there may be no champion
+      # 2-day models rarely pass the gates, so there is no champion until a retrain makes one
+      scoring_model: champion_or_latest
 
   # Deployed by CI (release.yml) for a v* tag, after approval in the prod-deploy GitHub environment.
   prod:

@@ -1,23 +1,26 @@
-# A retrain request (Plan.md §10.4). Started by prod-run when a drift check reaches "act"; it can
-# also be started by hand with a check's result line. It shows what the check found, then waits
-# for Kelvin in the retrain-approval environment: GitHub emails the request, and approving or
-# rejecting it is the decision. Not every drift calls for a retrain (a sensor fault doesn't), so
+# A retrain request (Plan.md §10.4). Started by a data run (prod-run; staging-run to rehearse)
+# when a drift check reaches "act"; it can also be started by hand with a check's result line.
+# It shows what the check found, then waits for Kelvin in the retrain-approval environment
+# (staging-approval for staging): GitHub emails the request, and approving or rejecting it is
+# the decision. Not every drift calls for a retrain (a sensor fault doesn't), so
 # rejecting is a normal outcome: see docs/corpus/drift-incident-runbook.md.
 #
-# An approval runs prod's training job in retrain mode: the latest days are validation and test,
+# An approval runs the target's training job in retrain mode: the latest days are validation and test,
 # all earlier history trains, and the new model becomes @challenger only if it beats NEWS2 and
 # the current @champion (at the same alert budget: more escalations flagged, better ranking).
 # The job can't know whether enough has happened since the drift began: approve only once there
 # are enough outcomes under the new conditions (the runbook says how long to wait). A request
-# can be held for days: prod-run opens no second one for the same kind of drift, and replaces it
-# (this run is then cancelled) when a later check shows a different kind.
+# can be held for days: a data run opens no second one for the same kind of drift, and replaces
+# it (this run is then cancelled) when a later check shows a different kind.
 #
 # Nothing is promoted here. A model that passes opens a promotion request (promote.yml), which
 # waits for its own approval. The retrain is recorded in ml.ops_audit with who approved it; a
-# rejection is copied there by the next prod-run (a rejected run never gets prod credentials).
+# rejection is copied there by the next data run (a rejected run never gets the credentials).
 
-name: retrain
-run-name: "Retrain request: ${{ inputs.title || 'started by hand' }}"
+# The name is the alert: GitHub's email says only "<this name>: <environment> is waiting for
+# your review", with a link to the run, whose Summary shows the check and the breaches.
+name: Drift alert - retrain request
+run-name: "Retrain request${{ inputs.target == 'staging' && ' (staging)' || '' }}: ${{ inputs.title || 'started by hand' }}"
 
 on:
   workflow_dispatch:
@@ -27,16 +30,21 @@ on:
         type: string
         required: true
       title:
-        description: "What the request is about, for the run's name (prod-run fills this in)"
+        description: "What the request is about, for the run's name (a data run fills this in)"
         type: string
         default: ""
+      target:
+        description: "prod, or staging to rehearse the same steps there"
+        type: choice
+        options: [prod, staging]
+        default: prod
 
 permissions:
   contents: read
 
 # A backstop for requests started by hand: a second one queues behind the first.
 concurrency:
-  group: retrain
+  group: retrain-${{ inputs.target }}
   cancel-in-progress: false
 
 jobs:
@@ -80,7 +88,8 @@ jobs:
     needs: report
     runs-on: ubuntu-latest
     timeout-minutes: 75
-    environment: retrain-approval # waits here for Kelvin; rejecting ends the request
+    # waits here for Kelvin; rejecting ends the request
+    environment: ${{ inputs.target == 'staging' && 'staging-approval' || 'retrain-approval' }}
     permissions:
       contents: read
       id-token: write
@@ -88,11 +97,14 @@ jobs:
     env:
       DATABRICKS_AUTH_TYPE: azure-cli
       GH_TOKEN: ${{ github.token }}
+      TARGET: ${{ inputs.target }}
+      APPROVAL: ${{ inputs.target == 'staging' && 'staging-approval' || 'retrain-approval' }}
     defaults:
       run:
         working-directory: databricks
     outputs:
       passed: ${{ steps.train.outputs.passed }}
+      champion: ${{ steps.train.outputs.champion }}
       version: ${{ steps.train.outputs.version }}
       result: ${{ steps.train.outputs.result }}
     steps:
@@ -116,18 +128,21 @@ jobs:
         env:
           CHECK: ${{ inputs.check }}
         run: |
-          context=$(bash ../.github/scripts/review.sh context retrain-approval "$(jq -c '{check_id, episode}' <<<"$CHECK")")
-          databricks bundle run train -t prod --params "mode=retrain,context=$context" 2>&1 | tee "$RUNNER_TEMP/train.log"
+          context=$(bash ../.github/scripts/review.sh context "$APPROVAL" "$(jq -c '{check_id, episode}' <<<"$CHECK")")
+          databricks bundle run train -t "$TARGET" --params "mode=retrain,context=$context" 2>&1 | tee "$RUNNER_TEMP/train.log"
           result=$(grep -o 'TRAINING_RESULT {.*}' "$RUNNER_TEMP/train.log" | tail -1 | sed 's/^TRAINING_RESULT //' || true)
           jq -e .version <<<"$result" >/dev/null 2>&1 || { echo "::error::the training job printed no result line"; exit 1; }
           echo "passed=$(jq -r .passed_gates <<<"$result")" >> "$GITHUB_OUTPUT"
+          echo "champion=$(jq -r '.aliases | index("champion") != null' <<<"$result")" >> "$GITHUB_OUTPUT"
           echo "version=$(jq -r .version <<<"$result")" >> "$GITHUB_OUTPUT"
           echo "result=$result" >> "$GITHUB_OUTPUT"
           bash ../.github/scripts/training_summary.sh "$result" >> "$GITHUB_STEP_SUMMARY"
 
+  # A model that passed with no champion to replace is already @champion (the first model in
+  # use in an environment): there is nothing to promote.
   request-promotion:
     needs: retrain
-    if: needs.retrain.outputs.passed == 'true'
+    if: needs.retrain.outputs.passed == 'true' && needs.retrain.outputs.champion != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -139,6 +154,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.retrain.outputs.version }}
           RESULT: ${{ needs.retrain.outputs.result }}
+          TARGET: ${{ inputs.target }}
         run: |
-          gh workflow run promote.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f version="$VERSION" -f retrain="$RESULT"
-          echo "Promotion request opened for version $VERSION: Actions -> promote. It waits for approval." >> "$GITHUB_STEP_SUMMARY"
+          gh workflow run promote.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f version="$VERSION" -f retrain="$RESULT" -f target="$TARGET"
+          echo "Promotion request opened for version $VERSION: Actions -> Promotion request. It waits for approval." >> "$GITHUB_STEP_SUMMARY"

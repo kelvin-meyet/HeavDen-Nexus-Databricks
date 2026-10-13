@@ -50,7 +50,8 @@ AUDIT_SCHEMA = (
 AUDIT_COLUMNS = [field.split()[0] for field in AUDIT_SCHEMA.split(", ")]
 
 # Requests carry what they are about in their run name on GitHub (set by the workflows).
-REQUEST_TITLE = re.compile(r"^(Retrain|Promotion|Rollback) request:")
+# "(staging)" marks a rehearsal of the same workflow against the staging environment.
+REQUEST_TITLE = re.compile(r"^(Retrain|Promotion|Rollback) request( \(staging\))?:")
 _CHECK = re.compile(r"check ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
 _EPISODE = re.compile(r"episode ([\w-]+)")
 _VERSION = re.compile(r"version (\d+)")

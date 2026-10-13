@@ -4,8 +4,9 @@
 # src/jobs/score_model.py). Each hour keeps the model that scored it. Job parameter rescore=true
 # replaces the log with this model's scores for every hour. No schedule: staging
 # scores after every merge (CI), prod on demand (prod-run workflow, approved), and in Phase 3
-# after each drift episode. Prod uses @champion; dev and staging the newest version, because
-# their 2-day models rarely pass the gates.
+# after each drift episode. Prod uses @champion; dev and staging use their champion once a
+# retrain has made one, and the newest version until then (their 2-day models rarely pass
+# the gates).
 resources:
   jobs:
     score:

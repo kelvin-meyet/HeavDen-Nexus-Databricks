@@ -10,7 +10,9 @@ jq -e .version <<<"$result" >/dev/null
 
 echo "## Retrained: version $(jq -r .version <<<"$result") ($(jq -r .model_type <<<"$result"))"
 echo
-if [ "$(jq -r .passed_gates <<<"$result")" = "true" ]; then
+if [ "$(jq -r '.aliases | index("champion") != null' <<<"$result")" = "true" ]; then
+  echo "**Passed every gate. No model had been put in use here before, so it is \`@champion\` as well as \`@challenger\`:** there is nothing to promote."
+elif [ "$(jq -r .passed_gates <<<"$result")" = "true" ]; then
   echo "**Passed every gate: it is \`@challenger\`.** \`@champion\` is unchanged until a promotion is approved."
 else
   echo "**Did not pass the gates: no alias.** \`@champion\` stays. The version is registered, so the attempt is on record."

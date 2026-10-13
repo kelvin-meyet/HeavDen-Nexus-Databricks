@@ -362,7 +362,9 @@ def main(argv: list[str] | None = None) -> None:
 
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--catalog", required=True, help="e.g. heavden_prod")
-    parser.add_argument("--model-alias", default="champion", help='an alias, or "latest"')
+    parser.add_argument(
+        "--model-alias", default="champion", help='an alias, "latest" or "champion_or_latest"'
+    )
     parser.add_argument("--train-days", type=float, default=train.Split.train_days)
     parser.add_argument("--valid-days", type=float, default=train.Split.valid_days)
     parser.add_argument(  # may arrive empty: the job parameter defaults to ""

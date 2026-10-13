@@ -164,13 +164,16 @@ def test_rejected_requests_become_rows_once():
         ),
         _review(12, "promote", "Promotion request: version 7"),
         _review(13, "retrain", "retrain"),  # a test run from before requests had titles
+        _review(14, "rollback", "Rollback request (staging): worse at Site C"),  # a rehearsal
     ]
     rows = model_ops.rejection_rows("c.ml.m", reviews, known=set())
     assert [(r["event"], r["outcome"]) for r in rows] == [
         ("retrain", "rejected"),
         ("promote", "rejected"),
+        ("rollback", "rejected"),  # a rehearsal's title is a request title too
     ]
-    retrain, promotion = rows
+    assert json.loads(rows[2]["details"])["title"].startswith("Rollback request (staging):")
+    retrain, promotion = rows[:2]
     assert (retrain["check_id"], retrain["episode"], retrain["reason"]) == (
         CHECK,
         "sensor-bias",
