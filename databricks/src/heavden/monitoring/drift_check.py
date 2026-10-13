@@ -5,9 +5,10 @@ together and per site, each with a warn and an act level:
 
 * **inputs**: PSI of key features, latest day vs the champion's own data (its training and
   validation blocks: what it was fitted and calibrated on);
-* **predictions**: Jensen-Shannon distance of the risk scores, same comparison;
+* **predictions**: Jensen-Shannon distance of the risk scores, same comparison (both scored
+  by the model being judged, not taken from the log, which may hold older versions' scores);
 * **alert load**: alerts per nurse per shift in the latest day (known at once, no labels);
-* **performance**: AUPRC and Brier score on the latest labelled hours vs the champion's
+* **performance**: AUPRC and Brier score of the model on the latest labelled hours vs its own
   validation scores. Labels arrive ~12 h late, so this window ends earlier;
 * **data quality**: share of readings quarantined, and how far each field's missing share has
   moved since training (a firmware update that drops or adds a field).
@@ -198,6 +199,7 @@ def data_quality(q: ReadingQuality) -> list[dict]:
 
 
 def run_check(
+    model,
     features: pd.DataFrame,
     log: pd.DataFrame,
     training_set: pd.DataFrame,
@@ -209,18 +211,24 @@ def run_check(
 ) -> pd.DataFrame:
     """Every signal, one row each, for the latest `window` of patient-hours.
 
-    `baseline` is the champion's training and validation rows, with its `risk` on them; `log`
-    the prediction log (`gold.risk_scores`); `training_set` the labelled hours, whose latest
-    `label_window` is joined to the logged risk; `reference` the champion's validation `auprc`
-    and `brier`."""
+    The check judges one model, `model` (its validation scores are `reference`: `auprc` and
+    `brier`), so it scores its reference rows (`baseline`: the model's training and validation
+    rows), the latest window of `features` and the latest `label_window` of the labelled
+    `training_set` itself. The prediction log can hold older versions' scores (each hour is
+    scored once), which would compare one model's predictions with another's validation. Only
+    the alert load comes from the log (`gold.risk_scores`): it's what the nurses received."""
+
+    def scored(df: pd.DataFrame) -> pd.DataFrame:
+        return df.assign(risk=model.predict_proba(df)[:, 1])
+
     start = features["prediction_ts"].max() - window + pd.Timedelta(hours=1)
-    current = features[features["prediction_ts"] >= start]
-    labelled = training_set[["encounter_id", "prediction_ts", "label"]]
-    labelled = labelled[labelled["prediction_ts"] > labelled["prediction_ts"].max() - label_window]
-    labelled = labelled.merge(log[["encounter_id", "prediction_ts", "risk"]], how="inner")
+    current = scored(features[features["prediction_ts"] >= start])
+    reference_rows = scored(baseline)
+    newest = training_set["prediction_ts"].max()
+    labelled = scored(training_set[training_set["prediction_ts"] > newest - label_window])
     rows = (
-        input_drift(baseline, current)
-        + prediction_drift(baseline, log[log["prediction_ts"] >= start])
+        input_drift(reference_rows, current)
+        + prediction_drift(reference_rows, current)
         + alert_load(log, start)
         + performance(labelled, reference)
         + data_quality(quality)
@@ -336,7 +344,6 @@ def main(argv: list[str] | None = None) -> None:
     # 18 hours in staging, too short a reference: normal days then read as drift.
     split = train.Split(args.train_days, args.valid_days)
     baseline = pd.concat(train.time_split(training_set, split)[:2])
-    baseline = baseline.assign(risk=model.predict_proba(baseline)[:, 1])
 
     hour = pd.Timedelta(hours=1)
     end = features["prediction_ts"].max() + hour
@@ -347,9 +354,8 @@ def main(argv: list[str] | None = None) -> None:
         training=(baseline["prediction_ts"].min() - hour, baseline["prediction_ts"].max()),
         window=(start - hour, end - hour),
     )
-    metrics = run_check(
-        features, log, training_set, baseline, validation_metrics(name, version), quality
-    )
+    reference = validation_metrics(name, version)
+    metrics = run_check(model, features, log, training_set, baseline, reference, quality)
     result = summary(metrics)
 
     check = {
