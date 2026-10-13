@@ -22,8 +22,8 @@ from heavden_api.config import Settings, load_dotenv
 def main() -> None:
     load_dotenv()
     settings = Settings(chat_requests_per_hour=1000)
-    if not settings.openai_api_key:
-        raise SystemExit("OPENAI_API_KEY is not set (environment or .env)")
+    if not settings.llm_connection():
+        raise SystemExit(f"no key for LLM_PROVIDER={settings.llm_provider} (environment or .env)")
     conversations = []
     with TestClient(create_app(settings)) as client:
         as_of = client.get("/health").json()["as_of"]

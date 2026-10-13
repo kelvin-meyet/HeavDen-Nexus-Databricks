@@ -102,7 +102,7 @@ PROMPT_MARKERS = (
     "untrusted content:",
 )
 _SECRET = re.compile(
-    r"\b(sk-(proj-)?[A-Za-z0-9_-]{20,}|OPENAI_API_KEY|Bearer\s+[A-Za-z0-9._-]{20,})"
+    r"\b(sk-(proj-)?[A-Za-z0-9_-]{20,}|(AZURE_)?OPENAI_(API_)?KEY|Bearer\s+[A-Za-z0-9._-]{20,})"
 )
 
 

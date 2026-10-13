@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture(scope="module")
 def client(demo_snapshot):
-    settings = Settings(snapshot_dir=demo_snapshot, openai_api_key=None)
+    settings = Settings(snapshot_dir=demo_snapshot, llm_provider="openai", openai_api_key=None)
     app = create_app(settings, embedder=retrieval.HashingEmbedder())
     with fastapi_testclient.TestClient(app) as c:
         yield c

@@ -60,14 +60,21 @@ def stream_reply(llm: LLM, messages: list[dict], tools: list[dict]) -> Iterator[
 
 
 class OpenAILLM:
-    """OpenAI Chat Completions with function calling, streamed."""
+    """Chat Completions with function calling, streamed: OpenAI, or any service that speaks
+    the same API at `base_url` (Azure OpenAI in Foundry, where `model` is a deployment name)."""
 
     # "none": Chat Completions only allows function tools with reasoning off for gpt-5.x models;
     # it is also the fastest and cheapest setting
-    def __init__(self, api_key: str, model: str, reasoning_effort: str | None = "none"):
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        reasoning_effort: str | None = "none",
+        base_url: str | None = None,
+    ):
         from openai import OpenAI
 
-        self.client = OpenAI(api_key=api_key, timeout=60, max_retries=2)
+        self.client = OpenAI(api_key=api_key, base_url=base_url, timeout=60, max_retries=2)
         self.model = model
         self.reasoning_effort = reasoning_effort
 
