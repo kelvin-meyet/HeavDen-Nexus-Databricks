@@ -107,10 +107,26 @@ def score_hours(
     return {"risk_scores": risk, **derived_tables(risk, outcomes, as_of), "new_scores": new_scores}
 
 
-def background_sample(training_set: pd.DataFrame, split: train.Split) -> pd.DataFrame:
+def model_blocks(
+    training_set: pd.DataFrame, name: str, version: str, split: train.Split
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The (training, validation) rows a registered version was built on.
+
+    Its training run recorded the blocks' first and last hours (a retrained model's blocks are
+    counted back from when it was trained, so they can't be rebuilt from job settings). Versions
+    from before runs recorded them were all trained with the bundle's `split`."""
+    from heavden.ml import tracking
+
+    blocks = tracking.data_blocks(name, version)
+    if blocks is None:
+        return train.time_split(training_set, split)[:2]
+    ts = training_set["prediction_ts"]
+    return tuple(training_set[ts.between(*blocks[b])] for b in ("train", "valid"))
+
+
+def background_sample(train_rows: pd.DataFrame) -> pd.DataFrame:
     """Rows from the model's own training block, the reference population for explanations."""
-    rows = train.time_split(training_set, split)[0]
-    return rows.sample(min(BACKGROUND_ROWS, len(rows)), random_state=0)
+    return train_rows.sample(min(BACKGROUND_ROWS, len(train_rows)), random_state=0)
 
 
 def load_registered_model(name: str, alias: str):
@@ -189,7 +205,7 @@ def main(argv: list[str] | None = None) -> None:
         threshold,
         version,
         as_of,
-        background_sample(training_set, split),
+        background_sample(model_blocks(training_set, name, version, split)[0]),
         log,
     )
     new_scores = tables.pop("new_scores")

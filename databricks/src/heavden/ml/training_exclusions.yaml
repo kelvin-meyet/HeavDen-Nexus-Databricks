@@ -1,0 +1,17 @@
+# Data the model must not learn from, per catalog (read by heavden.ml.training).
+#
+# When a data fault is diagnosed (a sensor reading wrong, a broken feed), the readings are still
+# in Silver and Gold: they are what the ward saw, and the prediction log and dashboards keep
+# them. But a model trained, calibrated or judged on them would learn the fault. An entry here
+# removes those patient-hours from training, validation and test from the next training run on.
+# Entries are added by pull request when the incident is closed (Drift Incident Runbook, 5.1),
+# so each one is reviewed and dated in git.
+#
+#   site_id   the affected site, or "all"
+#   from, to  first and last affected prediction hour (UTC). Features look back 6 hours, so
+#             `to` is 6 hours after the last faulty reading.
+#   reason    the incident, e.g. the field safety notice
+
+heavden_dev: []
+heavden_staging: []
+heavden_prod: []

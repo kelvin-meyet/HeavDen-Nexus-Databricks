@@ -4,12 +4,19 @@
 # Each run logs every candidate to the experiment `training` (training.experiment.yml) and registers the chosen model as a new
 # version of <catalog>.ml.deterioration_risk (@challenger if it passes the gates, and @champion
 # only for the first model).
+#
+# Job parameter mode=retrain (the retrain workflow, after approval): the latest days become
+# validation and test, all earlier history trains, and the new model must also beat the current
+# @champion on the test days to become @challenger. Promotion is a separate, approved step.
 resources:
   jobs:
     train:
       name: heavden-train
       description: Trains the deterioration-risk model on ${var.catalog}.gold.training_set and registers it in Unity Catalog.
       max_concurrent_runs: 1
+      parameters:
+        - name: mode
+          default: initial
       performance_target: STANDARD # cost-efficient serverless; a slower start is fine for training
       timeout_seconds: 3600
       tags:
@@ -29,6 +36,14 @@ resources:
               - ${var.train_days}
               - --valid-days
               - ${var.valid_days}
+              - --mode
+              - "{{job.parameters.mode}}"
+              - --model-alias
+              - ${var.scoring_model}
+              - --retrain-valid-days
+              - ${var.retrain_valid_days}
+              - --retrain-test-days
+              - ${var.retrain_test_days}
       environments:
         # Serverless environment 6 already has pandas, numpy, scikit-learn and MLflow at the
         # versions our package asks for (databricks/requirements-serverless-env6.txt); we add

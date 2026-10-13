@@ -355,10 +355,10 @@ def main(argv: list[str] | None = None) -> None:
     mlflow.set_registry_uri("databricks-uc")
     name = f"{c}.ml.deterioration_risk"
     model, _, version = batch_scoring.load_registered_model(name, args.model_alias)
-    # The champion's training and validation blocks, as training split them. Training alone is
-    # 18 hours in staging, too short a reference: normal days then read as drift.
+    # The model's own training and validation blocks. Training alone is 18 hours in staging,
+    # too short a reference: normal days then read as drift.
     split = train.Split(args.train_days, args.valid_days)
-    baseline = pd.concat(train.time_split(training_set, split)[:2])
+    baseline = pd.concat(batch_scoring.model_blocks(training_set, name, version, split))
 
     hour = pd.Timedelta(hours=1)
     end = features["prediction_ts"].max() + hour
