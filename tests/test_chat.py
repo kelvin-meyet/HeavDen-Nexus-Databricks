@@ -115,7 +115,7 @@ def call(name, **arguments):
 def state(demo_snapshot):
     from heavden_api.deps import build_state
 
-    settings = Settings(snapshot_dir=demo_snapshot, openai_api_key=None)
+    settings = Settings(snapshot_dir=demo_snapshot, llm_provider="openai", openai_api_key=None)
     return build_state(settings, embedder=retrieval.HashingEmbedder())
 
 
@@ -192,7 +192,9 @@ def test_system_prompt_pins_now_and_bands():
 
 
 def _client(demo_snapshot, llm=None, **settings):
-    settings = Settings(snapshot_dir=demo_snapshot, openai_api_key=None, **settings)
+    settings = Settings(
+        snapshot_dir=demo_snapshot, llm_provider="openai", openai_api_key=None, **settings
+    )
     app = create_app(settings, embedder=retrieval.HashingEmbedder(), llm=llm)
     return fastapi_testclient.TestClient(app)
 

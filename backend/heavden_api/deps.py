@@ -59,8 +59,14 @@ def build_state(
             "agent endpoints). Use MODE=demo."
         )
     snapshot = Snapshot.load(settings.snapshot_dir)
-    if llm is None and settings.openai_api_key:
-        llm = OpenAILLM(settings.openai_api_key, settings.llm_model)
+    connection = settings.llm_connection()
+    if llm is None and connection:
+        llm = OpenAILLM(
+            connection.api_key,
+            settings.llm_model,
+            settings.llm_reasoning_effort,
+            connection.base_url,
+        )
     return AppState(
         settings=settings,
         snapshot=snapshot,

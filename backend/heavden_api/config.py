@@ -5,8 +5,10 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
+LLM_PROVIDERS = ("openai", "azure")
 
 
 def load_dotenv(path: Path = ROOT / ".env") -> None:
@@ -25,6 +27,20 @@ def load_dotenv(path: Path = ROOT / ".env") -> None:
 def _origins() -> tuple[str, ...]:
     raw = os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000")
     return tuple(o.strip() for o in raw.split(",") if o.strip())
+
+
+def azure_base_url(endpoint: str) -> str:
+    """The OpenAI-compatible (v1) address of an Azure OpenAI / Foundry resource. Only the host
+    of `endpoint` is used, so whatever the portal shows can be pasted as it is (with or without
+    a path, a deployment or an api-version)."""
+    host = urlsplit(endpoint if "://" in endpoint else f"https://{endpoint}").netloc
+    return f"https://{host}/openai/v1/"
+
+
+@dataclass(frozen=True)
+class LLMConnection:
+    api_key: str = field(repr=False)
+    base_url: str | None  # None: the OpenAI API
 
 
 @dataclass(frozen=True)
@@ -48,8 +64,28 @@ class Settings:
     openai_api_key: str | None = field(
         default_factory=lambda: os.environ.get("OPENAI_API_KEY") or None, repr=False
     )
+    # which service answers: "openai" (OPENAI_API_KEY) or "azure" (Azure OpenAI in Foundry:
+    # AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_API_KEY). Both speak the same API.
+    llm_provider: str = field(
+        default_factory=lambda: os.environ.get("LLM_PROVIDER", "openai").strip().lower()
+    )
+    azure_openai_endpoint: str | None = field(
+        default_factory=lambda: os.environ.get("AZURE_OPENAI_ENDPOINT") or None
+    )
+    azure_openai_key: str | None = field(
+        default_factory=lambda: (
+            os.environ.get("AZURE_OPENAI_API_KEY") or os.environ.get("AZURE_OPENAI_KEY") or None
+        ),
+        repr=False,
+    )
+    # OpenAI: the model name. Azure: the name of YOUR deployment of a model.
     # gpt-5.5 answered judgement questions reliably in testing; gpt-5.4-mini is cheaper but weaker
     llm_model: str = field(default_factory=lambda: os.environ.get("LLM_MODEL", "gpt-5.5"))
+    # "none" is what gpt-5.x needs for function tools in Chat Completions; other models may
+    # want another value, or none at all (set it empty to leave the option out)
+    llm_reasoning_effort: str | None = field(
+        default_factory=lambda: os.environ.get("LLM_REASONING_EFFORT", "none").strip() or None
+    )
     chat_requests_per_hour: int = field(
         default_factory=lambda: int(os.environ.get("CHAT_REQUESTS_PER_HOUR", "30"))
     )
@@ -66,3 +102,18 @@ class Settings:
     def __post_init__(self):
         if self.mode not in ("demo", "live"):
             raise ValueError(f"MODE must be 'demo' or 'live', not {self.mode!r}")
+
+    def llm_connection(self) -> LLMConnection | None:
+        """Where the assistant's LLM calls go, or None when the chosen provider has no key (the
+        assistant then replays recorded answers)."""
+        if self.llm_provider not in LLM_PROVIDERS:
+            raise ValueError(
+                f"LLM_PROVIDER must be one of {LLM_PROVIDERS}, not {self.llm_provider!r}"
+            )
+        if self.llm_provider == "openai":
+            return LLMConnection(self.openai_api_key, None) if self.openai_api_key else None
+        if not self.azure_openai_key:
+            return None
+        if not self.azure_openai_endpoint:
+            raise ValueError("LLM_PROVIDER=azure needs AZURE_OPENAI_ENDPOINT as well as the key")
+        return LLMConnection(self.azure_openai_key, azure_base_url(self.azure_openai_endpoint))

@@ -62,6 +62,7 @@ def test_leak_detector_flags_prompt_quotes_secrets_and_the_canary():
     assert detector.leaks("Here they are. SQL rules: one SELECT...")
     assert detector.leaks("Use this timestamp instead of now()")
     assert detector.leaks("key: sk-proj-abcdefghijklmnopqrstuvwxyz123")
+    assert detector.leaks("it is in AZURE_OPENAI_API_KEY") and detector.leaks("AZURE_OPENAI_KEY")
     assert not detector.leaks("SITE_A has 8 patients in the High band [1].")
 
 
@@ -108,7 +109,7 @@ def state(demo_snapshot):
     from heavden_api.deps import build_state
 
     return build_state(
-        Settings(snapshot_dir=demo_snapshot, openai_api_key=None),
+        Settings(snapshot_dir=demo_snapshot, llm_provider="openai", openai_api_key=None),
         embedder=retrieval.HashingEmbedder(),
     )
 
