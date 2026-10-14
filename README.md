@@ -50,7 +50,7 @@ The project is built in phases. **Phases 0–2 are complete**: the offline found
 
 The production model (`heavden_prod.ml.deterioration_risk` version 1, logistic regression, `@champion`) was trained on 9 days, chosen on the next 2, and scored **once** on the last days, which it never saw. Both scores get the same alert budget: **at most about 2 alerts per nurse per 12-hour shift**.
 
-| Test block: 12–14 Nov, 26 escalations | Model | NEWS2 |
+| Test block: 1–3 Oct, 26 escalations | Model | NEWS2 |
 |---|---|---|
 | Escalations flagged in the 6 hours before | **23 of 26 (88%)** | 19 of 26 (73%) |
 | Alerts followed by an escalation | 3.0% | 3.2% |

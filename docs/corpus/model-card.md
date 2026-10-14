@@ -48,7 +48,7 @@ An **alert** fires when a patient **enters** the High band. The same patient doe
 
 Responses to each band are set by the escalation protocol (HD-CLIN-001).
 
-## 4. Performance (version 1, test block: 12–14 November, 26 escalations)
+## 4. Performance (version 1, test block: 1–3 October, 26 escalations)
 
 **How it was tested.** The patient-hours are split by time: the model learns on the first 9 days, the best candidate is **chosen** on the next 2 days (validation), and the last days (the test block, 16,146 patient-hours) are scored **once**, after the choice. The model never saw the test block. Validation results were used for picking, so they flatter the model; the test results below are the honest ones.
 
