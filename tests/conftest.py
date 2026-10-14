@@ -1,5 +1,6 @@
 """Shared fixtures: a small demo snapshot built with the real snapshot builder, and local Spark."""
 
+import importlib.util
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -61,12 +62,19 @@ def _readings(activity) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+# Delta Lake in the local Spark session (MERGE, change data feed) where it can work: on Windows,
+# Delta writes need Hadoop's winutils, so the Delta tests skip there and run on CI's Linux.
+DELTA = os.name != "nt" and importlib.util.find_spec("delta") is not None
+needs_delta = pytest.mark.skipif(not DELTA, reason="Delta Lake runs on Linux (CI), not Windows")
+
+
 @pytest.fixture(scope="session")
-def spark():
+def spark(tmp_path_factory):
     """Local Spark for the pipeline transformations (`uv sync --group spark`; needs Java 17+).
 
     Uses the JDK at HEAVDEN_JAVA (default ~/tools/jdk-21), never the `java` on PATH, which may
-    be too old; otherwise JAVA_HOME (set on GitHub's runners).
+    be too old; otherwise JAVA_HOME (set on GitHub's runners). With Delta Lake where it works
+    (`DELTA`), tables written in tests go to a temporary warehouse.
     """
     pytest.importorskip("pyspark")
     java = Path(os.environ.get("HEAVDEN_JAVA", Path.home() / "tools" / "jdk-21" / "bin" / "java"))
@@ -76,7 +84,7 @@ def spark():
         pytest.skip("Spark needs Java 17+: set HEAVDEN_JAVA or JAVA_HOME")
     from pyspark.sql import SparkSession
 
-    session = (
+    builder = (
         SparkSession.builder.master("local[2]")
         .appName("heavden-tests")
         .config("spark.sql.session.timeZone", "UTC")  # Databricks serverless runs in UTC
@@ -85,8 +93,18 @@ def spark():
         .config("spark.sql.execution.arrow.pyspark.enabled", "true")
         .config("spark.sql.shuffle.partitions", "2")
         .config("spark.ui.enabled", "false")
-        .getOrCreate()
     )
+    if DELTA:
+        from delta import configure_spark_with_delta_pip
+
+        builder = configure_spark_with_delta_pip(
+            builder.config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+            .config(
+                "spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog"
+            )
+            .config("spark.sql.warehouse.dir", str(tmp_path_factory.mktemp("warehouse")))
+        )
+    session = builder.getOrCreate()
     session.sparkContext.setLogLevel("ERROR")
     yield session
     session.stop()

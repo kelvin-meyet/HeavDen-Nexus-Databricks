@@ -79,6 +79,7 @@ jobs:
           tests/test_features.py tests/test_train.py tests/test_evaluate_explain.py
           tests/test_scoring_gold.py tests/test_drift_metrics.py tests/test_package.py
           tests/test_training.py tests/test_batch_scoring.py tests/test_model_ops.py
+          tests/test_profiling.py
 
   web:
     runs-on: ubuntu-latest
@@ -144,7 +145,7 @@ jobs:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: [lint-and-test, ml-on-databricks-libraries, bundle-validate]
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90 # the drift check waits for the monitor's refresh (~15-25 min)
     environment: staging
     concurrency:
       group: staging
@@ -196,6 +197,15 @@ jobs:
 
       - name: Score every patient-hour with the newest model
         run: databricks bundle run score -t staging
+
+      # The sign-in at the start gives tokens that last about an hour, and the run can be longer
+      # with the monitor's refresh: sign in again so the drift step can follow its job to the end.
+      - name: Sign in to Azure again before the drift check
+        uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
 
       - name: Check for drift against the newest model's data
         run: databricks bundle run drift_check -t staging
