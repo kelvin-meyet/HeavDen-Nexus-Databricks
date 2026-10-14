@@ -15,14 +15,15 @@ from pathlib import Path
 
 RECORDINGS = Path(__file__).with_name("recordings.json")
 
-# Questions shown in the app; also the set that gets recorded.
+# Questions shown in the app; also the set that gets recorded. None of them names a date or a
+# month: the hospital's clock moves on, and a question must still make sense next month.
 EXAMPLE_QUESTIONS = (
     "How many patients are in the High risk band at each site right now?",
     "Which unit raised the most alerts in the last 24 hours?",
     "What share of escalations in the last 7 days were flagged in advance, by site?",
     "How did daily alerts change over the last week?",
     "What should a nurse do when a patient's risk band turns High?",
-    "What NEWS2 score triggers a rapid response call, and how did that change in October?",
+    "What NEWS2 score triggers a rapid response call, and what did the latest protocol change?",
     "If SpO2 readings drift down at one site only, should we retrain the model?",
     "How much better than NEWS2 is the model, and what are its limitations?",
     "Why is the highest-risk patient flagged right now, and what does the protocol say to do?",
