@@ -749,6 +749,19 @@ wheels = [
 ]
 
 [[package]]
+name = "delta-spark"
+version = "4.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "importlib-metadata" },
+    { name = "pyspark" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/22/fd/37a0c2ee6fbf4dcbf034178dcb978ba586d37dc9c95214b90416d1042735/delta-spark-4.0.0.tar.gz", hash = "sha256:39325d76d6e5d8b5fea9d47827c59f5e0674844cb95f97b2cc613bfc5209c7ec", size = 35026 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3b/d8/265a93d22ae79262cdff701496a6f5676926a342153f3855ae6060430660/delta_spark-4.0.0-py3-none-any.whl", hash = "sha256:4e4ded07bb9ee4f6a0df45606d84395239d4b82001e765a627fecc1e914f3029", size = 39756 },
+]
+
+[[package]]
 name = "docker"
 version = "7.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1205,6 +1218,7 @@ rag = [
     { name = "fastembed" },
 ]
 spark = [
+    { name = "delta-spark" },
     { name = "pyspark" },
 ]
 
@@ -1244,7 +1258,10 @@ rag = [
     { name = "faiss-cpu", specifier = ">=1.15.1" },
     { name = "fastembed", specifier = ">=0.9.0" },
 ]
-spark = [{ name = "pyspark", specifier = "==4.0.4" }]
+spark = [
+    { name = "delta-spark", specifier = "==4.0.0" },
+    { name = "pyspark", specifier = "==4.0.4" },
+]
 
 [[package]]
 name = "hf-xet"

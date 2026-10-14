@@ -24,6 +24,10 @@ the app shows the same numbers in demo and live mode. Differences, by design:
 
 Re-running is safe: a second run finds no new hours and rebuilds the same three tables.
 
+It also keeps the monitor's tables current (`heavden.monitoring.profiling`):
+`monitoring.inference_log` gets the new hours and the labels that became known, and
+`monitoring.inference_baseline` the reference rows of any model version it doesn't hold yet.
+
 It refuses to run when Gold is behind the readings (`heavden.pipelines.gold.require_current`):
 otherwise "0 new hours scored" after a load would look like a normal quiet run.
 """
@@ -151,17 +155,29 @@ def load_registered_model(name: str, alias: str):
         mv = max(versions, key=lambda v: int(v.version))
     else:
         mv = client.get_model_version_by_alias(name, alias)
-    model = mlflow.sklearn.load_model(f"models:/{name}/{mv.version}")
-    threshold = client.get_run(mv.run_id).data.metrics["valid_threshold"]
-    return model, threshold, str(mv.version)
+    return (*load_version(name, str(mv.version)), str(mv.version))
+
+
+def load_version(name: str, version: str):
+    """(model, alert threshold) of one registered version."""
+    import mlflow
+
+    client = mlflow.MlflowClient()
+    model = mlflow.sklearn.load_model(f"models:/{name}/{version}")
+    run_id = client.get_model_version(name, version).run_id
+    return model, client.get_run(run_id).data.metrics["valid_threshold"]
 
 
 def to_spark(spark, df: pd.DataFrame):
-    """A Spark DataFrame where NaN becomes NULL (pandas marks missing numbers with NaN)."""
+    """A Spark DataFrame where missing values become NULL. pandas marks missing numbers with
+    NaN, and in pandas 3 missing text too: such text columns also stop Arrow from converting
+    the frame, and Spark's fallback would store the text "nan"."""
     df = df.copy()
     for c in df.columns:
         if df[c].dtype == np.float64:
             df[c] = df[c].astype("Float64")
+        elif isinstance(df[c].dtype, pd.StringDtype):
+            df[c] = df[c].astype(object).where(df[c].notna(), None)
     return spark.createDataFrame(df)
 
 
@@ -182,6 +198,7 @@ def main(argv: list[str] | None = None) -> None:
     import mlflow
     from pyspark.sql import SparkSession
 
+    from heavden.monitoring import profiling
     from heavden.pipelines.gold import data_window, require_current
 
     spark = SparkSession.builder.getOrCreate()
@@ -236,6 +253,24 @@ def main(argv: list[str] | None = None) -> None:
             "overwriteSchema", "true"
         ).saveAsTable(f"{c}.gold.{table}")
     risk, alerts = tables["risk_scores"], tables["alerts_fact"]
+
+    def reference_for(v: str) -> pd.DataFrame:
+        """Version `v`'s training and validation rows, scored by it, for the monitor's baseline."""
+        m, t = (model, threshold) if v == version else load_version(name, v)
+        rows = pd.concat(model_blocks(training_set, name, v, split))
+        return profiling.reference_rows(rows, m.predict_proba(rows)[:, 1], t, v)
+
+    try:
+        monitored = profiling.update_tables(
+            spark, c, risk, features, training_set, alerts, reference_for, rescore=log is None
+        )
+    except Exception as error:  # the monitor doesn't decide yet: scoring carries on without it
+        if profiling.MONITOR_DECIDES:
+            raise
+        monitored = (
+            f"Monitoring tables NOT updated ({type(error).__name__}: {error}); "
+            "the drift check will report the monitor as behind"
+        )
     print(
         f"{name} v{version} ({args.model_alias}), alert threshold {threshold:.4f}, as of {as_of}: "
         f"{len(new_scores):,} new hours scored"
@@ -248,3 +283,4 @@ def main(argv: list[str] | None = None) -> None:
         f"of which escalated within 6 h {alerts['escalated_within_6h'].sum():.0f} "
         f"(outcome known for {alerts['escalated_within_6h'].notna().sum():,})"
     )
+    print(monitored)

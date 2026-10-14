@@ -13,6 +13,11 @@ together and per site, each with a warn and an act level:
 * **data quality**: share of readings quarantined, and how far each field's missing share has
   moved since training (a firmware update that drops or adds a field).
 
+It also refreshes the monitor (Lakehouse Monitoring, `heavden.monitoring.profiling`) and records
+the monitor's numbers next to its own as shadow rows (level "shadow"): stage 1 of Plan.md §10.5,
+they never count in the status, and a monitor that fails or lags is reported in the result
+(`monitor`) without stopping the check.
+
 The check measures and reports; it doesn't decide. A sensor fault (inputs drift at one site)
 needs the sensors fixed, not a new model; a change in outcomes (performance drops while the
 inputs stay put) is what retraining is for. A person reads the report and chooses (§10.4).
@@ -284,6 +289,19 @@ def act_kinds(metrics: pd.DataFrame) -> list[str]:
     return sorted(kinds)
 
 
+def shadow_line(metrics: pd.DataFrame) -> str:
+    """The monitor's numbers for all sites, on one line (recorded, not judged)."""
+    shadow = (metrics["level"] == "shadow") & (metrics["signal"] != "lm_status")
+    rows = metrics[shadow & (metrics["site_id"] == ALL_SITES)]
+    parts = [
+        f"{r.signal.removeprefix('lm_')}"
+        + (f" ({r.feature})" if isinstance(r.feature, str) else "")
+        + f" {r.value:.3f}"
+        for r in rows.itertuples()
+    ]
+    return "Monitor (shadow, not judged): " + (", ".join(parts) if parts else "no numbers")
+
+
 RESULT_MARKER = "DRIFT_CHECK_RESULT"
 
 
@@ -359,6 +377,7 @@ def main(argv: list[str] | None = None) -> None:
 
     from heavden.ml import batch_scoring, train
     from heavden.ml.training import to_utc
+    from heavden.monitoring import profiling
     from heavden.pipelines.gold import require_current
 
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -371,6 +390,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(  # may arrive empty: the job parameter defaults to ""
         "--episode", nargs="?", default="", const="", help="the drift episode just loaded"
     )
+    parser.add_argument(
+        "--assets-dir", required=True, help="workspace folder for the monitor's assets"
+    )
     args = parser.parse_args(argv)
 
     spark = SparkSession.builder.getOrCreate()
@@ -380,6 +402,7 @@ def main(argv: list[str] | None = None) -> None:
     require_current(
         spark.read.table(f"{c}.silver.device_readings"), spark.read.table(f"{c}.silver.vitals")
     )
+    monitor = profiling.MonitorSpec(c, args.assets_dir)
 
     def read(table: str, times: tuple[str, ...]) -> pd.DataFrame:
         return to_utc(spark.read.table(f"{c}.{table}").toPandas(), times)
@@ -399,6 +422,8 @@ def main(argv: list[str] | None = None) -> None:
     hour = pd.Timedelta(hours=1)
     end = features["prediction_ts"].max() + hour
     start = end - WINDOW
+    shadow, monitor_status = profiling.shadow_rows(spark, monitor, end)
+    print(f"Monitor (stage 1, recorded not judged): {monitor_status}")
     quality = reading_quality(
         spark,
         c,
@@ -407,7 +432,8 @@ def main(argv: list[str] | None = None) -> None:
     )
     reference = validation_metrics(name, version)
     metrics = run_check(model, features, log, training_set, baseline, reference, quality)
-    result = summary(metrics)
+    metrics = pd.concat([metrics, pd.DataFrame(shadow)], ignore_index=True)
+    result = summary(metrics)  # shadow rows are neither warn nor act
 
     check = {
         "check_id": str(uuid.uuid4()),
@@ -432,4 +458,6 @@ def main(argv: list[str] | None = None) -> None:
     )
     for line in result["breaches"]:
         print(" ", line)
-    print(result_line(check | {"catalog": c}, result | {"act_kinds": act_kinds(metrics)}))
+    print(shadow_line(metrics))
+    extra = {"act_kinds": act_kinds(metrics), "monitor": monitor_status}
+    print(result_line(check | {"catalog": c}, result | extra))

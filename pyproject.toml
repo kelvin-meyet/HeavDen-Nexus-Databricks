@@ -48,6 +48,9 @@ azure = [
 ]
 spark = [
     "pyspark==4.0.4",
+    # Delta Lake for the tests of MERGE and change data feed (Linux only: on Windows, Delta
+    # writes need Hadoop's winutils). 4.0.x is the line built for PySpark 4.0.
+    "delta-spark==4.0.0",
 ]
 
 [build-system]
