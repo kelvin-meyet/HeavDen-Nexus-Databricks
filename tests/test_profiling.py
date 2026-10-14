@@ -1,6 +1,7 @@
 """The monitor's tables, custom metrics, settings, refresh and shadow numbers
 (heavden.monitoring.profiling)."""
 
+import dataclasses
 from types import SimpleNamespace
 
 import numpy as np
@@ -188,13 +189,17 @@ def _info(**changes):
 
 
 class FakeMonitors:
-    """`w.quality_monitors` with refreshes that move through given states."""
+    """`w.quality_monitors` with a monitor and refreshes that move through given states.
 
-    def __init__(self, info=None, refreshes: dict | None = None):
+    Time passes between two looks at the monitor (`statuses`, one per `get`); like the service,
+    it refuses to list refreshes while the monitor isn't ACTIVE."""
+
+    def __init__(self, info=None, refreshes: dict | None = None, statuses=("ACTIVE",)):
         from databricks.sdk.service import catalog as c
 
         self.c, self.info, self.calls = c, info, []
         self.states = {k: list(v) for k, v in (refreshes or {}).items()}
+        self.statuses = list(statuses)
 
     def _refresh(self, rid: int, advance: bool):
         states = self.states[rid]
@@ -208,7 +213,10 @@ class FakeMonitors:
 
         if self.info is None:
             raise NotFound("no monitor")
-        return self.info
+        if len(self.statuses) > 1:
+            self.statuses.pop(0)
+        status = self.c.MonitorInfoStatus(f"MONITOR_STATUS_{self.statuses[0]}")
+        return dataclasses.replace(self.info, status=status, latest_monitor_failure_msg="boom")
 
     def create(self, **kwargs):
         self.calls.append(("create", kwargs))
@@ -217,6 +225,10 @@ class FakeMonitors:
         self.calls.append(("update", kwargs))
 
     def list_refreshes(self, table):
+        from databricks.sdk.errors import BadRequest
+
+        if self.statuses[0] != "ACTIVE":
+            raise BadRequest(f"not supported when your monitor has status {self.statuses[0]}")
         listed = [self._refresh(rid, advance=False) for rid in self.states]
         return self.c.MonitorRefreshListResponse(refreshes=listed)
 
@@ -252,22 +264,38 @@ def test_the_monitor_is_created_updated_or_left_alone():
         pf.ensure_monitor(_client(FakeMonitors(), table_exists=False), SPEC)
 
 
-def test_a_new_monitor_waits_for_its_own_first_refresh():
-    monitors = FakeMonitors(refreshes={1: ["RUNNING", "RUNNING", "SUCCESS"]})
+def test_a_new_monitor_is_awaited_while_pending_then_its_own_first_refresh():
+    # 14 Oct, staging: listing the refreshes of a monitor still being set up failed
+    first = {1: ["RUNNING", "RUNNING", "SUCCESS"]}
+    monitors = FakeMonitors(_info(), first, statuses=["PENDING", "PENDING", "ACTIVE"])
     done = pf.refresh_and_wait(_client(monitors), SPEC.table, just_created=True, poll_s=0)
     assert done.refresh_id == 1 and not monitors.calls  # no second refresh started
 
 
 def test_a_refresh_already_running_is_awaited_then_a_new_one_started():
-    monitors = FakeMonitors(refreshes={1: ["RUNNING", "SUCCESS"]})
+    monitors = FakeMonitors(_info(), refreshes={1: ["RUNNING", "SUCCESS"]})
     done = pf.refresh_and_wait(_client(monitors), SPEC.table, just_created=False, poll_s=0)
     assert done.refresh_id == 99 and monitors.calls == [("run_refresh", SPEC.table)]
 
 
-def test_a_failed_refresh_stops_the_check():
-    monitors = FakeMonitors(refreshes={1: ["RUNNING", "FAILED"]})
+def test_a_failed_refresh_or_monitor_stops_the_check():
+    monitors = FakeMonitors(_info(), refreshes={1: ["RUNNING", "FAILED"]})
     with pytest.raises(RuntimeError, match="FAILED"):
         pf.refresh_and_wait(_client(monitors), SPEC.table, just_created=True, poll_s=0)
+
+    broken = FakeMonitors(_info(), statuses=["PENDING", "ERROR"])
+    with pytest.raises(RuntimeError, match="MONITOR_STATUS_ERROR boom"):
+        pf.refresh_and_wait(_client(broken), SPEC.table, just_created=True, poll_s=0)
+
+
+def test_all_the_waiting_shares_one_deadline():
+    stuck = FakeMonitors(_info(), statuses=["PENDING"])
+    with pytest.raises(TimeoutError, match="still MONITOR_STATUS_PENDING"):
+        pf.refresh_and_wait(_client(stuck), SPEC.table, True, poll_s=0, timeout_s=-1)
+
+    slow = FakeMonitors(_info(), refreshes={1: ["RUNNING"]})
+    with pytest.raises(TimeoutError, match="refresh 1 of .* still running"):
+        pf.refresh_and_wait(_client(slow), SPEC.table, False, poll_s=0, timeout_s=-1)
 
 
 def _window_rows(granularity: str, starts, length: pd.Timedelta, **values) -> pd.DataFrame:
