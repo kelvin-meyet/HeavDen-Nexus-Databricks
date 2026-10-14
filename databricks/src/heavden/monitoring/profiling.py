@@ -347,28 +347,41 @@ def refresh_and_wait(
 
     Creating a monitor starts a refresh after the data was written: then that one is awaited.
     Any other refresh in progress may have started before this run's data, so it is awaited
-    and a new one started."""
-    from databricks.sdk.service.catalog import MonitorRefreshInfo
+    and a new one started. All the waiting shares one deadline, so a stuck monitor can't
+    outlast the drift check's job."""
+    from databricks.sdk.service.catalog import MonitorInfoStatus, MonitorRefreshInfo
+
+    deadline = time.monotonic() + timeout_s
+
+    def pause(waiting_for: str) -> None:
+        if time.monotonic() > deadline:
+            raise TimeoutError(f"{waiting_for} after {timeout_s / 60:.0f} min")
+        time.sleep(poll_s)
 
     def active() -> list[MonitorRefreshInfo]:
         listed = w.quality_monitors.list_refreshes(table).refreshes or []
         return [r for r in listed if _state(r) in ACTIVE]
 
     def wait(refresh: MonitorRefreshInfo) -> MonitorRefreshInfo:
-        deadline = time.monotonic() + timeout_s
         while _state(refresh) in ACTIVE:
-            if time.monotonic() > deadline:
-                raise TimeoutError(f"refresh {refresh.refresh_id} of {table} still running")
-            time.sleep(poll_s)
+            pause(f"refresh {refresh.refresh_id} of {table} still running")
             refresh = w.quality_monitors.get_refresh(table, refresh.refresh_id)
         return refresh
+
+    # A new or changed monitor is PENDING while it's set up (about a minute on 14 Oct), and
+    # until it's ACTIVE it refuses to list its refreshes.
+    while (info := w.quality_monitors.get(table)).status != MonitorInfoStatus.MONITOR_STATUS_ACTIVE:
+        status = info.status.value if info.status is not None else "UNKNOWN"
+        if status != "MONITOR_STATUS_PENDING":
+            raise RuntimeError(f"monitor on {table}: {status} {info.latest_monitor_failure_msg}")
+        pause(f"monitor on {table} still {status}")
 
     running = active()
     if just_created:
         for _ in range(4):  # the create's own refresh can take a moment to be listed
             if running:
                 break
-            time.sleep(poll_s)
+            pause(f"the first refresh of {table} not listed")
             running = active()
     if just_created and running:
         done = wait(running[0])
