@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from functools import reduce
 
-from pyspark.sql import Column, DataFrame
+from pyspark.sql import Column, DataFrame, Window
 from pyspark.sql import functions as F
 
 VITALS = ("heart_rate", "resp_rate", "spo2", "temp_c", "sbp", "dbp")
@@ -146,6 +146,50 @@ def profile_flags(
     out = out.fillna(False, subset=names)
     n_conditions = reduce(lambda a, b: a + b, [F.col(f).cast("int") for f in CONDITION_FLAGS])
     return out.withColumn("n_conditions", n_conditions)
+
+
+def encounters(encounters: DataFrame, patients: DataFrame, flags: DataFrame) -> DataFrame:
+    """`gold.encounters`: one row per stay for the app and the assistant, as the demo snapshot
+    builds it (`heavden_api.snapshot.encounters_dimension`): a masked patient label instead of
+    names or a birth date, age at admission, sex, the conditions active at admission, and where
+    the stay is (current site, unit and bed).
+
+    Labels number patients in order of their first admission (`P-1001` came first; the id
+    breaks ties). New patients only arrive after the ones already known, so they take the next
+    numbers and nobody's label changes as the hospital runs on (in id order, every new patient
+    would shift the ones after it). `encounters` and `patients` are the current Silver rows;
+    `flags` from `profile_flags`."""
+    first = encounters.groupBy("patient_id").agg(F.min("admit_ts").alias("first_admit_ts"))
+    order = Window.orderBy("first_admit_ts", "patient_id")
+    labels = patients.join(first, "patient_id").select(
+        "patient_id",
+        F.concat(F.lit("P-"), (1000 + F.row_number().over(order)).cast("string")).alias(
+            "patient_label"
+        ),
+        "birth_date",
+        "sex",
+    )
+    named = [F.when(F.col(f), F.lit(f.replace("_", " "))) for f in CONDITION_FLAGS]
+    conditions = F.concat_ws(", ", *named)  # skips the flags that are off (NULL)
+    return (
+        encounters.join(labels, "patient_id")
+        .join(flags, "encounter_id", "left")
+        .select(
+            "encounter_id",
+            "patient_id",
+            "patient_label",
+            F.floor(F.datediff(F.to_date("admit_ts"), F.col("birth_date")) / 365.25)
+            .cast("int")
+            .alias("age"),
+            "sex",
+            F.when(conditions == "", "none").otherwise(conditions).alias("conditions"),
+            "site_id",
+            "unit_id",
+            "bed_id",
+            "admit_ts",
+            "discharge_ts",
+        )
+    )
 
 
 def condition_flag_reference(conditions: DataFrame, medications: DataFrame) -> DataFrame:

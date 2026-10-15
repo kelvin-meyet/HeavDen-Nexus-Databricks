@@ -79,7 +79,7 @@ jobs:
           tests/test_features.py tests/test_train.py tests/test_evaluate_explain.py
           tests/test_scoring_gold.py tests/test_drift_metrics.py tests/test_package.py
           tests/test_training.py tests/test_batch_scoring.py tests/test_model_ops.py
-          tests/test_profiling.py
+          tests/test_profiling.py tests/test_assistant_publish.py
 
   web:
     runs-on: ubuntu-latest
@@ -189,6 +189,11 @@ jobs:
 
       - name: Run the pipeline
         run: databricks bundle run medallion -t staging
+
+      # The assistant's documents (ml.corpus_chunks) and its patient explanation
+      # (ml.explain_patient_risk, which reads gold.encounters, so after the pipeline)
+      - name: Publish what the assistant reads
+        run: databricks bundle run assistant_publish -t staging
 
       # A smoke test: 2 days of data are too few for a good model, but every step runs
       # (load Gold, train, calibrate, MLflow, Unity Catalog registry) on the Databricks runtime.

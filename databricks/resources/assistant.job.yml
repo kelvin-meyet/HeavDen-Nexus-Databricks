@@ -1,0 +1,30 @@
+# Publish what the assistant reads on Databricks (Plan.md §11.2): the documents of docs/corpus
+# (shipped in the wheel) chunked into ml.corpus_chunks (one MERGE; change data feed on, for a
+# Vector Search index), and the SQL table function ml.explain_patient_risk over Gold. Code in
+# src/heavden/agent/publish.py. Idempotent; staging runs it after every merge (CI), prod after a
+# release. It needs gold.encounters, so it runs after the pipeline.
+resources:
+  jobs:
+    assistant_publish:
+      name: heavden-assistant-publish
+      description: Publishes the assistant's documents (ml.corpus_chunks) and its patient-explanation function (ml.explain_patient_risk) in ${var.catalog}.
+      max_concurrent_runs: 1
+      performance_target: STANDARD
+      timeout_seconds: 1200
+      tags:
+        project: heavden
+        component: assistant
+      tasks:
+        - task_key: publish
+          environment_key: assistant
+          spark_python_task:
+            python_file: ../src/jobs/publish_assistant.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+      environments:
+        - environment_key: assistant
+          spec:
+            environment_version: "6"
+            dependencies:
+              - ../../dist/*.whl

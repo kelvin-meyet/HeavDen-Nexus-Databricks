@@ -1,4 +1,5 @@
-"""Gold: model features, training labels, device health and the condition-flag reference.
+"""Gold: model features, training labels, device health, the condition-flag reference and the
+stays (masked patient labels) the app and the assistant show.
 
 Materialized views over Silver: each refresh recomputes them from the current Silver tables, so
 late data and corrections flow through without special handling. The logic is in
@@ -60,6 +61,20 @@ def device_health_daily():
         spark.read.table("silver.device_readings"),
         silver.current(spark.read.table("silver.device_assignments")),
         gold.data_window(spark.read.table("silver.vitals")),
+    )
+
+
+@dp.materialized_view(
+    name="gold.encounters",
+    comment="Per stay: masked patient label, age, sex, conditions at admission, site, unit, bed "
+    "(synthetic; no names or birth dates).",
+)
+@dp.expect("labelled", "patient_label IS NOT NULL")
+def encounters():
+    return gold.encounters(
+        silver.current(spark.read.table("silver.encounters")),
+        silver.current(spark.read.table("silver.patients")),
+        _flags(),
     )
 
 
