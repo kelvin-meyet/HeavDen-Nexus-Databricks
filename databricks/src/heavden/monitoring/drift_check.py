@@ -13,6 +13,10 @@ together and per site, each with a warn and an act level:
 * **data quality**: share of readings quarantined, and how far each field's missing share has
   moved since training (a firmware update that drops or adds a field).
 
+The champion's own data leaves out the known data faults in `training_exclusions.yaml`, even
+those diagnosed after it was trained: compared with a fault, a normal day would read as drift
+that no retrain can clear.
+
 It also refreshes the monitor (Lakehouse Monitoring, `heavden.monitoring.profiling`) and records
 the monitor's numbers next to its own as shadow rows (level "shadow"): stage 1 of Plan.md §10.5,
 they never count in the status, and a monitor that fails or lags is reported in the result
@@ -338,32 +342,46 @@ def validation_metrics(model_name: str, version: str) -> dict[str, float]:
     return {k: run.data.metrics[f"valid_{k}"] for k in ("auprc", "brier")}
 
 
-def reading_quality(spark, catalog: str, training: tuple, window: tuple) -> ReadingQuality:
+def reading_quality(
+    spark, catalog: str, training: tuple, window: tuple, exclusions: list[dict]
+) -> ReadingQuality:
     """Missing shares per field in Silver's readings, over the champion's data and the window
-    (each a [start, end) pair), and the quarantined readings in the window."""
+    (each a [start, end) pair), and the quarantined readings in the window.
+
+    The champion's data leaves out the readings behind the hours of known faults (`exclusions`)
+    at every site, because the shares are judged over all sites: a fault at one site costs the
+    others a little reference, never lets faulty readings in."""
     from pyspark.sql import functions as F
 
     from heavden.pipelines.silver import READING_FIELDS
 
     fields = [f for f in READING_FIELDS if f not in ("device_id", "ts")]
     readings = spark.read.table(f"{catalog}.silver.device_readings")
+    hour = pd.Timedelta(hours=1)
+
+    def during(start, end):
+        ts = F.col("ts")
+        return (ts >= F.lit(start.to_pydatetime())) & (ts < F.lit(end.to_pydatetime()))
 
     def between(df, start, end):
-        ts = F.col("ts")
-        return df.where((ts >= F.lit(start.to_pydatetime())) & (ts < F.lit(end.to_pydatetime())))
+        return df.where(during(start, end))
 
-    def missing(start, end):
+    def missing(df):
         shares = [F.avg(F.col(f).isNull().cast("double")).alias(f) for f in fields]
-        row = between(readings, start, end).agg(F.count("*").alias("n"), *shares).toPandas()
+        row = df.agg(F.count("*").alias("n"), *shares).toPandas()
         return int(row["n"].iloc[0]), row[fields].iloc[0].astype(float).fillna(0.0)
 
+    reference = between(readings, *training)
+    for e in exclusions:  # prediction hours [from, to] are built from readings in [from - 1 h, to)
+        first, last = (pd.Timestamp(e[k]).tz_convert("UTC") for k in ("from", "to"))
+        reference = reference.where(~during(first - hour, last))
     quarantine = spark.read.table(f"{catalog}.silver.vitals_quarantine")
-    n_now, now = missing(*window)
+    n_now, now = missing(between(readings, *window))
     return ReadingQuality(
         readings=n_now,
         quarantined=between(quarantine, *window).count(),
         missing_now=now,
-        missing_in_training=missing(*training)[1],
+        missing_in_training=missing(reference)[1],
     )
 
 
@@ -376,7 +394,7 @@ def main(argv: list[str] | None = None) -> None:
     from pyspark.sql import functions as F
 
     from heavden.ml import batch_scoring, train
-    from heavden.ml.training import to_utc
+    from heavden.ml.training import load_exclusions, to_utc
     from heavden.monitoring import profiling
     from heavden.pipelines.gold import require_current
 
@@ -417,7 +435,12 @@ def main(argv: list[str] | None = None) -> None:
     # The model's own training and validation blocks. Training alone is 18 hours in staging,
     # too short a reference: normal days then read as drift.
     split = train.Split(args.train_days, args.valid_days)
-    baseline = pd.concat(batch_scoring.model_blocks(training_set, name, version, split))
+    exclusions = load_exclusions(c)
+    baseline = pd.concat(batch_scoring.model_blocks(training_set, name, version, split, exclusions))
+    print(
+        f"Reference: {len(baseline):,} hours of v{version}'s training and validation days; "
+        f"known data faults left out: {'; '.join(e['reason'] for e in exclusions) or 'none'}"
+    )
 
     hour = pd.Timedelta(hours=1)
     end = features["prediction_ts"].max() + hour
@@ -429,6 +452,7 @@ def main(argv: list[str] | None = None) -> None:
         c,
         training=(baseline["prediction_ts"].min() - hour, baseline["prediction_ts"].max()),
         window=(start - hour, end - hour),
+        exclusions=exclusions,
     )
     reference = validation_metrics(name, version)
     metrics = run_check(model, features, log, training_set, baseline, reference, quality)
