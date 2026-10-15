@@ -1,0 +1,19 @@
+# Model & Drift AI/BI dashboard (Plan.md §10.2): the drift checks and their signals over time,
+# drawn with the limits the check applies; the monitor's history and whether it agrees with the
+# check; every decision on the model (approvals, rejections, promotions, rollbacks); and this
+# environment's cost from Databricks billing. Defined in src/dashboards/model_drift.lvdash.json:
+# queries name tables without a catalog, which comes from dataset_catalog (dev has no model, so
+# it previews staging's). tests/test_dashboards.py keeps its limit lines equal to the check's.
+#
+# Published with the deploying identity's credentials, like Clinical Ops: in staging and prod the
+# service principal, whose own runs the cost page shows (`current_user()` in billing's run_as).
+# Reading billing needs the system.billing grant in infra/terraform/identities.tf (terraform apply).
+resources:
+  dashboards:
+    model_drift:
+      display_name: HeavDen Model & Drift
+      file_path: ../src/dashboards/model_drift.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+      dataset_catalog: ${var.model_catalog}
+      dataset_schema: monitoring
+      embed_credentials: true

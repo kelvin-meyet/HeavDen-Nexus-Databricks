@@ -101,6 +101,17 @@ resource "databricks_grant" "admins_read" {
   privileges = ["USE_CATALOG", "USE_SCHEMA", "SELECT", "READ_VOLUME", "EXECUTE"]
 }
 
+# The Model & Drift dashboard's cost page reads Databricks billing as each environment's service
+# principal (it publishes the dashboard with its own credentials) and shows that identity's own
+# runs. Read-only: usage records and list prices, no data. (Every account user already has
+# USE_CATALOG on the system catalog.)
+resource "databricks_grant" "billing_read" {
+  for_each   = local.deploy_environments
+  schema     = "system.billing"
+  principal  = databricks_service_principal.ci[each.key].application_id
+  privileges = ["USE_SCHEMA", "SELECT"]
+}
+
 # The staging and prod service principals publish the Clinical Ops dashboard with their own
 # credentials, so its queries run as them on the shared SQL warehouse. CAN_USE runs queries; it
 # grants no data access (that comes from the catalog grants above). The owner keeps CAN_MANAGE

@@ -1,0 +1,4703 @@
+{
+  "datasets": [
+    {
+      "name": "checks",
+      "displayName": "Drift checks",
+      "queryLines": [
+        "SELECT checked_at, window_start AS day_judged,\n",
+        "  coalesce(nullif(episode, ''), 'none') AS episode, model_version AS model,\n",
+        "  upper(status) AS status, n_act, n_warn,\n",
+        "  replace(replace(replace(array_join(breaches, '; '), 'SITE_A', 'Site-A-GH'), 'SITE_B', 'Site-B-NS'), 'SITE_C', 'Site-C-VL') AS breaches\n",
+        "FROM drift_checks\n",
+        "ORDER BY checked_at DESC\n"
+      ]
+    },
+    {
+      "name": "check_summary",
+      "displayName": "Drift checks in numbers",
+      "queryLines": [
+        "SELECT count(*) AS checks, count_if(status = 'act') AS act_checks,\n",
+        "  max_by(n_act, checked_at) AS latest_act, max_by(n_warn, checked_at) AS latest_warn\n",
+        "FROM drift_checks\n"
+      ]
+    },
+    {
+      "name": "latest_check",
+      "displayName": "The latest drift check",
+      "queryLines": [
+        "SELECT checked_at, window_start AS day_judged, model_version AS model,\n",
+        "  upper(status) AS status, n_act, n_warn,\n",
+        "  replace(replace(replace(array_join(breaches, '; '), 'SITE_A', 'Site-A-GH'), 'SITE_B', 'Site-B-NS'), 'SITE_C', 'Site-C-VL') AS breaches\n",
+        "FROM drift_checks\n",
+        "ORDER BY checked_at DESC\n",
+        "LIMIT 1\n"
+      ]
+    },
+    {
+      "name": "js_lines",
+      "displayName": "Prediction drift by day",
+      "queryLines": [
+        "WITH limits AS (\n",
+        "  -- the limits of heavden.monitoring.drift_check.THRESHOLDS\n",
+        "  SELECT * FROM VALUES\n",
+        "    ('feature_psi', 0.1, 0.25),\n",
+        "    ('prediction_js', 0.08, 0.12),\n",
+        "    ('alerts_per_nurse_shift', 2.5, 3.0),\n",
+        "    ('auprc_drop', 0.1, 0.2),\n",
+        "    ('brier_rise', 0.1, 0.2),\n",
+        "    ('quarantine_rate', 0.02, 0.05),\n",
+        "    ('missing_rate_change', 0.02, 0.05),\n",
+        "    ('monitor_difference', 0.01, NULL)\n",
+        "  AS limits(signal, warn_limit, act_limit)\n",
+        "),\n",
+        "judged AS (\n",
+        "  SELECT window_start AS day, model_version AS model, signal,\n",
+        "    CASE WHEN site_id = 'all' THEN 'All sites' WHEN site_id = 'SITE_A' THEN 'Site-A-GH' WHEN site_id = 'SITE_B' THEN 'Site-B-NS' WHEN site_id = 'SITE_C' THEN 'Site-C-VL' ELSE site_id END AS site, value\n",
+        "  FROM drift_metrics\n",
+        "  WHERE signal IN ('prediction_js') AND level <> 'shadow'\n",
+        "  QUALIFY row_number() OVER (\n",
+        "    PARTITION BY window_start, signal, coalesce(feature, ''), site_id\n",
+        "    ORDER BY checked_at DESC) = 1\n",
+        ")\n",
+        "SELECT day, model, site, site AS line, max(value) AS value\n",
+        "FROM judged \n",
+        "GROUP BY ALL\n",
+        "UNION ALL\n",
+        "SELECT DISTINCT day, model, site, 'Warn limit', l.warn_limit\n",
+        "FROM judged JOIN limits l ON l.signal = 'prediction_js' \n",
+        "UNION ALL\n",
+        "SELECT DISTINCT day, model, site, 'Act limit', l.act_limit\n",
+        "FROM judged JOIN limits l ON l.signal = 'prediction_js' \n",
+        "WHERE l.act_limit IS NOT NULL\n"
+      ]
+    },
+    {
+      "name": "alert_lines",
+      "displayName": "Alert load by day",
+      "queryLines": [
+        "WITH limits AS (\n",
+        "  -- the limits of heavden.monitoring.drift_check.THRESHOLDS\n",
+        "  SELECT * FROM VALUES\n",
+        "    ('feature_psi', 0.1, 0.25),\n",
+        "    ('prediction_js', 0.08, 0.12),\n",
+        "    ('alerts_per_nurse_shift', 2.5, 3.0),\n",
+        "    ('auprc_drop', 0.1, 0.2),\n",
+        "    ('brier_rise', 0.1, 0.2),\n",
+        "    ('quarantine_rate', 0.02, 0.05),\n",
+        "    ('missing_rate_change', 0.02, 0.05),\n",
+        "    ('monitor_difference', 0.01, NULL)\n",
+        "  AS limits(signal, warn_limit, act_limit)\n",
+        "),\n",
+        "judged AS (\n",
+        "  SELECT window_start AS day, model_version AS model, signal,\n",
+        "    CASE WHEN site_id = 'all' THEN 'All sites' WHEN site_id = 'SITE_A' THEN 'Site-A-GH' WHEN site_id = 'SITE_B' THEN 'Site-B-NS' WHEN site_id = 'SITE_C' THEN 'Site-C-VL' ELSE site_id END AS site, value\n",
+        "  FROM drift_metrics\n",
+        "  WHERE signal IN ('alerts_per_nurse_shift') AND level <> 'shadow'\n",
+        "  QUALIFY row_number() OVER (\n",
+        "    PARTITION BY window_start, signal, coalesce(feature, ''), site_id\n",
+        "    ORDER BY checked_at DESC) = 1\n",
+        ")\n",
+        "SELECT day, model, site, site AS line, max(value) AS value\n",
+        "FROM judged \n",
+        "GROUP BY ALL\n",
+        "UNION ALL\n",
+        "SELECT DISTINCT day, model, site, 'Warn limit', l.warn_limit\n",
+        "FROM judged JOIN limits l ON l.signal = 'alerts_per_nurse_shift' \n",
+        "UNION ALL\n",
+        "SELECT DISTINCT day, model, site, 'Act limit', l.act_limit\n",
+        "FROM judged JOIN limits l ON l.signal = 'alerts_per_nurse_shift' \n",
+        "WHERE l.act_limit IS NOT NULL\n"
+      ]
+    },
+    {
+      "name": "psi_lines",
+      "displayName": "Largest input drift by day",
+      "queryLines": [
+        "WITH limits AS (\n",
+        "  -- the limits of heavden.monitoring.drift_check.THRESHOLDS\n",
+        "  SELECT * FROM VALUES\n",
+        "    ('feature_psi', 0.1, 0.25),\n",
+        "    ('prediction_js', 0.08, 0.12),\n",
+        "    ('alerts_per_nurse_shift', 2.5, 3.0),\n",
+        "    ('auprc_drop', 0.1, 0.2),\n",
+        "    ('brier_rise', 0.1, 0.2),\n",
+        "    ('quarantine_rate', 0.02, 0.05),\n",
+        "    ('missing_rate_change', 0.02, 0.05),\n",
+        "    ('monitor_difference', 0.01, NULL)\n",
+        "  AS limits(signal, warn_limit, act_limit)\n",
+        "),\n",
+        "judged AS (\n",
+        "  SELECT window_start AS day, model_version AS model, signal,\n",
+        "    CASE WHEN site_id = 'all' THEN 'All sites' WHEN site_id = 'SITE_A' THEN 'Site-A-GH' WHEN site_id = 'SITE_B' THEN 'Site-B-NS' WHEN site_id = 'SITE_C' THEN 'Site-C-VL' ELSE site_id END AS site, value\n",
+        "  FROM drift_metrics\n",
+        "  WHERE signal IN ('feature_psi') AND level <> 'shadow'\n",
+        "  QUALIFY row_number() OVER (\n",
+        "    PARTITION BY window_start, signal, coalesce(feature, ''), site_id\n",
+        "    ORDER BY checked_at DESC) = 1\n",
+        ")\n",
+        "SELECT day, model, site, site AS line, max(value) AS value\n",
+        "FROM judged \n",
+        "GROUP BY ALL\n",
+        "UNION ALL\n",
+        "SELECT DISTINCT day, model, site, 'Warn limit', l.warn_limit\n",
+        "FROM judged JOIN limits l ON l.signal = 'feature_psi' \n",
+        "UNION ALL\n",
+        "SELECT DISTINCT day, model, site, 'Act limit', l.act_limit\n",
+        "FROM judged JOIN limits l ON l.signal = 'feature_psi' \n",
+        "WHERE l.act_limit IS NOT NULL\n"
+      ]
+    },
+    {
+      "name": "performance_lines",
+      "displayName": "Performance against validation by day",
+      "queryLines": [
+        "WITH limits AS (\n",
+        "  -- the limits of heavden.monitoring.drift_check.THRESHOLDS\n",
+        "  SELECT * FROM VALUES\n",
+        "    ('feature_psi', 0.1, 0.25),\n",
+        "    ('prediction_js', 0.08, 0.12),\n",
+        "    ('alerts_per_nurse_shift', 2.5, 3.0),\n",
+        "    ('auprc_drop', 0.1, 0.2),\n",
+        "    ('brier_rise', 0.1, 0.2),\n",
+        "    ('quarantine_rate', 0.02, 0.05),\n",
+        "    ('missing_rate_change', 0.02, 0.05),\n",
+        "    ('monitor_difference', 0.01, NULL)\n",
+        "  AS limits(signal, warn_limit, act_limit)\n",
+        "),\n",
+        "judged AS (\n",
+        "  SELECT window_start AS day, model_version AS model, signal,\n",
+        "    CASE WHEN site_id = 'all' THEN 'All sites' WHEN site_id = 'SITE_A' THEN 'Site-A-GH' WHEN site_id = 'SITE_B' THEN 'Site-B-NS' WHEN site_id = 'SITE_C' THEN 'Site-C-VL' ELSE site_id END AS site, value\n",
+        "  FROM drift_metrics\n",
+        "  WHERE signal IN ('auprc_drop', 'brier_rise') AND level <> 'shadow'\n",
+        "  QUALIFY row_number() OVER (\n",
+        "    PARTITION BY window_start, signal, coalesce(feature, ''), site_id\n",
+        "    ORDER BY checked_at DESC) = 1\n",
+        ")\n",
+        "SELECT day, model, CASE signal WHEN 'auprc_drop' THEN 'AUPRC drop' WHEN 'brier_rise' THEN 'Brier rise' WHEN 'quarantine_rate' THEN 'Quarantined share' WHEN 'missing_rate_change' THEN 'Largest change in a missing share' ELSE signal END AS line, max(value) AS value\n",
+        "FROM judged WHERE site = 'All sites'\n",
+        "GROUP BY ALL\n",
+        "UNION ALL\n",
+        "SELECT DISTINCT day, model, 'Warn limit', l.warn_limit\n",
+        "FROM judged JOIN limits l ON l.signal = 'auprc_drop' AND site = 'All sites'\n",
+        "UNION ALL\n",
+        "SELECT DISTINCT day, model, 'Act limit', l.act_limit\n",
+        "FROM judged JOIN limits l ON l.signal = 'auprc_drop' AND site = 'All sites'\n",
+        "WHERE l.act_limit IS NOT NULL\n"
+      ]
+    },
+    {
+      "name": "quality_lines",
+      "displayName": "Data quality by day",
+      "queryLines": [
+        "WITH limits AS (\n",
+        "  -- the limits of heavden.monitoring.drift_check.THRESHOLDS\n",
+        "  SELECT * FROM VALUES\n",
+        "    ('feature_psi', 0.1, 0.25),\n",
+        "    ('prediction_js', 0.08, 0.12),\n",
+        "    ('alerts_per_nurse_shift', 2.5, 3.0),\n",
+        "    ('auprc_drop', 0.1, 0.2),\n",
+        "    ('brier_rise', 0.1, 0.2),\n",
+        "    ('quarantine_rate', 0.02, 0.05),\n",
+        "    ('missing_rate_change', 0.02, 0.05),\n",
+        "    ('monitor_difference', 0.01, NULL)\n",
+        "  AS limits(signal, warn_limit, act_limit)\n",
+        "),\n",
+        "judged AS (\n",
+        "  SELECT window_start AS day, model_version AS model, signal,\n",
+        "    CASE WHEN site_id = 'all' THEN 'All sites' WHEN site_id = 'SITE_A' THEN 'Site-A-GH' WHEN site_id = 'SITE_B' THEN 'Site-B-NS' WHEN site_id = 'SITE_C' THEN 'Site-C-VL' ELSE site_id END AS site, value\n",
+        "  FROM drift_metrics\n",
+        "  WHERE signal IN ('missing_rate_change', 'quarantine_rate') AND level <> 'shadow'\n",
+        "  QUALIFY row_number() OVER (\n",
+        "    PARTITION BY window_start, signal, coalesce(feature, ''), site_id\n",
+        "    ORDER BY checked_at DESC) = 1\n",
+        ")\n",
+        "SELECT day, model, CASE signal WHEN 'auprc_drop' THEN 'AUPRC drop' WHEN 'brier_rise' THEN 'Brier rise' WHEN 'quarantine_rate' THEN 'Quarantined share' WHEN 'missing_rate_change' THEN 'Largest change in a missing share' ELSE signal END AS line, max(value) AS value\n",
+        "FROM judged WHERE site = 'All sites'\n",
+        "GROUP BY ALL\n",
+        "UNION ALL\n",
+        "SELECT DISTINCT day, model, 'Warn limit', l.warn_limit\n",
+        "FROM judged JOIN limits l ON l.signal = 'missing_rate_change' AND site = 'All sites'\n",
+        "UNION ALL\n",
+        "SELECT DISTINCT day, model, 'Act limit', l.act_limit\n",
+        "FROM judged JOIN limits l ON l.signal = 'missing_rate_change' AND site = 'All sites'\n",
+        "WHERE l.act_limit IS NOT NULL\n"
+      ]
+    },
+    {
+      "name": "psi_latest",
+      "displayName": "Input drift in the latest check, by feature and site",
+      "queryLines": [
+        "SELECT replace(feature, '_mean_1h', '') AS feature,\n",
+        "  max(CASE WHEN site_id = 'all' THEN value END) AS all_sites,\n",
+        "  max(CASE WHEN site_id = 'SITE_A' THEN value END) AS site_a,\n",
+        "  max(CASE WHEN site_id = 'SITE_B' THEN value END) AS site_b,\n",
+        "  max(CASE WHEN site_id = 'SITE_C' THEN value END) AS site_c,\n",
+        "  max(value) AS largest\n",
+        "FROM drift_metrics\n",
+        "WHERE signal = 'feature_psi'\n",
+        "  AND check_id = (SELECT check_id FROM drift_checks ORDER BY checked_at DESC LIMIT 1)\n",
+        "GROUP BY feature\n",
+        "ORDER BY largest DESC\n"
+      ]
+    },
+    {
+      "name": "monitor_weekly",
+      "displayName": "The monitor: performance by week",
+      "queryLines": [
+        "SELECT window.start AS week_start, CASE WHEN slice_value IS NULL THEN 'All sites' WHEN slice_value = 'SITE_A' THEN 'Site-A-GH' WHEN slice_value = 'SITE_B' THEN 'Site-B-NS' WHEN slice_value = 'SITE_C' THEN 'Site-C-VL' ELSE slice_value END AS site, count AS hours,\n",
+        "  auprc, brier, auroc\n",
+        "FROM inference_log_profile_metrics\n",
+        "WHERE column_name = ':table' AND log_type = 'INPUT' AND model_version = '*'\n",
+        "  AND (slice_key IS NULL OR slice_key = 'site_id')\n",
+        "  AND granularity = '1 week'\n"
+      ]
+    },
+    {
+      "name": "monitor_daily",
+      "displayName": "The monitor: alert load and hours by day",
+      "queryLines": [
+        "SELECT window.start AS day, CASE WHEN slice_value IS NULL THEN 'All sites' WHEN slice_value = 'SITE_A' THEN 'Site-A-GH' WHEN slice_value = 'SITE_B' THEN 'Site-B-NS' WHEN slice_value = 'SITE_C' THEN 'Site-C-VL' ELSE slice_value END AS site, count AS hours,\n",
+        "  CASE WHEN slice_value IS NULL THEN 0 ELSE count END AS site_hours,\n",
+        "  alerts_per_nurse_shift\n",
+        "FROM inference_log_profile_metrics\n",
+        "WHERE column_name = ':table' AND log_type = 'INPUT' AND model_version = '*'\n",
+        "  AND (slice_key IS NULL OR slice_key = 'site_id')\n",
+        "  AND granularity = '1 day'\n"
+      ]
+    },
+    {
+      "name": "cross_check",
+      "displayName": "Does the monitor agree with the check?",
+      "queryLines": [
+        "SELECT checked_at, window_start AS day_judged, feature AS compared,\n",
+        "  CASE WHEN site_id = 'all' THEN 'All sites' WHEN site_id = 'SITE_A' THEN 'Site-A-GH' WHEN site_id = 'SITE_B' THEN 'Site-B-NS' WHEN site_id = 'SITE_C' THEN 'Site-C-VL' ELSE site_id END AS site,\n",
+        "  reference AS check_number, observed AS monitor_number, value AS difference,\n",
+        "  CASE level WHEN 'stable' THEN 'agrees' ELSE 'DISAGREES' END AS verdict\n",
+        "FROM drift_metrics\n",
+        "WHERE signal = 'monitor_difference'\n",
+        "ORDER BY checked_at DESC\n"
+      ]
+    },
+    {
+      "name": "class_weekly",
+      "displayName": "Classification metrics per hour, by week and site",
+      "queryLines": [
+        "WITH cells AS (\n",
+        "  SELECT window.start AS week_start, CASE WHEN slice_value IS NULL THEN 'All sites' WHEN slice_value = 'SITE_A' THEN 'Site-A-GH' WHEN slice_value = 'SITE_B' THEN 'Site-B-NS' WHEN slice_value = 'SITE_C' THEN 'Site-C-VL' ELSE slice_value END AS site,\n",
+        "    aggregate(filter(confusion_matrix, c -> c.label = '1' AND c.prediction = '1'), 0L, (n, c) -> n + c.count) AS tp, aggregate(filter(confusion_matrix, c -> c.label = '0' AND c.prediction = '1'), 0L, (n, c) -> n + c.count) AS fp,\n",
+        "    aggregate(filter(confusion_matrix, c -> c.label = '1' AND c.prediction = '0'), 0L, (n, c) -> n + c.count) AS fn, aggregate(filter(confusion_matrix, c -> c.label = '0' AND c.prediction = '0'), 0L, (n, c) -> n + c.count) AS tn\n",
+        "  FROM inference_log_profile_metrics\n",
+        "  WHERE column_name = ':table' AND log_type = 'INPUT' AND model_version = '*'\n",
+        "    AND (slice_key IS NULL OR slice_key = 'site_id')\n",
+        "    AND granularity = '1 week'\n",
+        "), rates AS (\n",
+        "  SELECT *, tp + fn AS escalation_hours, tn + fp AS quiet_hours, tp + fp + fn + tn AS known,\n",
+        "    tp / nullif(tp + fp, 0) AS precision_esc, tp / nullif(tp + fn, 0) AS recall_esc,\n",
+        "    tn / nullif(tn + fn, 0) AS precision_quiet, tn / nullif(tn + fp, 0) AS recall_quiet\n",
+        "  FROM cells\n",
+        "), f1 AS (\n",
+        "  SELECT *,\n",
+        "    2 * precision_esc * recall_esc / nullif(precision_esc + recall_esc, 0) AS f1_esc,\n",
+        "    2 * precision_quiet * recall_quiet / nullif(precision_quiet + recall_quiet, 0)\n",
+        "      AS f1_quiet\n",
+        "  FROM rates\n",
+        "), metrics AS (\n",
+        "  SELECT week_start, site, known AS labelled_hours, escalation_hours,\n",
+        "    precision_esc, recall_esc, f1_esc,\n",
+        "    (precision_esc + precision_quiet) / 2 AS precision_macro,\n",
+        "    (recall_esc + recall_quiet) / 2 AS recall_macro,\n",
+        "    (f1_esc + f1_quiet) / 2 AS f1_macro,\n",
+        "    (precision_esc * escalation_hours + precision_quiet * quiet_hours) / known\n",
+        "      AS precision_weighted,\n",
+        "    (recall_esc * escalation_hours + recall_quiet * quiet_hours) / known AS recall_weighted,\n",
+        "    (f1_esc * escalation_hours + f1_quiet * quiet_hours) / known AS f1_weighted,\n",
+        "    (tp + tn) / known AS accuracy, quiet_hours / known AS never_alert_accuracy,\n",
+        "    fp / nullif(fp + tn, 0) AS false_positive_rate, recall_quiet AS specificity,\n",
+        "    tp, fn, fp, tn\n",
+        "  FROM f1 WHERE known > 0\n",
+        ")\n",
+        "SELECT * FROM metrics\n"
+      ]
+    },
+    {
+      "name": "f1_averaging",
+      "displayName": "F1: escalation class, macro and weighted",
+      "queryLines": [
+        "WITH cells AS (\n",
+        "  SELECT window.start AS week_start, CASE WHEN slice_value IS NULL THEN 'All sites' WHEN slice_value = 'SITE_A' THEN 'Site-A-GH' WHEN slice_value = 'SITE_B' THEN 'Site-B-NS' WHEN slice_value = 'SITE_C' THEN 'Site-C-VL' ELSE slice_value END AS site,\n",
+        "    aggregate(filter(confusion_matrix, c -> c.label = '1' AND c.prediction = '1'), 0L, (n, c) -> n + c.count) AS tp, aggregate(filter(confusion_matrix, c -> c.label = '0' AND c.prediction = '1'), 0L, (n, c) -> n + c.count) AS fp,\n",
+        "    aggregate(filter(confusion_matrix, c -> c.label = '1' AND c.prediction = '0'), 0L, (n, c) -> n + c.count) AS fn, aggregate(filter(confusion_matrix, c -> c.label = '0' AND c.prediction = '0'), 0L, (n, c) -> n + c.count) AS tn\n",
+        "  FROM inference_log_profile_metrics\n",
+        "  WHERE column_name = ':table' AND log_type = 'INPUT' AND model_version = '*'\n",
+        "    AND (slice_key IS NULL OR slice_key = 'site_id')\n",
+        "    AND granularity = '1 week'\n",
+        "), rates AS (\n",
+        "  SELECT *, tp + fn AS escalation_hours, tn + fp AS quiet_hours, tp + fp + fn + tn AS known,\n",
+        "    tp / nullif(tp + fp, 0) AS precision_esc, tp / nullif(tp + fn, 0) AS recall_esc,\n",
+        "    tn / nullif(tn + fn, 0) AS precision_quiet, tn / nullif(tn + fp, 0) AS recall_quiet\n",
+        "  FROM cells\n",
+        "), f1 AS (\n",
+        "  SELECT *,\n",
+        "    2 * precision_esc * recall_esc / nullif(precision_esc + recall_esc, 0) AS f1_esc,\n",
+        "    2 * precision_quiet * recall_quiet / nullif(precision_quiet + recall_quiet, 0)\n",
+        "      AS f1_quiet\n",
+        "  FROM rates\n",
+        "), metrics AS (\n",
+        "  SELECT week_start, site, known AS labelled_hours, escalation_hours,\n",
+        "    precision_esc, recall_esc, f1_esc,\n",
+        "    (precision_esc + precision_quiet) / 2 AS precision_macro,\n",
+        "    (recall_esc + recall_quiet) / 2 AS recall_macro,\n",
+        "    (f1_esc + f1_quiet) / 2 AS f1_macro,\n",
+        "    (precision_esc * escalation_hours + precision_quiet * quiet_hours) / known\n",
+        "      AS precision_weighted,\n",
+        "    (recall_esc * escalation_hours + recall_quiet * quiet_hours) / known AS recall_weighted,\n",
+        "    (f1_esc * escalation_hours + f1_quiet * quiet_hours) / known AS f1_weighted,\n",
+        "    (tp + tn) / known AS accuracy, quiet_hours / known AS never_alert_accuracy,\n",
+        "    fp / nullif(fp + tn, 0) AS false_positive_rate, recall_quiet AS specificity,\n",
+        "    tp, fn, fp, tn\n",
+        "  FROM f1 WHERE known > 0\n",
+        ")\n",
+        "SELECT week_start, 'Escalation class' AS averaging, f1_esc AS value\n",
+        "FROM metrics WHERE site = 'All sites'\n",
+        "UNION ALL\n",
+        "SELECT week_start, 'Macro (both classes equal)', f1_macro\n",
+        "FROM metrics WHERE site = 'All sites'\n",
+        "UNION ALL\n",
+        "SELECT week_start, 'Weighted (by hours)', f1_weighted\n",
+        "FROM metrics WHERE site = 'All sites'\n"
+      ]
+    },
+    {
+      "name": "recall_averaging",
+      "displayName": "Recall: escalation class, macro and weighted",
+      "queryLines": [
+        "WITH cells AS (\n",
+        "  SELECT window.start AS week_start, CASE WHEN slice_value IS NULL THEN 'All sites' WHEN slice_value = 'SITE_A' THEN 'Site-A-GH' WHEN slice_value = 'SITE_B' THEN 'Site-B-NS' WHEN slice_value = 'SITE_C' THEN 'Site-C-VL' ELSE slice_value END AS site,\n",
+        "    aggregate(filter(confusion_matrix, c -> c.label = '1' AND c.prediction = '1'), 0L, (n, c) -> n + c.count) AS tp, aggregate(filter(confusion_matrix, c -> c.label = '0' AND c.prediction = '1'), 0L, (n, c) -> n + c.count) AS fp,\n",
+        "    aggregate(filter(confusion_matrix, c -> c.label = '1' AND c.prediction = '0'), 0L, (n, c) -> n + c.count) AS fn, aggregate(filter(confusion_matrix, c -> c.label = '0' AND c.prediction = '0'), 0L, (n, c) -> n + c.count) AS tn\n",
+        "  FROM inference_log_profile_metrics\n",
+        "  WHERE column_name = ':table' AND log_type = 'INPUT' AND model_version = '*'\n",
+        "    AND (slice_key IS NULL OR slice_key = 'site_id')\n",
+        "    AND granularity = '1 week'\n",
+        "), rates AS (\n",
+        "  SELECT *, tp + fn AS escalation_hours, tn + fp AS quiet_hours, tp + fp + fn + tn AS known,\n",
+        "    tp / nullif(tp + fp, 0) AS precision_esc, tp / nullif(tp + fn, 0) AS recall_esc,\n",
+        "    tn / nullif(tn + fn, 0) AS precision_quiet, tn / nullif(tn + fp, 0) AS recall_quiet\n",
+        "  FROM cells\n",
+        "), f1 AS (\n",
+        "  SELECT *,\n",
+        "    2 * precision_esc * recall_esc / nullif(precision_esc + recall_esc, 0) AS f1_esc,\n",
+        "    2 * precision_quiet * recall_quiet / nullif(precision_quiet + recall_quiet, 0)\n",
+        "      AS f1_quiet\n",
+        "  FROM rates\n",
+        "), metrics AS (\n",
+        "  SELECT week_start, site, known AS labelled_hours, escalation_hours,\n",
+        "    precision_esc, recall_esc, f1_esc,\n",
+        "    (precision_esc + precision_quiet) / 2 AS precision_macro,\n",
+        "    (recall_esc + recall_quiet) / 2 AS recall_macro,\n",
+        "    (f1_esc + f1_quiet) / 2 AS f1_macro,\n",
+        "    (precision_esc * escalation_hours + precision_quiet * quiet_hours) / known\n",
+        "      AS precision_weighted,\n",
+        "    (recall_esc * escalation_hours + recall_quiet * quiet_hours) / known AS recall_weighted,\n",
+        "    (f1_esc * escalation_hours + f1_quiet * quiet_hours) / known AS f1_weighted,\n",
+        "    (tp + tn) / known AS accuracy, quiet_hours / known AS never_alert_accuracy,\n",
+        "    fp / nullif(fp + tn, 0) AS false_positive_rate, recall_quiet AS specificity,\n",
+        "    tp, fn, fp, tn\n",
+        "  FROM f1 WHERE known > 0\n",
+        ")\n",
+        "SELECT week_start, 'Escalation class' AS averaging, recall_esc AS value\n",
+        "FROM metrics WHERE site = 'All sites'\n",
+        "UNION ALL\n",
+        "SELECT week_start, 'Macro (both classes equal)', recall_macro\n",
+        "FROM metrics WHERE site = 'All sites'\n",
+        "UNION ALL\n",
+        "SELECT week_start, 'Weighted (by hours)', recall_weighted\n",
+        "FROM metrics WHERE site = 'All sites'\n"
+      ]
+    },
+    {
+      "name": "precision_averaging",
+      "displayName": "Precision: escalation class, macro and weighted",
+      "queryLines": [
+        "WITH cells AS (\n",
+        "  SELECT window.start AS week_start, CASE WHEN slice_value IS NULL THEN 'All sites' WHEN slice_value = 'SITE_A' THEN 'Site-A-GH' WHEN slice_value = 'SITE_B' THEN 'Site-B-NS' WHEN slice_value = 'SITE_C' THEN 'Site-C-VL' ELSE slice_value END AS site,\n",
+        "    aggregate(filter(confusion_matrix, c -> c.label = '1' AND c.prediction = '1'), 0L, (n, c) -> n + c.count) AS tp, aggregate(filter(confusion_matrix, c -> c.label = '0' AND c.prediction = '1'), 0L, (n, c) -> n + c.count) AS fp,\n",
+        "    aggregate(filter(confusion_matrix, c -> c.label = '1' AND c.prediction = '0'), 0L, (n, c) -> n + c.count) AS fn, aggregate(filter(confusion_matrix, c -> c.label = '0' AND c.prediction = '0'), 0L, (n, c) -> n + c.count) AS tn\n",
+        "  FROM inference_log_profile_metrics\n",
+        "  WHERE column_name = ':table' AND log_type = 'INPUT' AND model_version = '*'\n",
+        "    AND (slice_key IS NULL OR slice_key = 'site_id')\n",
+        "    AND granularity = '1 week'\n",
+        "), rates AS (\n",
+        "  SELECT *, tp + fn AS escalation_hours, tn + fp AS quiet_hours, tp + fp + fn + tn AS known,\n",
+        "    tp / nullif(tp + fp, 0) AS precision_esc, tp / nullif(tp + fn, 0) AS recall_esc,\n",
+        "    tn / nullif(tn + fn, 0) AS precision_quiet, tn / nullif(tn + fp, 0) AS recall_quiet\n",
+        "  FROM cells\n",
+        "), f1 AS (\n",
+        "  SELECT *,\n",
+        "    2 * precision_esc * recall_esc / nullif(precision_esc + recall_esc, 0) AS f1_esc,\n",
+        "    2 * precision_quiet * recall_quiet / nullif(precision_quiet + recall_quiet, 0)\n",
+        "      AS f1_quiet\n",
+        "  FROM rates\n",
+        "), metrics AS (\n",
+        "  SELECT week_start, site, known AS labelled_hours, escalation_hours,\n",
+        "    precision_esc, recall_esc, f1_esc,\n",
+        "    (precision_esc + precision_quiet) / 2 AS precision_macro,\n",
+        "    (recall_esc + recall_quiet) / 2 AS recall_macro,\n",
+        "    (f1_esc + f1_quiet) / 2 AS f1_macro,\n",
+        "    (precision_esc * escalation_hours + precision_quiet * quiet_hours) / known\n",
+        "      AS precision_weighted,\n",
+        "    (recall_esc * escalation_hours + recall_quiet * quiet_hours) / known AS recall_weighted,\n",
+        "    (f1_esc * escalation_hours + f1_quiet * quiet_hours) / known AS f1_weighted,\n",
+        "    (tp + tn) / known AS accuracy, quiet_hours / known AS never_alert_accuracy,\n",
+        "    fp / nullif(fp + tn, 0) AS false_positive_rate, recall_quiet AS specificity,\n",
+        "    tp, fn, fp, tn\n",
+        "  FROM f1 WHERE known > 0\n",
+        ")\n",
+        "SELECT week_start, 'Escalation class' AS averaging, precision_esc AS value\n",
+        "FROM metrics WHERE site = 'All sites'\n",
+        "UNION ALL\n",
+        "SELECT week_start, 'Macro (both classes equal)', precision_macro\n",
+        "FROM metrics WHERE site = 'All sites'\n",
+        "UNION ALL\n",
+        "SELECT week_start, 'Weighted (by hours)', precision_weighted\n",
+        "FROM metrics WHERE site = 'All sites'\n"
+      ]
+    },
+    {
+      "name": "accuracy_vs_never",
+      "displayName": "Accuracy against a model that never alerts",
+      "queryLines": [
+        "WITH cells AS (\n",
+        "  SELECT window.start AS week_start, CASE WHEN slice_value IS NULL THEN 'All sites' WHEN slice_value = 'SITE_A' THEN 'Site-A-GH' WHEN slice_value = 'SITE_B' THEN 'Site-B-NS' WHEN slice_value = 'SITE_C' THEN 'Site-C-VL' ELSE slice_value END AS site,\n",
+        "    aggregate(filter(confusion_matrix, c -> c.label = '1' AND c.prediction = '1'), 0L, (n, c) -> n + c.count) AS tp, aggregate(filter(confusion_matrix, c -> c.label = '0' AND c.prediction = '1'), 0L, (n, c) -> n + c.count) AS fp,\n",
+        "    aggregate(filter(confusion_matrix, c -> c.label = '1' AND c.prediction = '0'), 0L, (n, c) -> n + c.count) AS fn, aggregate(filter(confusion_matrix, c -> c.label = '0' AND c.prediction = '0'), 0L, (n, c) -> n + c.count) AS tn\n",
+        "  FROM inference_log_profile_metrics\n",
+        "  WHERE column_name = ':table' AND log_type = 'INPUT' AND model_version = '*'\n",
+        "    AND (slice_key IS NULL OR slice_key = 'site_id')\n",
+        "    AND granularity = '1 week'\n",
+        "), rates AS (\n",
+        "  SELECT *, tp + fn AS escalation_hours, tn + fp AS quiet_hours, tp + fp + fn + tn AS known,\n",
+        "    tp / nullif(tp + fp, 0) AS precision_esc, tp / nullif(tp + fn, 0) AS recall_esc,\n",
+        "    tn / nullif(tn + fn, 0) AS precision_quiet, tn / nullif(tn + fp, 0) AS recall_quiet\n",
+        "  FROM cells\n",
+        "), f1 AS (\n",
+        "  SELECT *,\n",
+        "    2 * precision_esc * recall_esc / nullif(precision_esc + recall_esc, 0) AS f1_esc,\n",
+        "    2 * precision_quiet * recall_quiet / nullif(precision_quiet + recall_quiet, 0)\n",
+        "      AS f1_quiet\n",
+        "  FROM rates\n",
+        "), metrics AS (\n",
+        "  SELECT week_start, site, known AS labelled_hours, escalation_hours,\n",
+        "    precision_esc, recall_esc, f1_esc,\n",
+        "    (precision_esc + precision_quiet) / 2 AS precision_macro,\n",
+        "    (recall_esc + recall_quiet) / 2 AS recall_macro,\n",
+        "    (f1_esc + f1_quiet) / 2 AS f1_macro,\n",
+        "    (precision_esc * escalation_hours + precision_quiet * quiet_hours) / known\n",
+        "      AS precision_weighted,\n",
+        "    (recall_esc * escalation_hours + recall_quiet * quiet_hours) / known AS recall_weighted,\n",
+        "    (f1_esc * escalation_hours + f1_quiet * quiet_hours) / known AS f1_weighted,\n",
+        "    (tp + tn) / known AS accuracy, quiet_hours / known AS never_alert_accuracy,\n",
+        "    fp / nullif(fp + tn, 0) AS false_positive_rate, recall_quiet AS specificity,\n",
+        "    tp, fn, fp, tn\n",
+        "  FROM f1 WHERE known > 0\n",
+        ")\n",
+        "SELECT week_start, 'Accuracy of the model' AS line, accuracy AS value\n",
+        "FROM metrics WHERE site = 'All sites'\n",
+        "UNION ALL\n",
+        "SELECT week_start, 'Accuracy of a model that never alerts', never_alert_accuracy\n",
+        "FROM metrics WHERE site = 'All sites'\n"
+      ]
+    },
+    {
+      "name": "decisions",
+      "displayName": "Decisions",
+      "queryLines": [
+        "SELECT event_ts, event, outcome, nullif(version, '') AS version,\n",
+        "  nullif(from_version, '') AS from_version, actor, reason,\n",
+        "  nullif(episode, '') AS episode, run_url\n",
+        "FROM ml.ops_audit\n",
+        "ORDER BY event_ts DESC\n"
+      ]
+    },
+    {
+      "name": "retrains",
+      "displayName": "Retrains against the champion",
+      "queryLines": [
+        "SELECT event_ts, version, from_version AS champion, outcome,\n",
+        "  get_json_object(details, '$.model_type') AS model_type,\n",
+        "  CAST(get_json_object(details, '$.vs_champion.escalations') AS DOUBLE) AS escalations,\n",
+        "  CAST(get_json_object(details, '$.vs_champion.escalations_flagged') AS DOUBLE) AS flagged,\n",
+        "  CAST(get_json_object(details, '$.vs_champion.champion_escalations_flagged') AS DOUBLE) AS champion_flagged,\n",
+        "  CAST(get_json_object(details, '$.vs_champion.auroc') AS DOUBLE) AS auroc,\n",
+        "  CAST(get_json_object(details, '$.vs_champion.champion_auroc') AS DOUBLE) AS champion_auroc,\n",
+        "  CAST(get_json_object(details, '$.vs_champion.auprc') AS DOUBLE) AS auprc,\n",
+        "  CAST(get_json_object(details, '$.vs_champion.champion_auprc') AS DOUBLE) AS champion_auprc,\n",
+        "  CAST(get_json_object(details, '$.vs_champion.brier') AS DOUBLE) AS brier,\n",
+        "  CAST(get_json_object(details, '$.vs_champion.champion_brier') AS DOUBLE) AS champion_brier\n",
+        "FROM ml.ops_audit\n",
+        "WHERE event = 'retrain' AND nullif(version, '') IS NOT NULL\n",
+        "ORDER BY event_ts DESC\n"
+      ]
+    },
+    {
+      "name": "cost",
+      "displayName": "This environment's cost (list price)",
+      "queryLines": [
+        "SELECT u.usage_date AS day,\n",
+        "  CASE WHEN u.billing_origin_product = 'DATA_QUALITY_MONITORING' THEN 'monitor refresh'\n",
+        "       WHEN u.billing_origin_product = 'DLT' THEN 'pipeline'\n",
+        "       ELSE coalesce(u.custom_tags['component'], lower(u.billing_origin_product)) END\n",
+        "    AS part,\n",
+        "  u.usage_metadata.job_run_id AS job_run_id,\n",
+        "  u.usage_quantity * p.pricing.effective_list.default AS usd\n",
+        "FROM system.billing.usage u\n",
+        "JOIN system.billing.list_prices p\n",
+        "  ON u.sku_name = p.sku_name AND u.cloud = p.cloud AND u.usage_unit = p.usage_unit\n",
+        " AND u.usage_start_time >= p.price_start_time\n",
+        " AND (p.price_end_time IS NULL OR u.usage_start_time < p.price_end_time)\n",
+        "WHERE u.identity_metadata.run_as = current_user()\n",
+        "  AND u.usage_date >= date_sub(current_date(), 90)\n"
+      ]
+    },
+    {
+      "name": "cost_summary",
+      "displayName": "Cost in numbers (list price)",
+      "queryLines": [
+        "WITH own AS (\n",
+        "SELECT u.usage_date AS day,\n",
+        "  CASE WHEN u.billing_origin_product = 'DATA_QUALITY_MONITORING' THEN 'monitor refresh'\n",
+        "       WHEN u.billing_origin_product = 'DLT' THEN 'pipeline'\n",
+        "       ELSE coalesce(u.custom_tags['component'], lower(u.billing_origin_product)) END\n",
+        "    AS part,\n",
+        "  u.usage_metadata.job_run_id AS job_run_id,\n",
+        "  u.usage_quantity * p.pricing.effective_list.default AS usd\n",
+        "FROM system.billing.usage u\n",
+        "JOIN system.billing.list_prices p\n",
+        "  ON u.sku_name = p.sku_name AND u.cloud = p.cloud AND u.usage_unit = p.usage_unit\n",
+        " AND u.usage_start_time >= p.price_start_time\n",
+        " AND (p.price_end_time IS NULL OR u.usage_start_time < p.price_end_time)\n",
+        "WHERE u.identity_metadata.run_as = current_user()\n",
+        "), shared AS (\n",
+        "SELECT u.usage_date AS day,\n",
+        "  CASE WHEN u.billing_origin_product = 'DATA_QUALITY_MONITORING' THEN 'monitor refresh'\n",
+        "       WHEN u.billing_origin_product = 'DLT' THEN 'pipeline'\n",
+        "       ELSE coalesce(u.custom_tags['component'], lower(u.billing_origin_product)) END\n",
+        "    AS part,\n",
+        "  u.usage_metadata.job_run_id AS job_run_id,\n",
+        "  u.usage_quantity * p.pricing.effective_list.default AS usd\n",
+        "FROM system.billing.usage u\n",
+        "JOIN system.billing.list_prices p\n",
+        "  ON u.sku_name = p.sku_name AND u.cloud = p.cloud AND u.usage_unit = p.usage_unit\n",
+        " AND u.usage_start_time >= p.price_start_time\n",
+        " AND (p.price_end_time IS NULL OR u.usage_start_time < p.price_end_time)\n",
+        "WHERE u.billing_origin_product = 'SQL' AND u.custom_tags['project'] = 'heavden'\n",
+        ")\n",
+        "SELECT\n",
+        "  (SELECT round(sum(usd), 2) FROM own WHERE day >= date_sub(current_date(), 7))\n",
+        "    AS last_7_days,\n",
+        "  (SELECT round(sum(usd), 2) FROM own WHERE day >= date_trunc('MONTH', current_date()))\n",
+        "    AS this_month,\n",
+        "  (SELECT round(sum(usd), 2) FROM own WHERE part = 'monitor refresh'\n",
+        "     AND day >= date_trunc('MONTH', current_date())) AS monitor_this_month,\n",
+        "  (SELECT round(sum(usd), 2) FROM shared\n",
+        "     WHERE day >= date_trunc('MONTH', current_date())) AS shared_this_month\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "checks",
+      "displayName": "Drift checks",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Model & Drift\n",
+                "\n",
+                "Synthetic data. Every patient and hospital is invented. Not a medical device. After each load of new data the drift check compares the latest day with the data the model in use was built on. **Warn** asks for a look; **act** opens a retrain request that a person approves or rejects. Signals, limits and decisions: Drift Incident Runbook.\n",
+                "\n",
+                "Sites: **Site-A-GH** HeavDen General Hospital; **Site-B-NS** HeavDen Northshore Medical Center; **Site-C-VL** HeavDen Valley Community Hospital."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "checks-model",
+            "queries": [
+              {
+                "name": "checks_model",
+                "query": {
+                  "datasetName": "checks",
+                  "fields": [
+                    {
+                      "name": "model",
+                      "expression": "`model`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "model",
+                    "displayName": "Model version",
+                    "queryName": "checks_model"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Model version"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "checks-status",
+            "queries": [
+              {
+                "name": "checks_status",
+                "query": {
+                  "datasetName": "checks",
+                  "fields": [
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "status",
+                    "displayName": "Result",
+                    "queryName": "checks_status"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Result"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "checks-episode",
+            "queries": [
+              {
+                "name": "checks_episode",
+                "query": {
+                  "datasetName": "checks",
+                  "fields": [
+                    {
+                      "name": "episode",
+                      "expression": "`episode`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "episode",
+                    "displayName": "Episode",
+                    "queryName": "checks_episode"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Episode"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "checks-checked",
+            "queries": [
+              {
+                "name": "checks_checked_at",
+                "query": {
+                  "datasetName": "checks",
+                  "fields": [
+                    {
+                      "name": "checked_at",
+                      "expression": "`checked_at`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "checked_at",
+                    "displayName": "Checked between",
+                    "queryName": "checks_checked_at"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Checked between"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 2,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "latest-act",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "check_summary",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`latest_act`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Act signals in the latest check"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Act signals in the latest check",
+                "showDescription": true,
+                "description": "A retrain request opens on any act"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "latest-warn",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "check_summary",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`latest_warn`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Warn signals in the latest check"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Warn signals in the latest check",
+                "showDescription": true,
+                "description": "Worth a look; no request"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 4,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "checks-run",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "check_summary",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`checks`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Drift checks run"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Drift checks run",
+                "showDescription": true,
+                "description": "Every data run and every merge to main"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 4,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "checks-act",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "check_summary",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`act_checks`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Checks that said act"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Checks that said act",
+                "showDescription": true,
+                "description": "A data run's act opens a request (merges never do)"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 4,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "latest",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "latest_check",
+                  "fields": [
+                    {
+                      "name": "day_judged",
+                      "expression": "`day_judged`"
+                    },
+                    {
+                      "name": "model",
+                      "expression": "`model`"
+                    },
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    },
+                    {
+                      "name": "breaches",
+                      "expression": "`breaches`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "day_judged",
+                    "displayName": "Day judged"
+                  },
+                  {
+                    "fieldName": "model",
+                    "displayName": "Model"
+                  },
+                  {
+                    "fieldName": "status",
+                    "displayName": "Result"
+                  },
+                  {
+                    "fieldName": "breaches",
+                    "displayName": "What crossed a limit, worst first"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "The latest check (not filtered)",
+                "showDescription": true,
+                "description": "The model in use against its own training and validation days, known data faults left out"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 7,
+            "width": 12,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "all-checks",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "checks",
+                  "fields": [
+                    {
+                      "name": "checked_at",
+                      "expression": "`checked_at`"
+                    },
+                    {
+                      "name": "day_judged",
+                      "expression": "`day_judged`"
+                    },
+                    {
+                      "name": "episode",
+                      "expression": "`episode`"
+                    },
+                    {
+                      "name": "model",
+                      "expression": "`model`"
+                    },
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    },
+                    {
+                      "name": "n_act",
+                      "expression": "`n_act`"
+                    },
+                    {
+                      "name": "n_warn",
+                      "expression": "`n_warn`"
+                    },
+                    {
+                      "name": "breaches",
+                      "expression": "`breaches`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "checked_at",
+                    "displayName": "Checked at"
+                  },
+                  {
+                    "fieldName": "day_judged",
+                    "displayName": "Day judged"
+                  },
+                  {
+                    "fieldName": "episode",
+                    "displayName": "Episode"
+                  },
+                  {
+                    "fieldName": "model",
+                    "displayName": "Model"
+                  },
+                  {
+                    "fieldName": "status",
+                    "displayName": "Result"
+                  },
+                  {
+                    "fieldName": "n_act",
+                    "displayName": "Act"
+                  },
+                  {
+                    "fieldName": "n_warn",
+                    "displayName": "Warn"
+                  },
+                  {
+                    "fieldName": "breaches",
+                    "displayName": "What crossed a limit"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Every drift check, newest first"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 10,
+            "width": 12,
+            "height": 8
+          }
+        }
+      ]
+    },
+    {
+      "name": "signals",
+      "displayName": "Signals over time",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "signals-intro",
+            "multilineTextboxSpec": {
+              "lines": [
+                "The latest check of every day judged, per site, with the **warn** and **act** limits the check applies. A sensor fault shows as input and prediction drift at one site; a change in outcomes as a performance drop while the inputs stay put. Sites: **Site-A-GH** HeavDen General Hospital; **Site-B-NS** HeavDen Northshore Medical Center; **Site-C-VL** HeavDen Valley Community Hospital."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "signals-site",
+            "queries": [
+              {
+                "name": "js_lines_site",
+                "query": {
+                  "datasetName": "js_lines",
+                  "fields": [
+                    {
+                      "name": "site",
+                      "expression": "`site`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "alert_lines_site",
+                "query": {
+                  "datasetName": "alert_lines",
+                  "fields": [
+                    {
+                      "name": "site",
+                      "expression": "`site`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "psi_lines_site",
+                "query": {
+                  "datasetName": "psi_lines",
+                  "fields": [
+                    {
+                      "name": "site",
+                      "expression": "`site`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "site",
+                    "displayName": "Site",
+                    "queryName": "js_lines_site"
+                  },
+                  {
+                    "fieldName": "site",
+                    "displayName": "Site",
+                    "queryName": "alert_lines_site"
+                  },
+                  {
+                    "fieldName": "site",
+                    "displayName": "Site",
+                    "queryName": "psi_lines_site"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Site"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "signals-model",
+            "queries": [
+              {
+                "name": "js_lines_model",
+                "query": {
+                  "datasetName": "js_lines",
+                  "fields": [
+                    {
+                      "name": "model",
+                      "expression": "`model`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "alert_lines_model",
+                "query": {
+                  "datasetName": "alert_lines",
+                  "fields": [
+                    {
+                      "name": "model",
+                      "expression": "`model`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "psi_lines_model",
+                "query": {
+                  "datasetName": "psi_lines",
+                  "fields": [
+                    {
+                      "name": "model",
+                      "expression": "`model`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "performance_lines_model",
+                "query": {
+                  "datasetName": "performance_lines",
+                  "fields": [
+                    {
+                      "name": "model",
+                      "expression": "`model`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "quality_lines_model",
+                "query": {
+                  "datasetName": "quality_lines",
+                  "fields": [
+                    {
+                      "name": "model",
+                      "expression": "`model`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "model",
+                    "displayName": "Model version",
+                    "queryName": "js_lines_model"
+                  },
+                  {
+                    "fieldName": "model",
+                    "displayName": "Model version",
+                    "queryName": "alert_lines_model"
+                  },
+                  {
+                    "fieldName": "model",
+                    "displayName": "Model version",
+                    "queryName": "psi_lines_model"
+                  },
+                  {
+                    "fieldName": "model",
+                    "displayName": "Model version",
+                    "queryName": "performance_lines_model"
+                  },
+                  {
+                    "fieldName": "model",
+                    "displayName": "Model version",
+                    "queryName": "quality_lines_model"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Model version"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "signals-days",
+            "queries": [
+              {
+                "name": "js_lines_day",
+                "query": {
+                  "datasetName": "js_lines",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "alert_lines_day",
+                "query": {
+                  "datasetName": "alert_lines",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "psi_lines_day",
+                "query": {
+                  "datasetName": "psi_lines",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "performance_lines_day",
+                "query": {
+                  "datasetName": "performance_lines",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "quality_lines_day",
+                "query": {
+                  "datasetName": "quality_lines",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "day",
+                    "displayName": "Days judged",
+                    "queryName": "js_lines_day"
+                  },
+                  {
+                    "fieldName": "day",
+                    "displayName": "Days judged",
+                    "queryName": "alert_lines_day"
+                  },
+                  {
+                    "fieldName": "day",
+                    "displayName": "Days judged",
+                    "queryName": "psi_lines_day"
+                  },
+                  {
+                    "fieldName": "day",
+                    "displayName": "Days judged",
+                    "queryName": "performance_lines_day"
+                  },
+                  {
+                    "fieldName": "day",
+                    "displayName": "Days judged",
+                    "queryName": "quality_lines_day"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Days judged"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "js",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "js_lines",
+                  "fields": [
+                    {
+                      "name": "x",
+                      "expression": "DATE_TRUNC(\"DAY\", `day`)"
+                    },
+                    {
+                      "name": "y",
+                      "expression": "MAX(`value`)"
+                    },
+                    {
+                      "name": "line",
+                      "expression": "`line`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "x",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Day judged"
+                },
+                "y": {
+                  "fieldName": "y",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "JS distance"
+                },
+                "color": {
+                  "fieldName": "line",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "All sites",
+                        "color": "#0072B2"
+                      },
+                      {
+                        "value": "Site-A-GH",
+                        "color": "#009E73"
+                      },
+                      {
+                        "value": "Site-B-NS",
+                        "color": "#7B3FA0"
+                      },
+                      {
+                        "value": "Site-C-VL",
+                        "color": "#8C564B"
+                      },
+                      {
+                        "value": "Warn limit",
+                        "color": "#F2C200"
+                      },
+                      {
+                        "value": "Act limit",
+                        "color": "#D62728"
+                      }
+                    ]
+                  },
+                  "displayName": "Line"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Prediction drift",
+                "showDescription": true,
+                "description": "Jensen-Shannon distance of the risk scores, latest day vs the model's own data. Yellow line: warn from 0.08. Red line: act from 0.12."
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "alerts",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "alert_lines",
+                  "fields": [
+                    {
+                      "name": "x",
+                      "expression": "DATE_TRUNC(\"DAY\", `day`)"
+                    },
+                    {
+                      "name": "y",
+                      "expression": "MAX(`value`)"
+                    },
+                    {
+                      "name": "line",
+                      "expression": "`line`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "x",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Day judged"
+                },
+                "y": {
+                  "fieldName": "y",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Alerts per nurse per shift"
+                },
+                "color": {
+                  "fieldName": "line",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "All sites",
+                        "color": "#0072B2"
+                      },
+                      {
+                        "value": "Site-A-GH",
+                        "color": "#009E73"
+                      },
+                      {
+                        "value": "Site-B-NS",
+                        "color": "#7B3FA0"
+                      },
+                      {
+                        "value": "Site-C-VL",
+                        "color": "#8C564B"
+                      },
+                      {
+                        "value": "Warn limit",
+                        "color": "#F2C200"
+                      },
+                      {
+                        "value": "Act limit",
+                        "color": "#D62728"
+                      }
+                    ]
+                  },
+                  "displayName": "Line"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Alerts per nurse per shift",
+                "showDescription": true,
+                "description": "The budget is about 2. Yellow line: warn from 2.5. Red line: act from 3."
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "psi",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "psi_lines",
+                  "fields": [
+                    {
+                      "name": "x",
+                      "expression": "DATE_TRUNC(\"DAY\", `day`)"
+                    },
+                    {
+                      "name": "y",
+                      "expression": "MAX(`value`)"
+                    },
+                    {
+                      "name": "line",
+                      "expression": "`line`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "x",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Day judged"
+                },
+                "y": {
+                  "fieldName": "y",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "PSI"
+                },
+                "color": {
+                  "fieldName": "line",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "All sites",
+                        "color": "#0072B2"
+                      },
+                      {
+                        "value": "Site-A-GH",
+                        "color": "#009E73"
+                      },
+                      {
+                        "value": "Site-B-NS",
+                        "color": "#7B3FA0"
+                      },
+                      {
+                        "value": "Site-C-VL",
+                        "color": "#8C564B"
+                      },
+                      {
+                        "value": "Warn limit",
+                        "color": "#F2C200"
+                      },
+                      {
+                        "value": "Act limit",
+                        "color": "#D62728"
+                      }
+                    ]
+                  },
+                  "displayName": "Line"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Largest input drift",
+                "showDescription": true,
+                "description": "The largest PSI over the eight monitored inputs. Yellow line: warn from 0.1. Red line: act from 0.25."
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "performance",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "performance_lines",
+                  "fields": [
+                    {
+                      "name": "x",
+                      "expression": "DATE_TRUNC(\"DAY\", `day`)"
+                    },
+                    {
+                      "name": "y",
+                      "expression": "MAX(`value`)"
+                    },
+                    {
+                      "name": "line",
+                      "expression": "`line`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "x",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Day judged"
+                },
+                "y": {
+                  "fieldName": "y",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Relative change"
+                },
+                "color": {
+                  "fieldName": "line",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "AUPRC drop",
+                        "color": "#0072B2"
+                      },
+                      {
+                        "value": "Brier rise",
+                        "color": "#7B3FA0"
+                      },
+                      {
+                        "value": "Quarantined share",
+                        "color": "#0072B2"
+                      },
+                      {
+                        "value": "Largest change in a missing share",
+                        "color": "#7B3FA0"
+                      },
+                      {
+                        "value": "Warn limit",
+                        "color": "#F2C200"
+                      },
+                      {
+                        "value": "Act limit",
+                        "color": "#D62728"
+                      }
+                    ]
+                  },
+                  "displayName": "Line"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Performance against validation (all sites)",
+                "showDescription": true,
+                "description": "Relative drop in AUPRC and rise in Brier, judged on the 95% bootstrap bound over the latest 48 labelled hours. Yellow line: warn from 0.1. Red line: act from 0.2."
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 9,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "quality",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "quality_lines",
+                  "fields": [
+                    {
+                      "name": "x",
+                      "expression": "DATE_TRUNC(\"DAY\", `day`)"
+                    },
+                    {
+                      "name": "y",
+                      "expression": "MAX(`value`)"
+                    },
+                    {
+                      "name": "line",
+                      "expression": "`line`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "x",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Day judged"
+                },
+                "y": {
+                  "fieldName": "y",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Share"
+                },
+                "color": {
+                  "fieldName": "line",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "AUPRC drop",
+                        "color": "#0072B2"
+                      },
+                      {
+                        "value": "Brier rise",
+                        "color": "#7B3FA0"
+                      },
+                      {
+                        "value": "Quarantined share",
+                        "color": "#0072B2"
+                      },
+                      {
+                        "value": "Largest change in a missing share",
+                        "color": "#7B3FA0"
+                      },
+                      {
+                        "value": "Warn limit",
+                        "color": "#F2C200"
+                      },
+                      {
+                        "value": "Act limit",
+                        "color": "#D62728"
+                      }
+                    ]
+                  },
+                  "displayName": "Line"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Data quality (all sites)",
+                "showDescription": true,
+                "description": "Share of readings quarantined, and the largest change in a field's missing share. Yellow line: warn from 0.02. Red line: act from 0.05."
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 15,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "psi-latest",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "psi_latest",
+                  "fields": [
+                    {
+                      "name": "feature",
+                      "expression": "`feature`"
+                    },
+                    {
+                      "name": "all_sites",
+                      "expression": "`all_sites`"
+                    },
+                    {
+                      "name": "site_a",
+                      "expression": "`site_a`"
+                    },
+                    {
+                      "name": "site_b",
+                      "expression": "`site_b`"
+                    },
+                    {
+                      "name": "site_c",
+                      "expression": "`site_c`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "feature",
+                    "displayName": "Input"
+                  },
+                  {
+                    "fieldName": "all_sites",
+                    "displayName": "All sites",
+                    "format": {
+                      "type": "number-plain",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 3
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "site_a",
+                    "displayName": "Site-A-GH",
+                    "format": {
+                      "type": "number-plain",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 3
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "site_b",
+                    "displayName": "Site-B-NS",
+                    "format": {
+                      "type": "number-plain",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 3
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "site_c",
+                    "displayName": "Site-C-VL",
+                    "format": {
+                      "type": "number-plain",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 3
+                      }
+                    }
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Input drift (PSI) in the latest check (not filtered)",
+                "showDescription": true,
+                "description": "Warn from 0.10, act from 0.25"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 15,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ]
+    },
+    {
+      "name": "monitor",
+      "displayName": "Monitor history",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "monitor-intro",
+            "multilineTextboxSpec": {
+              "lines": [
+                "The monitor (Lakehouse Monitoring) profiles every scored hour under the model that scored it, with outcomes filled in as they arrive. It keeps the history; it doesn't decide. Daily performance swings too much to judge on (few escalations a day), so it is shown by week. Where the monitor and the check measure the same thing, the check makes sure they agree. Sites: **Site-A-GH** HeavDen General Hospital; **Site-B-NS** HeavDen Northshore Medical Center; **Site-C-VL** HeavDen Valley Community Hospital."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "monitor-site",
+            "queries": [
+              {
+                "name": "monitor_weekly_site",
+                "query": {
+                  "datasetName": "monitor_weekly",
+                  "fields": [
+                    {
+                      "name": "site",
+                      "expression": "`site`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "monitor_daily_site",
+                "query": {
+                  "datasetName": "monitor_daily",
+                  "fields": [
+                    {
+                      "name": "site",
+                      "expression": "`site`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "cross_check_site",
+                "query": {
+                  "datasetName": "cross_check",
+                  "fields": [
+                    {
+                      "name": "site",
+                      "expression": "`site`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "site",
+                    "displayName": "Site",
+                    "queryName": "monitor_weekly_site"
+                  },
+                  {
+                    "fieldName": "site",
+                    "displayName": "Site",
+                    "queryName": "monitor_daily_site"
+                  },
+                  {
+                    "fieldName": "site",
+                    "displayName": "Site",
+                    "queryName": "cross_check_site"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Site"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "monitor-days",
+            "queries": [
+              {
+                "name": "monitor_weekly_week_start",
+                "query": {
+                  "datasetName": "monitor_weekly",
+                  "fields": [
+                    {
+                      "name": "week_start",
+                      "expression": "`week_start`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "monitor_daily_day",
+                "query": {
+                  "datasetName": "monitor_daily",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "cross_check_day_judged",
+                "query": {
+                  "datasetName": "cross_check",
+                  "fields": [
+                    {
+                      "name": "day_judged",
+                      "expression": "`day_judged`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "week_start",
+                    "displayName": "Days",
+                    "queryName": "monitor_weekly_week_start"
+                  },
+                  {
+                    "fieldName": "day",
+                    "displayName": "Days",
+                    "queryName": "monitor_daily_day"
+                  },
+                  {
+                    "fieldName": "day_judged",
+                    "displayName": "Days",
+                    "queryName": "cross_check_day_judged"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Days"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "auprc-week",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "monitor_weekly",
+                  "fields": [
+                    {
+                      "name": "x",
+                      "expression": "DATE_TRUNC(\"DAY\", `week_start`)"
+                    },
+                    {
+                      "name": "y",
+                      "expression": "MAX(`auprc`)"
+                    },
+                    {
+                      "name": "site",
+                      "expression": "`site`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "x",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Week"
+                },
+                "y": {
+                  "fieldName": "y",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "AUPRC",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 3
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "site",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "All sites",
+                        "color": "#0072B2"
+                      },
+                      {
+                        "value": "Site-A-GH",
+                        "color": "#009E73"
+                      },
+                      {
+                        "value": "Site-B-NS",
+                        "color": "#7B3FA0"
+                      },
+                      {
+                        "value": "Site-C-VL",
+                        "color": "#8C564B"
+                      }
+                    ]
+                  },
+                  "displayName": "Site"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "AUPRC by week",
+                "showDescription": true,
+                "description": "Higher is better"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "brier-week",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "monitor_weekly",
+                  "fields": [
+                    {
+                      "name": "x",
+                      "expression": "DATE_TRUNC(\"DAY\", `week_start`)"
+                    },
+                    {
+                      "name": "y",
+                      "expression": "MAX(`brier`)"
+                    },
+                    {
+                      "name": "site",
+                      "expression": "`site`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "x",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Week"
+                },
+                "y": {
+                  "fieldName": "y",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Brier",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 3
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "site",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "All sites",
+                        "color": "#0072B2"
+                      },
+                      {
+                        "value": "Site-A-GH",
+                        "color": "#009E73"
+                      },
+                      {
+                        "value": "Site-B-NS",
+                        "color": "#7B3FA0"
+                      },
+                      {
+                        "value": "Site-C-VL",
+                        "color": "#8C564B"
+                      }
+                    ]
+                  },
+                  "displayName": "Site"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Brier score by week",
+                "showDescription": true,
+                "description": "Lower is better"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 4,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "auroc-week",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "monitor_weekly",
+                  "fields": [
+                    {
+                      "name": "x",
+                      "expression": "DATE_TRUNC(\"DAY\", `week_start`)"
+                    },
+                    {
+                      "name": "y",
+                      "expression": "MAX(`auroc`)"
+                    },
+                    {
+                      "name": "site",
+                      "expression": "`site`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "x",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Week"
+                },
+                "y": {
+                  "fieldName": "y",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "AUROC",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 3
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "site",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "All sites",
+                        "color": "#0072B2"
+                      },
+                      {
+                        "value": "Site-A-GH",
+                        "color": "#009E73"
+                      },
+                      {
+                        "value": "Site-B-NS",
+                        "color": "#7B3FA0"
+                      },
+                      {
+                        "value": "Site-C-VL",
+                        "color": "#8C564B"
+                      }
+                    ]
+                  },
+                  "displayName": "Site"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "AUROC by week",
+                "showDescription": true,
+                "description": "Higher is better"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 4,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "alerts-day",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "monitor_daily",
+                  "fields": [
+                    {
+                      "name": "x",
+                      "expression": "DATE_TRUNC(\"DAY\", `day`)"
+                    },
+                    {
+                      "name": "y",
+                      "expression": "MAX(`alerts_per_nurse_shift`)"
+                    },
+                    {
+                      "name": "site",
+                      "expression": "`site`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "x",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Day"
+                },
+                "y": {
+                  "fieldName": "y",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Alerts per nurse per shift"
+                },
+                "color": {
+                  "fieldName": "site",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "All sites",
+                        "color": "#0072B2"
+                      },
+                      {
+                        "value": "Site-A-GH",
+                        "color": "#009E73"
+                      },
+                      {
+                        "value": "Site-B-NS",
+                        "color": "#7B3FA0"
+                      },
+                      {
+                        "value": "Site-C-VL",
+                        "color": "#8C564B"
+                      }
+                    ]
+                  },
+                  "displayName": "Site"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Alerts per nurse per shift, by day",
+                "showDescription": true,
+                "description": "What the nurses received"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 10,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "hours-day",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "monitor_daily",
+                  "fields": [
+                    {
+                      "name": "x",
+                      "expression": "DATE_TRUNC(\"DAY\", `day`)"
+                    },
+                    {
+                      "name": "y",
+                      "expression": "SUM(`site_hours`)"
+                    },
+                    {
+                      "name": "site",
+                      "expression": "`site`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "x",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Day"
+                },
+                "y": {
+                  "fieldName": "y",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Patient-hours"
+                },
+                "color": {
+                  "fieldName": "site",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "All sites",
+                        "color": "#0072B2"
+                      },
+                      {
+                        "value": "Site-A-GH",
+                        "color": "#009E73"
+                      },
+                      {
+                        "value": "Site-B-NS",
+                        "color": "#7B3FA0"
+                      },
+                      {
+                        "value": "Site-C-VL",
+                        "color": "#8C564B"
+                      }
+                    ]
+                  },
+                  "displayName": "Site"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Patient-hours monitored per day"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 10,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "agreement",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "cross_check",
+                  "fields": [
+                    {
+                      "name": "checked_at",
+                      "expression": "`checked_at`"
+                    },
+                    {
+                      "name": "day_judged",
+                      "expression": "`day_judged`"
+                    },
+                    {
+                      "name": "compared",
+                      "expression": "`compared`"
+                    },
+                    {
+                      "name": "site",
+                      "expression": "`site`"
+                    },
+                    {
+                      "name": "check_number",
+                      "expression": "`check_number`"
+                    },
+                    {
+                      "name": "monitor_number",
+                      "expression": "`monitor_number`"
+                    },
+                    {
+                      "name": "verdict",
+                      "expression": "`verdict`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "checked_at",
+                    "displayName": "Checked at"
+                  },
+                  {
+                    "fieldName": "day_judged",
+                    "displayName": "Day judged"
+                  },
+                  {
+                    "fieldName": "compared",
+                    "displayName": "Number"
+                  },
+                  {
+                    "fieldName": "site",
+                    "displayName": "Site"
+                  },
+                  {
+                    "fieldName": "check_number",
+                    "displayName": "Check",
+                    "format": {
+                      "type": "number-plain",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 3
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "monitor_number",
+                    "displayName": "Monitor",
+                    "format": {
+                      "type": "number-plain",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 3
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "verdict",
+                    "displayName": "Verdict"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Does the monitor agree with the check?",
+                "showDescription": true,
+                "description": "Alert load must match; the monitor's prediction drift is the check's x 0.8326 (natural vs base-2 logs). A disagreement means the monitor's copy of the prediction log went wrong"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 16,
+            "width": 12,
+            "height": 6
+          }
+        }
+      ]
+    },
+    {
+      "name": "supplementary",
+      "displayName": "Supplementary metrics",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "supplementary-intro",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## The textbook metrics, for context and learning\n",
+                "\n",
+                "Not used to decide anything: the model is judged on AUPRC, Brier, AUROC and alerts per nurse per shift. Here each **patient-hour** counts once: *predicted* = the hour was in the High band (the alert threshold), *actual* = an escalation followed within 6 hours. Only about 1 hour in 100 is followed by one, so **accuracy and the weighted averages are dominated by the quiet hours**: a model that never alerts scores about 99% accuracy while catching no one (below). **Macro** averages weigh both classes equally; the **escalation class** shows what matters: recall = share of escalation hours flagged, precision = share of High hours followed by an escalation. Counted per hour, not per alert, over hours whose outcome is known.\n",
+                "\n",
+                "Sites: **Site-A-GH** HeavDen General Hospital; **Site-B-NS** HeavDen Northshore Medical Center; **Site-C-VL** HeavDen Valley Community Hospital."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "supplementary-site",
+            "queries": [
+              {
+                "name": "class_weekly_site",
+                "query": {
+                  "datasetName": "class_weekly",
+                  "fields": [
+                    {
+                      "name": "site",
+                      "expression": "`site`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "site",
+                    "displayName": "Site",
+                    "queryName": "class_weekly_site"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Site"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "supplementary-weeks",
+            "queries": [
+              {
+                "name": "class_weekly_week_start",
+                "query": {
+                  "datasetName": "class_weekly",
+                  "fields": [
+                    {
+                      "name": "week_start",
+                      "expression": "`week_start`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "f1_averaging_week_start",
+                "query": {
+                  "datasetName": "f1_averaging",
+                  "fields": [
+                    {
+                      "name": "week_start",
+                      "expression": "`week_start`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "recall_averaging_week_start",
+                "query": {
+                  "datasetName": "recall_averaging",
+                  "fields": [
+                    {
+                      "name": "week_start",
+                      "expression": "`week_start`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "precision_averaging_week_start",
+                "query": {
+                  "datasetName": "precision_averaging",
+                  "fields": [
+                    {
+                      "name": "week_start",
+                      "expression": "`week_start`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "accuracy_vs_never_week_start",
+                "query": {
+                  "datasetName": "accuracy_vs_never",
+                  "fields": [
+                    {
+                      "name": "week_start",
+                      "expression": "`week_start`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "week_start",
+                    "displayName": "Weeks",
+                    "queryName": "class_weekly_week_start"
+                  },
+                  {
+                    "fieldName": "week_start",
+                    "displayName": "Weeks",
+                    "queryName": "f1_averaging_week_start"
+                  },
+                  {
+                    "fieldName": "week_start",
+                    "displayName": "Weeks",
+                    "queryName": "recall_averaging_week_start"
+                  },
+                  {
+                    "fieldName": "week_start",
+                    "displayName": "Weeks",
+                    "queryName": "precision_averaging_week_start"
+                  },
+                  {
+                    "fieldName": "week_start",
+                    "displayName": "Weeks",
+                    "queryName": "accuracy_vs_never_week_start"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Weeks"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 3,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "recall-esc",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "class_weekly",
+                  "fields": [
+                    {
+                      "name": "x",
+                      "expression": "DATE_TRUNC(\"DAY\", `week_start`)"
+                    },
+                    {
+                      "name": "y",
+                      "expression": "MAX(`recall_esc`)"
+                    },
+                    {
+                      "name": "site",
+                      "expression": "`site`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "x",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Week"
+                },
+                "y": {
+                  "fieldName": "y",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Recall",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "site",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "All sites",
+                        "color": "#0072B2"
+                      },
+                      {
+                        "value": "Site-A-GH",
+                        "color": "#009E73"
+                      },
+                      {
+                        "value": "Site-B-NS",
+                        "color": "#7B3FA0"
+                      },
+                      {
+                        "value": "Site-C-VL",
+                        "color": "#8C564B"
+                      }
+                    ]
+                  },
+                  "displayName": "Site"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Recall (escalation class)",
+                "showDescription": true,
+                "description": "Escalation hours flagged High"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "precision-esc",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "class_weekly",
+                  "fields": [
+                    {
+                      "name": "x",
+                      "expression": "DATE_TRUNC(\"DAY\", `week_start`)"
+                    },
+                    {
+                      "name": "y",
+                      "expression": "MAX(`precision_esc`)"
+                    },
+                    {
+                      "name": "site",
+                      "expression": "`site`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "x",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Week"
+                },
+                "y": {
+                  "fieldName": "y",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Precision",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "site",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "All sites",
+                        "color": "#0072B2"
+                      },
+                      {
+                        "value": "Site-A-GH",
+                        "color": "#009E73"
+                      },
+                      {
+                        "value": "Site-B-NS",
+                        "color": "#7B3FA0"
+                      },
+                      {
+                        "value": "Site-C-VL",
+                        "color": "#8C564B"
+                      }
+                    ]
+                  },
+                  "displayName": "Site"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Precision (escalation class)",
+                "showDescription": true,
+                "description": "High hours followed by an escalation"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 5,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "f1-esc",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "class_weekly",
+                  "fields": [
+                    {
+                      "name": "x",
+                      "expression": "DATE_TRUNC(\"DAY\", `week_start`)"
+                    },
+                    {
+                      "name": "y",
+                      "expression": "MAX(`f1_esc`)"
+                    },
+                    {
+                      "name": "site",
+                      "expression": "`site`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "x",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Week"
+                },
+                "y": {
+                  "fieldName": "y",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "F1",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "site",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "All sites",
+                        "color": "#0072B2"
+                      },
+                      {
+                        "value": "Site-A-GH",
+                        "color": "#009E73"
+                      },
+                      {
+                        "value": "Site-B-NS",
+                        "color": "#7B3FA0"
+                      },
+                      {
+                        "value": "Site-C-VL",
+                        "color": "#8C564B"
+                      }
+                    ]
+                  },
+                  "displayName": "Site"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "F1 (escalation class)",
+                "showDescription": true,
+                "description": "Harmonic mean of the two"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 5,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "f1-averaging",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "f1_averaging",
+                  "fields": [
+                    {
+                      "name": "x",
+                      "expression": "DATE_TRUNC(\"DAY\", `week_start`)"
+                    },
+                    {
+                      "name": "y",
+                      "expression": "MAX(`value`)"
+                    },
+                    {
+                      "name": "averaging",
+                      "expression": "`averaging`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "x",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Week"
+                },
+                "y": {
+                  "fieldName": "y",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "F1",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "averaging",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Escalation class",
+                        "color": "#0072B2"
+                      },
+                      {
+                        "value": "Macro (both classes equal)",
+                        "color": "#009E73"
+                      },
+                      {
+                        "value": "Weighted (by hours)",
+                        "color": "#7B3FA0"
+                      }
+                    ]
+                  },
+                  "displayName": "Averaging"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "F1: three ways to average (all sites)",
+                "showDescription": true,
+                "description": "The weighted average hides the escalation class"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "recall-averaging",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "recall_averaging",
+                  "fields": [
+                    {
+                      "name": "x",
+                      "expression": "DATE_TRUNC(\"DAY\", `week_start`)"
+                    },
+                    {
+                      "name": "y",
+                      "expression": "MAX(`value`)"
+                    },
+                    {
+                      "name": "averaging",
+                      "expression": "`averaging`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "x",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Week"
+                },
+                "y": {
+                  "fieldName": "y",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Recall",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "averaging",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Escalation class",
+                        "color": "#0072B2"
+                      },
+                      {
+                        "value": "Macro (both classes equal)",
+                        "color": "#009E73"
+                      },
+                      {
+                        "value": "Weighted (by hours)",
+                        "color": "#7B3FA0"
+                      }
+                    ]
+                  },
+                  "displayName": "Averaging"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Recall: three ways to average (all sites)"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 11,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "precision-averaging",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "precision_averaging",
+                  "fields": [
+                    {
+                      "name": "x",
+                      "expression": "DATE_TRUNC(\"DAY\", `week_start`)"
+                    },
+                    {
+                      "name": "y",
+                      "expression": "MAX(`value`)"
+                    },
+                    {
+                      "name": "averaging",
+                      "expression": "`averaging`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "x",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Week"
+                },
+                "y": {
+                  "fieldName": "y",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Precision",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "averaging",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Escalation class",
+                        "color": "#0072B2"
+                      },
+                      {
+                        "value": "Macro (both classes equal)",
+                        "color": "#009E73"
+                      },
+                      {
+                        "value": "Weighted (by hours)",
+                        "color": "#7B3FA0"
+                      }
+                    ]
+                  },
+                  "displayName": "Averaging"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Precision: three ways to average (all sites)"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 11,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "accuracy",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "accuracy_vs_never",
+                  "fields": [
+                    {
+                      "name": "x",
+                      "expression": "DATE_TRUNC(\"DAY\", `week_start`)"
+                    },
+                    {
+                      "name": "y",
+                      "expression": "MAX(`value`)"
+                    },
+                    {
+                      "name": "line",
+                      "expression": "`line`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "x",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Week"
+                },
+                "y": {
+                  "fieldName": "y",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Accuracy",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "line",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Accuracy of the model",
+                        "color": "#0072B2"
+                      },
+                      {
+                        "value": "Accuracy of a model that never alerts",
+                        "color": "#8C564B"
+                      }
+                    ]
+                  },
+                  "displayName": "Line"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Accuracy vs a model that never alerts (all sites)",
+                "showDescription": true,
+                "description": "Why accuracy misleads with rare events"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 17,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "class-table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "class_weekly",
+                  "fields": [
+                    {
+                      "name": "week_start",
+                      "expression": "`week_start`"
+                    },
+                    {
+                      "name": "site",
+                      "expression": "`site`"
+                    },
+                    {
+                      "name": "labelled_hours",
+                      "expression": "`labelled_hours`"
+                    },
+                    {
+                      "name": "tp",
+                      "expression": "`tp`"
+                    },
+                    {
+                      "name": "fn",
+                      "expression": "`fn`"
+                    },
+                    {
+                      "name": "fp",
+                      "expression": "`fp`"
+                    },
+                    {
+                      "name": "tn",
+                      "expression": "`tn`"
+                    },
+                    {
+                      "name": "recall_esc",
+                      "expression": "`recall_esc`"
+                    },
+                    {
+                      "name": "precision_esc",
+                      "expression": "`precision_esc`"
+                    },
+                    {
+                      "name": "f1_macro",
+                      "expression": "`f1_macro`"
+                    },
+                    {
+                      "name": "f1_weighted",
+                      "expression": "`f1_weighted`"
+                    },
+                    {
+                      "name": "accuracy",
+                      "expression": "`accuracy`"
+                    },
+                    {
+                      "name": "specificity",
+                      "expression": "`specificity`"
+                    },
+                    {
+                      "name": "false_positive_rate",
+                      "expression": "`false_positive_rate`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "week_start",
+                    "displayName": "Week"
+                  },
+                  {
+                    "fieldName": "site",
+                    "displayName": "Site"
+                  },
+                  {
+                    "fieldName": "labelled_hours",
+                    "displayName": "Hours (outcome known)"
+                  },
+                  {
+                    "fieldName": "tp",
+                    "displayName": "Escalated, flagged"
+                  },
+                  {
+                    "fieldName": "fn",
+                    "displayName": "Escalated, missed"
+                  },
+                  {
+                    "fieldName": "fp",
+                    "displayName": "Quiet, flagged"
+                  },
+                  {
+                    "fieldName": "tn",
+                    "displayName": "Quiet, not flagged"
+                  },
+                  {
+                    "fieldName": "recall_esc",
+                    "displayName": "Recall",
+                    "format": {
+                      "type": "number-percent",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 1
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "precision_esc",
+                    "displayName": "Precision",
+                    "format": {
+                      "type": "number-percent",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 1
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "f1_macro",
+                    "displayName": "Macro F1",
+                    "format": {
+                      "type": "number-percent",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 1
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "f1_weighted",
+                    "displayName": "Weighted F1",
+                    "format": {
+                      "type": "number-percent",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 1
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "accuracy",
+                    "displayName": "Accuracy",
+                    "format": {
+                      "type": "number-percent",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 1
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "specificity",
+                    "displayName": "Specificity",
+                    "format": {
+                      "type": "number-percent",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 1
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "false_positive_rate",
+                    "displayName": "False positive rate",
+                    "format": {
+                      "type": "number-percent",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 1
+                      }
+                    }
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Confusion matrix and metrics by week and site",
+                "showDescription": true,
+                "description": "Escalated / quiet = an escalation did / didn't follow within 6 hours; flagged = the hour was High"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 17,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ]
+    },
+    {
+      "name": "decisions",
+      "displayName": "Decisions",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "decisions-event",
+            "queries": [
+              {
+                "name": "decisions_event",
+                "query": {
+                  "datasetName": "decisions",
+                  "fields": [
+                    {
+                      "name": "event",
+                      "expression": "`event`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "event",
+                    "displayName": "Decision",
+                    "queryName": "decisions_event"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Decision"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "decisions-outcome",
+            "queries": [
+              {
+                "name": "decisions_outcome",
+                "query": {
+                  "datasetName": "decisions",
+                  "fields": [
+                    {
+                      "name": "outcome",
+                      "expression": "`outcome`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "retrains_outcome",
+                "query": {
+                  "datasetName": "retrains",
+                  "fields": [
+                    {
+                      "name": "outcome",
+                      "expression": "`outcome`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "outcome",
+                    "displayName": "Outcome",
+                    "queryName": "decisions_outcome"
+                  },
+                  {
+                    "fieldName": "outcome",
+                    "displayName": "Outcome",
+                    "queryName": "retrains_outcome"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Outcome"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "decisions-when",
+            "queries": [
+              {
+                "name": "decisions_event_ts",
+                "query": {
+                  "datasetName": "decisions",
+                  "fields": [
+                    {
+                      "name": "event_ts",
+                      "expression": "`event_ts`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "retrains_event_ts",
+                "query": {
+                  "datasetName": "retrains",
+                  "fields": [
+                    {
+                      "name": "event_ts",
+                      "expression": "`event_ts`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "event_ts",
+                    "displayName": "When",
+                    "queryName": "decisions_event_ts"
+                  },
+                  {
+                    "fieldName": "event_ts",
+                    "displayName": "When",
+                    "queryName": "retrains_event_ts"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "When"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "decisions",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "decisions",
+                  "fields": [
+                    {
+                      "name": "event_ts",
+                      "expression": "`event_ts`"
+                    },
+                    {
+                      "name": "event",
+                      "expression": "`event`"
+                    },
+                    {
+                      "name": "outcome",
+                      "expression": "`outcome`"
+                    },
+                    {
+                      "name": "version",
+                      "expression": "`version`"
+                    },
+                    {
+                      "name": "from_version",
+                      "expression": "`from_version`"
+                    },
+                    {
+                      "name": "actor",
+                      "expression": "`actor`"
+                    },
+                    {
+                      "name": "reason",
+                      "expression": "`reason`"
+                    },
+                    {
+                      "name": "episode",
+                      "expression": "`episode`"
+                    },
+                    {
+                      "name": "run_url",
+                      "expression": "`run_url`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "event_ts",
+                    "displayName": "When"
+                  },
+                  {
+                    "fieldName": "event",
+                    "displayName": "What"
+                  },
+                  {
+                    "fieldName": "outcome",
+                    "displayName": "Outcome"
+                  },
+                  {
+                    "fieldName": "version",
+                    "displayName": "Version"
+                  },
+                  {
+                    "fieldName": "from_version",
+                    "displayName": "From"
+                  },
+                  {
+                    "fieldName": "actor",
+                    "displayName": "Who"
+                  },
+                  {
+                    "fieldName": "reason",
+                    "displayName": "Why"
+                  },
+                  {
+                    "fieldName": "episode",
+                    "displayName": "Episode"
+                  },
+                  {
+                    "fieldName": "run_url",
+                    "displayName": "Run"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Every decision on the model, newest first",
+                "showDescription": true,
+                "description": "Retrain requests approved or rejected in GitHub (with the approver's comment), promotions and rollbacks"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 12,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "retrains",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "retrains",
+                  "fields": [
+                    {
+                      "name": "event_ts",
+                      "expression": "`event_ts`"
+                    },
+                    {
+                      "name": "version",
+                      "expression": "`version`"
+                    },
+                    {
+                      "name": "champion",
+                      "expression": "`champion`"
+                    },
+                    {
+                      "name": "outcome",
+                      "expression": "`outcome`"
+                    },
+                    {
+                      "name": "model_type",
+                      "expression": "`model_type`"
+                    },
+                    {
+                      "name": "escalations",
+                      "expression": "`escalations`"
+                    },
+                    {
+                      "name": "flagged",
+                      "expression": "`flagged`"
+                    },
+                    {
+                      "name": "champion_flagged",
+                      "expression": "`champion_flagged`"
+                    },
+                    {
+                      "name": "auroc",
+                      "expression": "`auroc`"
+                    },
+                    {
+                      "name": "champion_auroc",
+                      "expression": "`champion_auroc`"
+                    },
+                    {
+                      "name": "auprc",
+                      "expression": "`auprc`"
+                    },
+                    {
+                      "name": "champion_auprc",
+                      "expression": "`champion_auprc`"
+                    },
+                    {
+                      "name": "brier",
+                      "expression": "`brier`"
+                    },
+                    {
+                      "name": "champion_brier",
+                      "expression": "`champion_brier`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "event_ts",
+                    "displayName": "When"
+                  },
+                  {
+                    "fieldName": "version",
+                    "displayName": "New version"
+                  },
+                  {
+                    "fieldName": "champion",
+                    "displayName": "Against champion"
+                  },
+                  {
+                    "fieldName": "outcome",
+                    "displayName": "Outcome"
+                  },
+                  {
+                    "fieldName": "model_type",
+                    "displayName": "Model"
+                  },
+                  {
+                    "fieldName": "escalations",
+                    "displayName": "Escalations in test"
+                  },
+                  {
+                    "fieldName": "flagged",
+                    "displayName": "Flagged (new)",
+                    "format": {
+                      "type": "number-percent",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 0
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "champion_flagged",
+                    "displayName": "Flagged (champion)",
+                    "format": {
+                      "type": "number-percent",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 0
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "auroc",
+                    "displayName": "AUROC (new)",
+                    "format": {
+                      "type": "number-plain",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 3
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "champion_auroc",
+                    "displayName": "AUROC (champion)",
+                    "format": {
+                      "type": "number-plain",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 3
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "auprc",
+                    "displayName": "AUPRC (new)",
+                    "format": {
+                      "type": "number-plain",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 3
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "champion_auprc",
+                    "displayName": "AUPRC (champion)",
+                    "format": {
+                      "type": "number-plain",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 3
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "brier",
+                    "displayName": "Brier (new)",
+                    "format": {
+                      "type": "number-plain",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 3
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "champion_brier",
+                    "displayName": "Brier (champion)",
+                    "format": {
+                      "type": "number-plain",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 3
+                      }
+                    }
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Retrains against the champion, at the same alert budget",
+                "showDescription": true,
+                "description": "Test block after the training data; a new version must flag at least as many escalations and rank better, on paired resamples of stays"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 10,
+            "width": 12,
+            "height": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "cost",
+      "displayName": "Cost",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "cost-intro",
+            "multilineTextboxSpec": {
+              "lines": [
+                "List prices from Databricks billing, before any Azure discount; billing arrives a few hours late. This environment's jobs, pipeline and monitor run as its own service principal; the SQL warehouse is shared by every environment and its dashboards. The numbers at the top are not filtered."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "cost-7d",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "cost_summary",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`last_7_days`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Last 7 days (US$)",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Last 7 days (US$)",
+                "showDescription": true,
+                "description": "This environment"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "cost-month",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "cost_summary",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`this_month`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "This month (US$)",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "This month (US$)",
+                "showDescription": true,
+                "description": "This environment"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 1,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "cost-refresh",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "cost_summary",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`monitor_this_month`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Monitor refreshes this month (US$)",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Monitor refreshes this month (US$)",
+                "showDescription": true,
+                "description": "This environment"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 1,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "cost-shared",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "cost_summary",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "expression": "SUM(`shared_this_month`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "value",
+                  "displayName": "Shared SQL warehouse this month (US$)",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Shared SQL warehouse this month (US$)",
+                "showDescription": true,
+                "description": "Every environment"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 1,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "cost-part",
+            "queries": [
+              {
+                "name": "cost_part",
+                "query": {
+                  "datasetName": "cost",
+                  "fields": [
+                    {
+                      "name": "part",
+                      "expression": "`part`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "part",
+                    "displayName": "Part",
+                    "queryName": "cost_part"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Part"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "cost-days",
+            "queries": [
+              {
+                "name": "cost_day",
+                "query": {
+                  "datasetName": "cost",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "day",
+                    "displayName": "Days",
+                    "queryName": "cost_day"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Days"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 4,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "cost-by-part",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "cost",
+                  "fields": [
+                    {
+                      "name": "x",
+                      "expression": "DATE_TRUNC(\"DAY\", `day`)"
+                    },
+                    {
+                      "name": "y",
+                      "expression": "SUM(`usd`)"
+                    },
+                    {
+                      "name": "part",
+                      "expression": "`part`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "x",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Day"
+                },
+                "y": {
+                  "fieldName": "y",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "US dollars (list price)"
+                },
+                "color": {
+                  "fieldName": "part",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "ingestion",
+                        "color": "#0072B2"
+                      },
+                      {
+                        "value": "pipeline",
+                        "color": "#56B4E9"
+                      },
+                      {
+                        "value": "training",
+                        "color": "#009E73"
+                      },
+                      {
+                        "value": "scoring",
+                        "color": "#7B3FA0"
+                      },
+                      {
+                        "value": "monitoring",
+                        "color": "#CC79A7"
+                      },
+                      {
+                        "value": "monitor refresh",
+                        "color": "#8C564B"
+                      },
+                      {
+                        "value": "model-ops",
+                        "color": "#7F7F7F"
+                      }
+                    ]
+                  },
+                  "displayName": "Part"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Cost per day, by part",
+                "showDescription": true,
+                "description": "Ingestion, pipeline, training, scoring, drift check, model operations and monitor refreshes"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 12,
+            "height": 7
+          }
+        }
+      ]
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "canvasBackgroundColor": {
+        "light": "#F7F5F0",
+        "dark": "#14191F"
+      },
+      "widgetBackgroundColor": {
+        "light": "#FFFFFF",
+        "dark": "#1C232B"
+      },
+      "widgetBorderColor": {
+        "light": "#FFFFFF",
+        "dark": "#1C232B"
+      },
+      "fontColor": {
+        "light": "#1B2A3A",
+        "dark": "#E6EAEE"
+      },
+      "selectionColor": {
+        "light": "#0072B2",
+        "dark": "#56B4E9"
+      },
+      "visualizationColors": [
+        "#0072B2",
+        "#E69F00",
+        "#009E73",
+        "#CC79A7",
+        "#56B4E9",
+        "#D55E00",
+        "#F0E442"
+      ],
+      "widgetHeaderAlignment": "LEFT",
+      "widgetCornerRadius": 8
+    }
+  }
+}
