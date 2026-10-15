@@ -11,7 +11,7 @@
 resources:
   dashboards:
     model_drift:
-      display_name: HeavDen Model & Drift
+      display_name: HeavDen Model & Drift${var.env_label}
       file_path: ../src/dashboards/model_drift.lvdash.json
       warehouse_id: ${var.warehouse_id}
       dataset_catalog: ${var.model_catalog}
