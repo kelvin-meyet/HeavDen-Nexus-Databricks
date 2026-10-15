@@ -135,11 +135,20 @@ def test_a_retrain_uses_the_latest_days_and_must_beat_the_champion(store, table)
     assert int(client.get_model_version_by_alias(NAME, "challenger").version) == retrained.version
 
 
-def test_a_version_knows_the_rows_it_was_built_on(store, table):
+def test_a_version_knows_the_rows_it_was_built_on_without_known_faults(store, table):
     outcome = training.run_training(table, NAME, train.RecentSplit(2, 2))
     wrong_split = train.Split(train_days=1, valid_days=1)  # what job settings would rebuild
-    tr, va = batch_scoring.model_blocks(table, NAME, str(outcome.version), wrong_split)
+    version = str(outcome.version)
+    tr, va = batch_scoring.model_blocks(table, NAME, version, wrong_split, [])
     assert (len(tr), len(va)) == (outcome.rows["train"], outcome.rows["valid"])
+
+    # a fault diagnosed after the version was trained, in its first training day
+    first = tr["prediction_ts"].min()
+    fault = {"site_id": "all", "from": first, "to": first + pd.Timedelta(hours=5), "reason": "x"}
+    in_fault = tr["prediction_ts"].between(fault["from"], fault["to"]).sum()
+    tr2, va2 = batch_scoring.model_blocks(table, NAME, version, wrong_split, [fault])
+    assert len(tr2) == len(tr) - in_fault and in_fault > 0
+    assert len(va2) == len(va)
 
 
 def test_the_result_line_reports_the_gates(store, table):
@@ -173,6 +182,7 @@ def test_the_exclusions_file_lists_every_catalog_with_valid_entries():
     for catalog in ("heavden_dev", "heavden_staging", "heavden_prod"):
         for entry in training.load_exclusions(catalog):
             assert set(entry) == {"site_id", "from", "to", "reason"}
+            assert entry["site_id"] in {"SITE_A", "SITE_B", "SITE_C", "all"}
             assert pd.Timestamp(entry["from"]).tz is not None  # UTC, written with a Z
             assert pd.Timestamp(entry["from"]) < pd.Timestamp(entry["to"])
 

@@ -105,6 +105,56 @@ def test_a_dropped_field_and_quarantined_readings_are_flagged():
     assert rows.loc[("missing_rate_change", "etco2"), "level"] == "act"
 
 
+def test_the_readings_of_known_faults_are_left_out_of_the_reference(spark):
+    # 14 Oct, staging: v21's days held a firmware update's readings (etco2, no motion), so a
+    # normal day read as a dropped field and an added one
+    from conftest import DELTA
+
+    if not DELTA:
+        pytest.skip("Delta Lake runs on Linux (CI), not Windows")
+    from pyspark.sql import functions as F
+
+    from heavden.ml.batch_scoring import to_spark
+    from heavden.pipelines.silver import READING_FIELDS
+
+    day = pd.Timedelta(days=1)
+    times = pd.date_range(T0, periods=3 * 48, freq="30min")
+    readings = pd.DataFrame(
+        [{"device_id": d, "ts": t} for d in ("DEV-A-0001", "DEV-B-0001") for t in times]
+    )
+    for field, kind in READING_FIELDS.items():
+        if kind == "double":
+            readings[field] = 1.0
+    firmware_day = (readings["ts"] >= T0 + day) & (readings["ts"] < T0 + 2 * day)
+    readings["firmware"] = np.where(firmware_day, "3.2.0", "3.1.4")
+    readings.loc[firmware_day, "motion"] = np.nan
+    readings.loc[~firmware_day, "etco2"] = np.nan
+    spark.sql("CREATE DATABASE IF NOT EXISTS silver")
+    typed = [F.col(f).cast(t).alias(f) for f, t in READING_FIELDS.items()]
+    to_spark(spark, readings).select(typed).write.format("delta").mode("overwrite").saveAsTable(
+        "silver.device_readings"
+    )
+    quarantined = readings.iloc[[0, -2, -1]][["device_id", "ts"]]  # two in the window
+    to_spark(spark, quarantined).write.format("delta").mode("overwrite").saveAsTable(
+        "silver.vitals_quarantine"
+    )
+
+    def quality(exclusions):
+        window = (T0 + 2 * day, T0 + 3 * day)
+        return dc.reading_quality(spark, "spark_catalog", (T0, T0 + 2 * day), window, exclusions)
+
+    q = quality([])
+    assert (q.readings, q.quarantined) == (96, 2)
+    assert q.missing_in_training[["motion", "etco2"]].tolist() == [0.5, 0.5]
+    assert q.missing_now[["motion", "etco2"]].tolist() == [0.0, 1.0]
+    # a fault at Site B: the readings behind its hours go at every site (shares are judged
+    # over all sites); prediction hours from 01:00 are built from readings from 00:00
+    fault = {"site_id": "SITE_B", "from": T0 + day + pd.Timedelta(hours=1), "to": T0 + 2 * day}
+    q = quality([fault | {"reason": "firmware 3.2.0"}])
+    assert q.missing_in_training[["motion", "etco2"]].tolist() == [0.0, 1.0]
+    assert q.missing_now[["motion", "etco2"]].tolist() == [0.0, 1.0]  # the window is untouched
+
+
 class _SpO2Model:
     """Risk falls as SpO2 rises, like the real model's strongest factor."""
 

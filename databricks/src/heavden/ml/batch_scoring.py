@@ -41,7 +41,7 @@ import pandas as pd
 
 from heavden.analytics import gold
 from heavden.ml import scoring, train
-from heavden.ml.training import to_utc
+from heavden.ml.training import drop_excluded, load_exclusions, to_utc
 
 RECORDING_DELAY = pd.Timedelta(hours=6)
 BACKGROUND_ROWS = 2000  # training rows the explanations are measured against
@@ -115,9 +115,16 @@ def score_hours(
 
 
 def model_blocks(
-    training_set: pd.DataFrame, name: str, version: str, split: train.Split
+    training_set: pd.DataFrame,
+    name: str,
+    version: str,
+    split: train.Split,
+    exclusions: list[dict],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """The (training, validation) rows a registered version was built on.
+    """The (training, validation) rows a registered version was built on, without the hours of
+    known data faults (`exclusions`, from `training_exclusions.yaml`): the version's picture of
+    normal, which the drift check, the monitor's baseline and explanations compare with. A fault
+    diagnosed after the version was trained is left out too.
 
     Its training run recorded the blocks' first and last hours (a retrained model's blocks are
     counted back from when it was trained, so they can't be rebuilt from job settings). Versions
@@ -126,9 +133,11 @@ def model_blocks(
 
     blocks = tracking.data_blocks(name, version)
     if blocks is None:
-        return train.time_split(training_set, split)[:2]
-    ts = training_set["prediction_ts"]
-    return tuple(training_set[ts.between(*blocks[b])] for b in ("train", "valid"))
+        rows = train.time_split(training_set, split)[:2]
+    else:
+        ts = training_set["prediction_ts"]
+        rows = tuple(training_set[ts.between(*blocks[b])] for b in ("train", "valid"))
+    return tuple(drop_excluded(r, exclusions) for r in rows)
 
 
 def background_sample(train_rows: pd.DataFrame) -> pd.DataFrame:
@@ -221,6 +230,7 @@ def main(argv: list[str] | None = None) -> None:
     name = f"{c}.ml.deterioration_risk"
     model, threshold, version = load_registered_model(name, args.model_alias)
     split = train.Split(args.train_days, args.valid_days)
+    exclusions = load_exclusions(c)
     log_table = f"{c}.gold.risk_scores"
     log = None
     if not rescore and spark.catalog.tableExists(log_table):
@@ -236,7 +246,7 @@ def main(argv: list[str] | None = None) -> None:
         threshold,
         version,
         as_of,
-        background_sample(model_blocks(training_set, name, version, split)[0]),
+        background_sample(model_blocks(training_set, name, version, split, exclusions)[0]),
         log,
     )
     new_scores = tables.pop("new_scores")
@@ -255,9 +265,10 @@ def main(argv: list[str] | None = None) -> None:
     risk, alerts = tables["risk_scores"], tables["alerts_fact"]
 
     def reference_for(v: str) -> pd.DataFrame:
-        """Version `v`'s training and validation rows, scored by it, for the monitor's baseline."""
+        """Version `v`'s training and validation rows (known faults left out), scored by it, for
+        the monitor's baseline."""
         m, t = (model, threshold) if v == version else load_version(name, v)
-        rows = pd.concat(model_blocks(training_set, name, v, split))
+        rows = pd.concat(model_blocks(training_set, name, v, split, exclusions))
         return profiling.reference_rows(rows, m.predict_proba(rows)[:, 1], t, v)
 
     try:
