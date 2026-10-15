@@ -174,7 +174,8 @@ def test_the_check_scores_with_the_model_it_judges_and_reports_the_worst_first()
     metrics = dc.run_check(
         _SpO2Model(), features, log, training_set, baseline, {"auprc": 0.5, "brier": 0.01}, quality
     )
-    assert set(metrics["signal"]) == set(dc.THRESHOLDS)
+    # every signal but the monitor's cross-check, which the job adds once the monitor has answered
+    assert set(metrics["signal"]) == set(dc.THRESHOLDS) - {"monitor_difference"}
     js = metrics[metrics["signal"] == "prediction_js"].set_index("site_id")
     assert js.loc["SITE_A", "level"] == "stable"  # the log's 0.5s would be "act" everywhere
     assert js.loc["SITE_B", "level"] == "act"
@@ -241,3 +242,46 @@ def test_act_kinds_say_what_kind_of_drift_and_where():
     assert dc.act_kinds(metrics) == ["inputs@SITE_B", "performance", "predictions@SITE_B"]
     assert dc.act_kinds(metrics[metrics["level"] != "act"]) == []
     assert set(dc.KIND) == set(dc.THRESHOLDS)  # every signal has a kind
+
+
+def _monitor(signal: str, value: float, site: str = dc.ALL_SITES, version: str | None = None):
+    from heavden.monitoring import profiling
+
+    return profiling._shadow(f"lm_{signal}", value, 6000, site, version)
+
+
+def test_the_monitor_must_agree_with_the_check_where_both_measured():
+    # staging's protocol-settled day (5 Oct, v19), as both measured it (compared 15 Oct): the same
+    # alert load, and the prediction JS in natural-log units
+    ours = [
+        dc._row("alerts_per_nurse_shift", 1.8842, 6305),
+        dc._row("alerts_per_nurse_shift", 1.5361, 1992, site="SITE_B"),
+        dc._row("prediction_js", 0.0417, 6305),
+    ]
+    monitor = [
+        _monitor("alerts_per_nurse_shift", 1.8842),
+        _monitor("alerts_per_nurse_shift", 1.5361, "SITE_B"),
+        _monitor("prediction_js", 0.0347, version="19"),
+    ]
+    agreement = pd.DataFrame(dc.cross_check(pd.DataFrame(ours + monitor), "19"))
+    assert len(agreement) == 3 and (agreement["level"] == "stable").all()
+    assert dc.agreement_line(agreement) == "yes, 3 of 3 numbers"
+
+    # its copy of the prediction log lost some of Site B's alerts: a warning, never a request
+    monitor[1] = _monitor("alerts_per_nurse_shift", 1.2, "SITE_B")
+    metrics = pd.DataFrame(ours + monitor)
+    agreement = pd.DataFrame(dc.cross_check(metrics, "19"))
+    checked = pd.concat([metrics, agreement], ignore_index=True)
+    assert dc.summary(checked)["status"] == "warn" and dc.act_kinds(checked) == []
+    assert (
+        dc.agreement_line(agreement)
+        == "NO: alerts_per_nurse_shift at SITE_B 1.200 instead of 1.536"
+    )
+
+
+def test_prediction_drift_is_compared_only_on_a_day_the_judged_model_scored():
+    ours = [dc._row("prediction_js", 0.0417, 6305)]
+    scored_by_v19 = [_monitor("prediction_js", 0.02, version="19")]  # the check judges v21
+    assert dc.cross_check(pd.DataFrame(ours + scored_by_v19), "21") == []
+    assert dc.cross_check(pd.DataFrame(ours), "21") == []  # the monitor has no numbers
+    assert dc.agreement_line(pd.DataFrame()).startswith("nothing to compare")

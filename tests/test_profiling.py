@@ -360,7 +360,7 @@ def test_a_monitor_behind_the_data_stops_the_check():
         pf.monitor_signals(profile, drift, T0 + pd.Timedelta(days=7))
 
 
-def test_while_the_monitor_does_not_decide_its_failure_is_reported_not_raised(monkeypatch):
+def test_the_monitor_does_not_decide_so_its_failure_is_reported_not_raised(monkeypatch):
     def broken(spec):
         raise PermissionError("the service principal can't manage the table")
 
@@ -370,10 +370,6 @@ def test_while_the_monitor_does_not_decide_its_failure_is_reported_not_raised(mo
     assert [(r["signal"], r["feature"], r["level"]) for r in rows] == [
         ("lm_status", status, pf.SHADOW)
     ]
-
-    monkeypatch.setattr(pf, "MONITOR_DECIDES", True)  # stage 2: a failure stops the check
-    with pytest.raises(PermissionError):
-        pf.shadow_rows(None, SPEC, T0 + pd.Timedelta(days=7))
 
 
 def test_a_working_monitor_leaves_its_status_and_numbers(monkeypatch):
@@ -392,7 +388,7 @@ def test_shadow_rows_never_change_the_status_or_the_kinds_of_drift():
 
     assert dc.summary(metrics) == dc.summary(pd.DataFrame(judged))
     assert dc.act_kinds(metrics) == []
-    assert dc.shadow_line(metrics) == "Monitor (shadow, not judged): alerts_per_nurse_shift 9.000"
+    assert dc.shadow_line(metrics) == "Monitor's numbers (not judged): alerts_per_nurse_shift 9.000"
 
 
 # --- On Delta Lake (Linux / CI): the score job's writes and the reader of the monitor's tables
