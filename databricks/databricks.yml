@@ -68,6 +68,10 @@ variables:
   warehouse_id:
     description: Shared SQL warehouse the dashboards run on (terraform output sql_warehouse_id).
     default: 0a14d0d391ce8af6
+  model_catalog:
+    description: Catalog whose drift checks, monitor and decisions the Model & Drift dashboard
+      shows. The target's own, except dev, which has no model and reads staging's.
+    default: ""
 
 targets:
   # Personal development: resources are prefixed with "[dev <user>]" and schedules are paused.
@@ -76,6 +80,7 @@ targets:
     mode: development
     variables:
       catalog: heavden_dev
+      model_catalog: heavden_staging # dev has no model; preview the dashboard on staging's
       sql_schema: dev
       # 2 days of data: 1 day train, half a day validation, the rest test (a smoke test)
       train_days: 1
@@ -92,6 +97,7 @@ targets:
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
     variables:
       catalog: heavden_staging
+      model_catalog: heavden_staging
       sql_schema: staging
       # 2 days of data: 1 day train, half a day validation, the rest test (a smoke test)
       train_days: 1
@@ -106,4 +112,5 @@ targets:
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
     variables:
       catalog: heavden_prod
+      model_catalog: heavden_prod
       sql_schema: prod
