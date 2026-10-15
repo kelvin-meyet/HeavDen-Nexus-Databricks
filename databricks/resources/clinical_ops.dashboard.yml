@@ -7,7 +7,7 @@
 resources:
   dashboards:
     clinical_ops:
-      display_name: HeavDen Clinical Ops
+      display_name: HeavDen Clinical Ops${var.env_label}
       file_path: ../src/dashboards/clinical_ops.lvdash.json
       warehouse_id: ${var.warehouse_id}
       dataset_catalog: ${var.catalog}

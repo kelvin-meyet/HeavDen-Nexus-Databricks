@@ -91,3 +91,17 @@ def test_model_and_drift_names_sites_as_the_web_app_does_and_colours_the_limits(
         assert others and not {WARN, ACT} & set(others.values()), name  # no line looks like one
         if "All sites" in colours:
             assert colours["All sites"] == "#0072B2", name  # the same colour on every page
+
+
+def test_staging_and_prod_dashboards_carry_their_environment_in_the_name():
+    import yaml
+
+    bundle = Path(__file__).parents[1] / "databricks"
+    for path in (bundle / "resources").glob("*.dashboard.yml"):
+        for dashboard in yaml.safe_load(path.read_text(encoding="utf-8"))["resources"][
+            "dashboards"
+        ].values():
+            assert dashboard["display_name"].endswith("${var.env_label}"), path.name
+    targets = yaml.safe_load((bundle / "databricks.yml").read_text(encoding="utf-8"))["targets"]
+    labels = {t: targets[t]["variables"].get("env_label", "") for t in ("dev", "staging", "prod")}
+    assert labels == {"dev": "", "staging": " (staging)", "prod": " (prod)"}  # dev: "[dev <user>]"
