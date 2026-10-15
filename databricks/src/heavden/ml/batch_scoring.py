@@ -275,9 +275,7 @@ def main(argv: list[str] | None = None) -> None:
         monitored = profiling.update_tables(
             spark, c, risk, features, training_set, alerts, reference_for, rescore=log is None
         )
-    except Exception as error:  # the monitor doesn't decide yet: scoring carries on without it
-        if profiling.MONITOR_DECIDES:
-            raise
+    except Exception as error:  # the monitor doesn't decide: scoring carries on without it
         monitored = (
             f"Monitoring tables NOT updated ({type(error).__name__}: {error}); "
             "the drift check will report the monitor as behind"

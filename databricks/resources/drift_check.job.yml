@@ -4,7 +4,8 @@
 # src/heavden/monitoring/drift_check.py, run through src/jobs/check_drift.py). First it creates
 # the Lakehouse Monitoring monitor on monitoring.inference_log if it's missing (as this job's
 # identity, so the environment's service principal owns it), refreshes it and waits (~15 min;
-# Plan.md §10.5), then records the monitor's numbers next to its own as shadow rows. It reports;
+# Plan.md §10.5), then records the monitor's numbers next to its own as shadow rows and checks
+# that the two agree where they measured the same thing (the monitor never decides). It reports;
 # the workflow that runs it opens a retrain request on "act". No schedule: staging checks after
 # every merge (CI) and each staging-run, prod on demand (prod-run workflow).
 resources:

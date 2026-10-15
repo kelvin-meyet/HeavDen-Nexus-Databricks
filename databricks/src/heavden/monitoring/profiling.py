@@ -10,11 +10,13 @@ scored it.
 * **Written by the score job.** New hours are appended and labels filled in as they become
   known (one MERGE; change data feed is on, so a refresh recomputes only the days that
   changed). The first run backfills the whole log, one model version at a time.
-* **Refreshed by the drift check**, which then reads the monitor's numbers. Stage 1 records
-  them next to its own as shadow rows that never change a decision, and a monitor that fails
-  or lags is reported, not raised: it must not stop the scoring or the check that guard the
-  ward (`MONITOR_DECIDES`). Stage 2 switches the performance, alert-load and prediction
-  signals once their limits are measured, and from then on a failure stops the check.
+* **Refreshed by the drift check**, which then reads the monitor's numbers and records them
+  next to its own as shadow rows that never change a decision. **The monitor keeps the history
+  and cross-checks the check; it never decides** (measured 15 Oct on staging's five episodes:
+  its alert load equals the check's, its all-sites prediction JS is the check's in natural-log
+  units, and its daily or weekly performance is too noisy or too late to judge on). So a
+  monitor that fails or lags is reported, never raised: it must not stop the scoring or the
+  check that guard the ward.
 * **Text prediction and label** ("1"/"0"), so the monitor counts their values.
 * **The custom metrics are computed on `risk`** (Brier, AUPRC, AUROC, alerts per nurse per
   shift), so nothing depends on the monitor's probability column, which the newer "data
@@ -394,13 +396,7 @@ def refresh_and_wait(
     return done
 
 
-# --- Reading the monitor's numbers (stage 1: shadow rows) --------------------------------------
-
-
-# Stage 1 (Plan.md §10.5): the monitor's numbers are recorded, not judged, so its failures are
-# reported and the score job and the drift check carry on. Stage 2, when the numbers decide,
-# sets this to True in the same change as their limits: then a failure stops the check.
-MONITOR_DECIDES = False
+# --- Reading the monitor's numbers (shadow rows) ---------------------------------------------
 
 
 class MonitorBehind(RuntimeError):
@@ -511,14 +507,12 @@ def shadow_rows(spark, spec: MonitorSpec, end: pd.Timestamp) -> tuple[list[dict]
     """Refresh the monitor and read its numbers for the window ending at `end`.
 
     Returns (rows, status). The first row, `lm_status`, records how the monitor did ("ok: ..."
-    or "failed: ..." in its `feature`), so every check leaves a trace of it. While the monitor
-    doesn't decide (`MONITOR_DECIDES`), a failure is reported here instead of raised."""
+    or "failed: ..." in its `feature`), so every check leaves a trace of it. The monitor doesn't
+    decide, so a failure is reported here instead of raised."""
     try:
         status = "ok: " + refresh_monitor(spec)
         rows = monitor_signals(*read_monitor_tables(spark, spec), end)
     except Exception as error:
-        if MONITOR_DECIDES:
-            raise
         status, rows = f"failed: {type(error).__name__}: {error}"[:500], []  # rides in the result
     row = _shadow("lm_status", float("nan"), 0, ALL_SITES) | {"feature": status}
     return [row, *rows], status

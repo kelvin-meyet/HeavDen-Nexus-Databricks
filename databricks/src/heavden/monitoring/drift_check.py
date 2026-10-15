@@ -17,10 +17,12 @@ The champion's own data leaves out the known data faults in `training_exclusions
 those diagnosed after it was trained: compared with a fault, a normal day would read as drift
 that no retrain can clear.
 
-It also refreshes the monitor (Lakehouse Monitoring, `heavden.monitoring.profiling`) and records
-the monitor's numbers next to its own as shadow rows (level "shadow"): stage 1 of Plan.md §10.5,
-they never count in the status, and a monitor that fails or lags is reported in the result
-(`monitor`) without stopping the check.
+It also refreshes the monitor (Lakehouse Monitoring, `heavden.monitoring.profiling`), which keeps
+the history, and records the monitor's numbers next to its own as shadow rows (level "shadow")
+that never count in the status. Where both measured the same thing, the two must agree
+(`cross_check`): a disagreement is a warning that the monitor's copy of the prediction log went
+wrong. A monitor that fails or lags is reported in the result (`monitor`) without stopping the
+check.
 
 The check measures and reports; it doesn't decide. A sensor fault (inputs drift at one site)
 needs the sensors fixed, not a new model; a change in outcomes (performance drops while the
@@ -77,6 +79,8 @@ THRESHOLDS = {
     "brier_rise": Threshold(0.10, 0.20),  # relative to validation
     "quarantine_rate": Threshold(0.02, 0.05),
     "missing_rate_change": Threshold(0.02, 0.05),  # absolute change in a field's missing share
+    # relative; never act: a disagreement means the monitor's copy went wrong, not the ward
+    "monitor_difference": Threshold(0.01, np.inf),
 }
 
 
@@ -275,6 +279,7 @@ KIND = {
     "brier_rise": "performance",
     "quarantine_rate": "data-quality",
     "missing_rate_change": "data-quality",
+    "monitor_difference": "monitor",  # never act (a warn): kept so every signal has a kind
 }
 
 
@@ -303,7 +308,61 @@ def shadow_line(metrics: pd.DataFrame) -> str:
         + f" {r.value:.3f}"
         for r in rows.itertuples()
     ]
-    return "Monitor (shadow, not judged): " + (", ".join(parts) if parts else "no numbers")
+    return "Monitor's numbers (not judged): " + (", ".join(parts) if parts else "none")
+
+
+# The monitor's prediction JS uses natural logs, the check's base 2 (`drift_metrics.js_distance`):
+# the same distance is sqrt(ln 2) times smaller. Measured 15 Oct on staging's five episodes:
+# all-sites 0.8326 x the check's on every day, and its alert load equal to the check's.
+NATURAL_LOG = float(np.sqrt(np.log(2)))
+
+
+def cross_check(metrics: pd.DataFrame, version: str) -> list[dict]:
+    """Does the monitor agree with the check where both measured the same thing? One
+    `monitor_difference` row per comparison: how far the monitor's number is from what it should
+    be, relative (a warn above 1%, never act). Compared where both have a number: the alert load
+    at every site (both read the prediction log), and the all-sites prediction JS on a day
+    scored by the version the check judges (the monitor judges each hour under the model that
+    scored it; the check scores the day itself, with the model in use)."""
+
+    def number(signal: str, site: str, feature: str | None = None) -> tuple[float, int]:
+        rows = metrics[(metrics["signal"] == signal) & (metrics["site_id"] == site)]
+        if feature is not None:
+            rows = rows[rows["feature"] == feature]
+        return (float(rows["value"].iloc[0]), int(rows["n"].iloc[0])) if len(rows) else (np.nan, 0)
+
+    alert_sites = metrics.loc[metrics["signal"] == "alerts_per_nurse_shift", "site_id"]
+    pairs = [("alerts_per_nurse_shift", site, None, 1.0) for site in alert_sites]
+    pairs.append(("prediction_js", ALL_SITES, f"v{version}", NATURAL_LOG))
+    rows = []
+    for signal, site, monitor_feature, scale in pairs:
+        (ours, n), (monitor, _) = (
+            number(signal, site),
+            number(f"lm_{signal}", site, monitor_feature),
+        )
+        if np.isnan(ours) or np.isnan(monitor):
+            continue
+        expected = ours * scale
+        difference = abs(monitor - expected) / max(abs(expected), 1e-9)
+        rows.append(
+            _row("monitor_difference", difference, n, signal, site, expected, observed=monitor)
+        )
+    return rows
+
+
+def agreement_line(agreement: pd.DataFrame) -> str:
+    """What the cross-check found, e.g. "yes, 5 of 5 numbers" or
+    "NO: alerts_per_nurse_shift at SITE_A 2.300 instead of 2.100"."""
+    if agreement.empty:
+        return "nothing to compare (the monitor has no numbers for this window)"
+    off = agreement[agreement["level"] == "warn"]
+    if off.empty:
+        return f"yes, {len(agreement)} of {len(agreement)} numbers"
+    return "NO: " + "; ".join(
+        f"{r.feature}{'' if r.site_id == ALL_SITES else f' at {r.site_id}'}"
+        f" {r.observed:.3f} instead of {r.reference:.3f}"
+        for r in off.itertuples()
+    )
 
 
 RESULT_MARKER = "DRIFT_CHECK_RESULT"
@@ -446,7 +505,7 @@ def main(argv: list[str] | None = None) -> None:
     end = features["prediction_ts"].max() + hour
     start = end - WINDOW
     shadow, monitor_status = profiling.shadow_rows(spark, monitor, end)
-    print(f"Monitor (stage 1, recorded not judged): {monitor_status}")
+    print(f"Monitor: {monitor_status}")
     quality = reading_quality(
         spark,
         c,
@@ -457,7 +516,11 @@ def main(argv: list[str] | None = None) -> None:
     reference = validation_metrics(name, version)
     metrics = run_check(model, features, log, training_set, baseline, reference, quality)
     metrics = pd.concat([metrics, pd.DataFrame(shadow)], ignore_index=True)
-    result = summary(metrics)  # shadow rows are neither warn nor act
+    agreement = pd.DataFrame(cross_check(metrics, version))
+    metrics = pd.concat([metrics, agreement], ignore_index=True)
+    result = summary(metrics)  # shadow rows are neither warn nor act; a disagreement warns
+    agrees = agreement_line(agreement)
+    print(f"Monitor agrees with the check: {agrees}")
 
     check = {
         "check_id": str(uuid.uuid4()),
@@ -483,5 +546,5 @@ def main(argv: list[str] | None = None) -> None:
     for line in result["breaches"]:
         print(" ", line)
     print(shadow_line(metrics))
-    extra = {"act_kinds": act_kinds(metrics), "monitor": monitor_status}
+    extra = {"act_kinds": act_kinds(metrics), "monitor": monitor_status, "monitor_agrees": agrees}
     print(result_line(check | {"catalog": c}, result | extra))

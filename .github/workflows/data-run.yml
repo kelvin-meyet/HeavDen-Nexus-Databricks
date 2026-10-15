@@ -160,7 +160,7 @@ jobs:
           {
             echo "## Drift check ($TARGET): $(jq -r '.status | ascii_upcase' <<<"$result") ($(jq -r .n_act <<<"$result") act, $(jq -r .n_warn <<<"$result") warn)"
             jq -r '"Day judged: \(.window_start[0:16]) to \(.window_end[0:16]) UTC, model version \(.model_version)."' <<<"$result"
-            jq -r '"Monitor (stage 1, recorded not judged): \(.monitor // "not reported")"' <<<"$result"
+            jq -r '"Monitor: \(.monitor // "not reported"). Agrees with the check: \(.monitor_agrees // "not reported")."' <<<"$result"
             echo
             jq -r '.breaches[] | "- \(.)"' <<<"$result"
           } >> "$GITHUB_STEP_SUMMARY"
