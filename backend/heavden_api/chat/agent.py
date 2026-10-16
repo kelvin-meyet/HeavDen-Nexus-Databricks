@@ -18,7 +18,7 @@ swap in the Databricks agent endpoint. Only text turns are kept between requests
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -48,6 +48,22 @@ class LLM(Protocol):
     def complete(self, messages: list[dict], tools: list[dict]) -> LLMReply: ...
 
 
+def text_of(content) -> str:
+    """The answer text in a message, or in one streamed piece of it. Most models send a string.
+    Reasoning models served by Databricks (GPT-OSS, Qwen) send a list of parts instead: their
+    private reasoning (`{"type": "reasoning", ...}`) and then the answer (`{"type": "text",
+    "text": ...}`), whole or piece by piece. Only the text parts are kept, so the reasoning never
+    reaches the reader."""
+    if content is None or isinstance(content, str):
+        return content or ""
+    texts = []
+    for part in content:
+        get = part.get if isinstance(part, dict) else lambda key, p=part: getattr(p, key, None)
+        if get("type") == "text":
+            texts.append(get("text") or "")
+    return "".join(texts)
+
+
 def stream_reply(llm: LLM, messages: list[dict], tools: list[dict]) -> Iterator[str | LLMReply]:
     """Text deltas, then the full reply. Falls back to one chunk if the LLM can't stream."""
     if hasattr(llm, "stream"):
@@ -61,30 +77,43 @@ def stream_reply(llm: LLM, messages: list[dict], tools: list[dict]) -> Iterator[
 
 class OpenAILLM:
     """Chat Completions with function calling, streamed: OpenAI, or any service that speaks
-    the same API at `base_url` (Azure OpenAI in Foundry, where `model` is a deployment name)."""
+    the same API at `base_url`: Azure OpenAI in Foundry (`model` = your deployment), or a
+    Databricks serving endpoint (`model` = the endpoint's name). `api_key` may be a function
+    returning a fresh token for each request (Databricks tokens expire); `token_limit` is the
+    name the service gives the answer-length limit (`heavden_api.chat.models.TOKEN_LIMIT`)."""
 
-    # "none": Chat Completions only allows function tools with reasoning off for gpt-5.x models;
-    # it is also the fastest and cheapest setting
+    # reasoning_effort: how long the model thinks before answering; each model's setting is in
+    # chat/models.yaml. Tool calls work with any setting (checked 16 Oct 2026); "none" is the
+    # fastest and cheapest where a model offers it
     def __init__(
         self,
-        api_key: str,
+        api_key: str | Callable[[], str],
         model: str,
         reasoning_effort: str | None = "none",
         base_url: str | None = None,
+        token_limit: str = "max_completion_tokens",
     ):
         from openai import OpenAI
 
-        self.client = OpenAI(api_key=api_key, base_url=base_url, timeout=60, max_retries=2)
+        self._token = api_key if callable(api_key) else None
+        key = "(fetched before each request)" if self._token else api_key
+        self.client = OpenAI(api_key=key, base_url=base_url, timeout=60, max_retries=2)
         self.model = model
         self.reasoning_effort = reasoning_effort
+        self.token_limit = token_limit
 
     def _options(self) -> dict:
-        options: dict = {"max_completion_tokens": MAX_ANSWER_TOKENS}
+        options: dict = {self.token_limit: MAX_ANSWER_TOKENS}
         if self.reasoning_effort:
             options["reasoning_effort"] = self.reasoning_effort
         return options
 
+    def _refresh(self) -> None:
+        if self._token:
+            self.client.api_key = self._token()
+
     def complete(self, messages: list[dict], tools: list[dict]) -> LLMReply:
+        self._refresh()
         response = self.client.chat.completions.create(
             model=self.model, messages=messages, tools=tools, **self._options()
         )
@@ -92,9 +121,10 @@ class OpenAILLM:
         calls = [
             ToolCall(c.id, c.function.name, c.function.arguments) for c in message.tool_calls or []
         ]
-        return LLMReply(message.content, calls)
+        return LLMReply(text_of(message.content) or None, calls)
 
     def stream(self, messages: list[dict], tools: list[dict]) -> Iterator[str | LLMReply]:
+        self._refresh()
         chunks = self.client.chat.completions.create(
             model=self.model, messages=messages, tools=tools, stream=True, **self._options()
         )
@@ -110,9 +140,10 @@ def accumulate_stream(chunks) -> Iterator[str | LLMReply]:
         if not chunk.choices:
             continue
         delta = chunk.choices[0].delta
-        if getattr(delta, "content", None):
-            text.append(delta.content)
-            yield delta.content
+        piece = text_of(getattr(delta, "content", None))
+        if piece:
+            text.append(piece)
+            yield piece
         for part in getattr(delta, "tool_calls", None) or []:
             call = calls.setdefault(part.index, {"id": "", "name": "", "arguments": ""})
             if part.id:

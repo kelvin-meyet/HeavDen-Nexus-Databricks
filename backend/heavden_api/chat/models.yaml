@@ -1,0 +1,25 @@
+# The models the assistant may run on, and how to call each one. The switch is two settings:
+# LLM_PROVIDER and LLM_MODEL in the app (.env locally, Render's environment online), and the
+# Databricks agent's own LLM_ENDPOINT setting. A model not listed here is refused: add it, and
+# run the quality test on it (heavden/agent/evalsets/assistant.yaml) before visitors get it.
+#
+#   provider          databricks: a serving endpoint in the workspace (hosted by Databricks,
+#                     or an AI Gateway endpoint in front of your own keys), called with a
+#                     Databricks identity, no keys. openai / azure: your own keys.
+#   reasoning_effort  sent with each request when given (left out otherwise).
+#
+# The name is the serving endpoint (databricks), the model (openai) or YOUR deployment (azure).
+
+models:
+  # Hosted by Databricks: tool calling tested 16 Oct 2026
+  databricks-gpt-oss-120b: {provider: databricks, reasoning_effort: low}
+  databricks-qwen35-122b-a10b: {provider: databricks}
+  databricks-llama-4-maverick: {provider: databricks}
+  # Hosted by Databricks: refused for this account on 16 Oct 2026 (Anthropic models need the
+  # account upgraded or approved); listed so the switch is ready when they open
+  databricks-claude-sonnet-5-5: {provider: databricks}
+  databricks-claude-haiku-5-5: {provider: databricks}
+  # Your own keys
+  gpt-5.5: {provider: openai, reasoning_effort: none}
+  # 16 Oct 2026: with none it picked the right tool in 1.6 s; unset, the wrong one in 3.7 s
+  gpt-5-mini: {provider: azure, reasoning_effort: none}

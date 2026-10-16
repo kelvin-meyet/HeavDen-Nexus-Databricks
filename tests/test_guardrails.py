@@ -4,7 +4,13 @@ from types import SimpleNamespace
 import pytest
 from test_chat import LLMReply, ScriptedLLM, _client, call
 
-from heavden_api.chat.agent import ToolCall, accumulate_stream, agent_events, system_prompt
+from heavden_api.chat.agent import (
+    ToolCall,
+    accumulate_stream,
+    agent_events,
+    system_prompt,
+    text_of,
+)
 from heavden_api.chat.guardrails import REFUSALS, LeakDetector, screen_question
 
 pytest.importorskip("faiss")
@@ -176,6 +182,35 @@ def test_openai_stream_chunks_are_reassembled():
     ]
     *texts, reply = list(accumulate_stream([chunk("Hel"), chunk("lo")]))
     assert texts == ["Hel", "lo"] and reply.content == "Hello" and reply.tool_calls == []
+
+
+def test_reasoning_models_answer_text_is_kept_and_their_reasoning_dropped():
+    """GPT-OSS and Qwen on Databricks send content as parts: reasoning, then text (the shapes
+    captured from databricks-gpt-oss-120b on 16 Oct 2026)."""
+
+    def reasoning(text):
+        return [{"type": "reasoning", "summary": [{"type": "summary_text", "text": text}]}]
+
+    def chunk(content):
+        delta = SimpleNamespace(content=content, tool_calls=None)
+        return SimpleNamespace(choices=[SimpleNamespace(delta=delta)])
+
+    whole = reasoning("The user asks for a definition.") + [
+        {"type": "text", "text": "NEWS2 is an early warning score."}
+    ]
+    assert text_of(whole) == "NEWS2 is an early warning score."
+    assert text_of("plain") == "plain" and text_of(None) == ""
+    parts = SimpleNamespace(type="text", text="as objects")  # a client that parses the parts
+    assert text_of([SimpleNamespace(type="reasoning"), parts]) == "as objects"
+
+    stream = [chunk(""), chunk(""), chunk(reasoning("The")), chunk(reasoning(" user asks"))]
+    stream += [
+        chunk([{"type": "text", "text": "NEWS2 is"}]),
+        chunk([{"type": "text", "text": " a score."}]),
+    ]
+    *texts, reply = list(accumulate_stream(stream))
+    assert texts == ["NEWS2 is", " a score."] and reply.content == "NEWS2 is a score."
+    assert "user asks" not in reply.content  # the reasoning never reaches the reader
 
 
 # --- The endpoints -----------------------------------------------------------------------------

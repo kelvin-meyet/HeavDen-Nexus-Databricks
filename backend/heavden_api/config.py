@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from heavden_api.chat.models import PROVIDERS as LLM_PROVIDERS
+
 ROOT = Path(__file__).resolve().parents[2]
-LLM_PROVIDERS = ("openai", "azure")
 
 
 def load_dotenv(path: Path = ROOT / ".env") -> None:
@@ -37,9 +39,18 @@ def azure_base_url(endpoint: str) -> str:
     return f"https://{host}/openai/v1/"
 
 
+def databricks_token() -> str:
+    """A current token for the Databricks identity in the environment: a service principal
+    (DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET) on Render, a CLI profile
+    (DATABRICKS_CONFIG_PROFILE) locally. The SDK refreshes it before it expires."""
+    from databricks.sdk import WorkspaceClient
+
+    return WorkspaceClient().config.authenticate()["Authorization"].removeprefix("Bearer ")
+
+
 @dataclass(frozen=True)
 class LLMConnection:
-    api_key: str = field(repr=False)
+    api_key: str | Callable[[], str] = field(repr=False)
     base_url: str | None  # None: the OpenAI API
 
 
@@ -64,8 +75,9 @@ class Settings:
     openai_api_key: str | None = field(
         default_factory=lambda: os.environ.get("OPENAI_API_KEY") or None, repr=False
     )
-    # which service answers: "openai" (OPENAI_API_KEY) or "azure" (Azure OpenAI in Foundry:
-    # AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_API_KEY). Both speak the same API.
+    # which service answers: "openai" (OPENAI_API_KEY), "azure" (Azure OpenAI in Foundry:
+    # AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_API_KEY) or "databricks" (a serving endpoint in the
+    # workspace at DATABRICKS_HOST, called with a Databricks identity). All speak the same API.
     llm_provider: str = field(
         default_factory=lambda: os.environ.get("LLM_PROVIDER", "openai").strip().lower()
     )
@@ -78,13 +90,16 @@ class Settings:
         ),
         repr=False,
     )
-    # OpenAI: the model name. Azure: the name of YOUR deployment of a model.
+    databricks_host: str | None = field(
+        default_factory=lambda: os.environ.get("DATABRICKS_HOST") or None
+    )
+    # OpenAI: the model name. Azure: the name of YOUR deployment. Databricks: the serving
+    # endpoint. It must be listed in chat/models.yaml, with its settings.
     # gpt-5.5 answered judgement questions reliably in testing; gpt-5.4-mini is cheaper but weaker
     llm_model: str = field(default_factory=lambda: os.environ.get("LLM_MODEL", "gpt-5.5"))
-    # "none" is what gpt-5.x needs for function tools in Chat Completions; other models may
-    # want another value, or none at all (set it empty to leave the option out)
+    # overrides the model's reasoning_effort from models.yaml when set (empty: leave it out)
     llm_reasoning_effort: str | None = field(
-        default_factory=lambda: os.environ.get("LLM_REASONING_EFFORT", "none").strip() or None
+        default_factory=lambda: os.environ.get("LLM_REASONING_EFFORT")
     )
     chat_requests_per_hour: int = field(
         default_factory=lambda: int(os.environ.get("CHAT_REQUESTS_PER_HOUR", "30"))
@@ -112,6 +127,12 @@ class Settings:
             )
         if self.llm_provider == "openai":
             return LLMConnection(self.openai_api_key, None) if self.openai_api_key else None
+        if self.llm_provider == "databricks":
+            if not self.databricks_host:
+                raise ValueError("LLM_PROVIDER=databricks needs DATABRICKS_HOST")
+            host = self.databricks_host.rstrip("/")
+            host = host if "://" in host else f"https://{host}"
+            return LLMConnection(databricks_token, f"{host}/serving-endpoints")
         if not self.azure_openai_key:
             return None
         if not self.azure_openai_endpoint:
