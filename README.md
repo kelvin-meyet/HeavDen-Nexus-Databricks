@@ -48,16 +48,16 @@ The project is built in phases. **Phases 0–2 are complete**: the offline found
 
 ## Results on Databricks (production model, synthetic test period)
 
-The production model (`heavden_prod.ml.deterioration_risk` version 1, logistic regression, `@champion`) was trained on 9 days, chosen on the next 2, and scored **once** on the last days, which it never saw. Both scores get the same alert budget: **at most about 2 alerts per nurse per 12-hour shift**.
+The production model is `heavden_prod.ml.deterioration_risk` **version 3** (`@champion`, LightGBM). It replaced version 1 (logistic regression) after the hospital changed its escalation protocol on 6 October: the drift check saw the old model's accuracy fall, a retrain was approved, and version 3 passed its gates against version 1 before a second approval promoted it. It trained on everything up to 9 October (the faulty Site B sensor hours left out), was chosen on 9-11 October, and was scored **once** on 11-13 October, which it never saw. Every score gets the same alert budget: **at most about 2 alerts per nurse per 12-hour shift**.
 
-| Test block: 1–3 Oct, 26 escalations | Model | NEWS2 |
-|---|---|---|
-| Escalations flagged in the 6 hours before | **23 of 26 (88%)** | 19 of 26 (73%) |
-| Alerts followed by an escalation | 3.0% | 3.2% |
-| Alerts per nurse per shift | 2.1 | 1.8 |
-| AUPRC (hourly ranking) | **0.38** | 0.19 |
+| Test block: 11-13 Oct, 28 escalations | Version 3 | Version 1 | NEWS2 |
+|---|---|---|---|
+| Escalations flagged in the 6 hours before | **22 of 28 (79%)** | 20 of 28 (71%) | 17 of 28 (61%) |
+| Alerts per nurse per shift | 2.15 | 2.10 | 1.79 |
+| AUROC (hourly ranking) | **0.76** | 0.70 | 0.74 |
+| AUPRC (hourly ranking) | 0.21 | 0.22 | 0.15 |
 
-Within the same alert budget, the model warns about **4 more of the 26** deteriorating patients than NEWS2, without giving nurses more alarms: about 1 in 33 alerts is followed by an escalation for both. The validation figures used to pick the model (79% for both) aren't reported as results, because picking on them makes them flattering. Every number is logged in MLflow with the run, and the chosen version's description in Unity Catalog repeats it.
+Within the same alert budget, version 3 warns about **2 more of the 28** deteriorating patients than version 1 and **5 more** than NEWS2; on 300 resamples of patient stays it flagged at least as many as version 1 in 89% and ranked better (AUROC) in 97%. Its top-of-the-list precision (AUPRC) is the same as version 1's: the gain is further down the ranking, among patients the new protocol escalates earlier. Before the protocol change, version 1 flagged 23 of 26 escalations against NEWS2's 19 on its own test block (1-3 October). The validation figures used to pick a model aren't reported as results, because picking on them makes them flattering. Every number is logged in MLflow with the run; the model card (`docs/corpus/model-card.md`) is reissued for each promoted version, and a production release is refused while it describes another one.
 
 ## Rehearsal results (Phase 0, offline)
 

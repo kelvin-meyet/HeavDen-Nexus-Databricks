@@ -1,7 +1,7 @@
 ---
 doc_id: HD-ML-002
 title: "Data Card: HeavDen synthetic inpatient data"
-version: "1.0"
+version: "1.1"
 status: current
 effective_date: 2026-09-20
 owner: HeavDen ML Platform Team
@@ -59,7 +59,12 @@ A patient-hour at time `t` is **positive** if an escalation happens in the follo
 
 ## 4. Splits
 
-Data is split **by time**: days 1-9 for training, 10-11 for validation (model choice and calibration), 12-14 for the final test, with 6-hour gaps between blocks so look-ahead windows don't straddle them. Random splits are not used because neighbouring hours of the same patient would leak between blocks.
+Data is split **by time**, with 6-hour gaps between blocks so look-ahead windows don't straddle them. Random splits are not used because neighbouring hours of the same patient would leak between blocks.
+
+- **First model (version 1):** days 1-9 for training, 10-11 for validation (model choice and calibration), 12-14 for the final test.
+- **Retraining (version 3 onward):** the latest 2 days with known outcomes are the test, the 2 days before them the validation, and all earlier history trains. Patient-hours of known data faults (e.g. the Northshore SpO2 sensor fault, FSN-2026-10) are left out of all three. Version 3: training 20 September to 9 October, validation 9 to 11 October, test 11 to 13 October.
+
+The *Model Card* (HD-ML-001) gives each version's exact blocks and results.
 
 ## 5. Drift scenarios
 
