@@ -68,11 +68,14 @@ resource "azuread_application_federated_identity_credential" "github" {
 
 # The same identities in the workspace. Workspace access lets them deploy bundle files to their
 # home folder and own the jobs and pipelines they deploy (production targets run as the deployer).
+# Databricks SQL access (staging and prod only) lets them update the Genie space they publish:
+# creating one works without it, updating it is refused ("aclPath entitlement: /sqlanalytics").
 resource "databricks_service_principal" "ci" {
-  for_each         = azuread_service_principal.ci
-  application_id   = each.value.client_id
-  display_name     = "heavden-ci-${each.key}"
-  workspace_access = true
+  for_each              = azuread_service_principal.ci
+  application_id        = each.value.client_id
+  display_name          = "heavden-ci-${each.key}"
+  workspace_access      = true
+  databricks_sql_access = contains(local.deploy_environments, each.key)
 }
 
 resource "databricks_grant" "catalog" {
