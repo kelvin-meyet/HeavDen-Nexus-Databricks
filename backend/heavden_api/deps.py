@@ -12,6 +12,7 @@ from heavden_api.chat.agent import LLM, OpenAILLM
 from heavden_api.chat.guardrails import LeakDetector
 from heavden_api.chat.limits import DailyBudget, RateLimiter
 from heavden_api.chat.memory import ConversationStore
+from heavden_api.chat.models import profile
 from heavden_api.chat.recorded import Recordings
 from heavden_api.chat.sandbox import SqlSandbox
 from heavden_api.config import Settings
@@ -61,11 +62,14 @@ def build_state(
     snapshot = Snapshot.load(settings.snapshot_dir)
     connection = settings.llm_connection()
     if llm is None and connection:
+        model = profile(settings.llm_model, settings.llm_provider)  # refuses unlisted models
+        effort = settings.llm_reasoning_effort
         llm = OpenAILLM(
             connection.api_key,
-            settings.llm_model,
-            settings.llm_reasoning_effort,
+            model.name,
+            model.reasoning_effort if effort is None else (effort.strip() or None),
             connection.base_url,
+            model.token_limit,
         )
     return AppState(
         settings=settings,

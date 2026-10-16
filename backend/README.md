@@ -47,14 +47,14 @@ One tool-calling agent with three tools, mirroring the Databricks design (Plan.m
 | `search_documents` | FAISS + BM25 over the snapshot's document chunks | Vector Search |
 | `explain_patient` | latest risk, band, reasons and alerts | UC function `explain_patient_risk` |
 
-- **LLM:** OpenAI (`LLM_MODEL`, default `gpt-5.5`), or Azure OpenAI in Microsoft Foundry with `LLM_PROVIDER=azure` (see *Choosing the LLM provider*); only when the chosen provider's key is set. Without a key, or if the LLM call fails, `/chat` replays **recorded** answers (`heavden_api/chat/recordings.json`) and suggests the recorded questions. Re-record with `uv run python backend/scripts/record_chats.py` and **review the answers before committing**.
+- **LLM:** OpenAI (`LLM_MODEL`, default `gpt-5.5`), Azure OpenAI in Microsoft Foundry with `LLM_PROVIDER=azure`, or a model served by Databricks with `LLM_PROVIDER=databricks` (no keys; see *Choosing the LLM provider*). Only models listed in `chat/models.yaml` are accepted. Live answers need the chosen provider's key (or, for Databricks, an identity). Without a key, or if the LLM call fails, `/chat` replays **recorded** answers (`heavden_api/chat/recordings.json`) and suggests the recorded questions. Re-record with `uv run python backend/scripts/record_chats.py` and **review the answers before committing**.
 - **SQL safety, two independent layers:** `heavden.agent.sql_guard` parses the SQL and allows only one SELECT over allow-listed `gold` tables (no table functions, no file or environment functions); the sandbox (`chat/sandbox.py`) holds in-memory copies of the gold tables without internal ids, with external access disabled and configuration locked, and stops queries after 5 s. Rows are capped at 200.
 - **Guardrails, three independent layers** (`chat/guardrails.py`): (1) before the LLM, obvious attempts to extract the instructions, configuration, keys or source code, or to override the rules, get a fixed refusal at no cost (code requests are pointed to GitHub); (2) the system prompt sets the scope, forbids revealing or paraphrasing its instructions, treats document and query text as data, and redirects anything about real patients to their clinical team; (3) every answer, also while streaming, is checked for a per-process canary hidden in the prompt, distinctive prompt phrases and key patterns, and replaced if it leaks. The prompt contains nothing secret, so a paraphrase that slips through reveals no credentials. `backend/scripts/redteam_chat.py` runs adversarial prompts against the live model (12 of 12 handled correctly on 2026-10-08).
 - **Streaming:** `/chat/stream` sends server-sent events. In the web app a dedicated route (`web/app/api/chat/stream/route.ts`) passes them through, because the generic `/api` rewrite buffers whole responses.
 - **Conversation memory** (`chat/memory.py`): kept on the server under a random `conversation_id`: the last 6 turns, each with a compact note of the SQL and rows, documents and patient behind it, so follow-ups like "that unit" or "why is she flagged?" resolve. Idle conversations expire after 30 minutes; at most 500 are kept. The client never sends history, so it can't be forged; refused and redacted turns aren't remembered.
 - **Abuse and cost limits** (`chat/limits.py`): messages up to 1,000 characters and 10 history turns; `CHAT_REQUESTS_PER_HOUR` per visitor (default 30); `CHAT_LIVE_ANSWERS_PER_DAY` live LLM answers across **all** visitors (default 300, then recordings are replayed); and a **monthly spending cap on the OpenAI key** as the backstop, since in-memory counters reset when the server restarts.
 - **Who is the visitor?** `X-Forwarded-For` is appended to by each proxy, so only entries added by our own proxies can be trusted; anything to their left can be forged by the caller. The visitor is the entry `TRUSTED_PROXY_HOPS` places from the right: 0 locally (header ignored), 1 on Render alone, **2 when Vercel proxies `/api/*` to Render**.
-- **Model choice:** `gpt-5.4-mini` was tested first and made reasoning mistakes (wrong arithmetic, accepting false premises, inventing its own metrics); `gpt-5.5` answered all ten example questions correctly. With Chat Completions, function tools require `reasoning_effort="none"` for these models.
+- **Model choice:** `gpt-5.4-mini` was tested first and made reasoning mistakes (wrong arithmetic, accepting false premises, inventing its own metrics); `gpt-5.5` answered all ten example questions correctly, with `reasoning_effort="none"`. Tool calls also work at the models' default reasoning (checked 16 Oct 2026); each model's setting is in `chat/models.yaml`, and the model comparison runs every model at its default.
 
 ## Configuration
 
@@ -64,12 +64,13 @@ One tool-calling agent with three tools, mirroring the Databricks design (Plan.m
 | `SNAPSHOT_DIR` | `data/demo_snapshot` | snapshot to serve in demo mode |
 | `EMBED_CACHE_DIR` | `data/models` | where the embedding model is cached |
 | `ALLOWED_ORIGINS` | `http://localhost:3000` | comma-separated origins for CORS (local dev; in production Vercel proxies `/api/*`) |
-| `LLM_PROVIDER` | `openai` | `openai` or `azure`: which service answers the assistant's questions |
+| `LLM_PROVIDER` | `openai` | `openai`, `azure` or `databricks`: which service answers the assistant's questions |
 | `OPENAI_API_KEY` | unset | enables live assistant answers with `LLM_PROVIDER=openai`. Locally from `.env` (git-ignored); on Render, set it in the dashboard, never in git |
 | `AZURE_OPENAI_ENDPOINT` | unset | with `LLM_PROVIDER=azure`: the resource's endpoint as the portal shows it, e.g. `https://<resource>.openai.azure.com` |
 | `AZURE_OPENAI_API_KEY` | unset | with `LLM_PROVIDER=azure`: the resource's key (`AZURE_OPENAI_KEY` is read too). Same rule: `.env` locally, never in git |
-| `LLM_MODEL` | `gpt-5.5` | OpenAI: the model name. Azure: the name of **your deployment** |
-| `LLM_REASONING_EFFORT` | `none` | sent with every call; `none` is what gpt-5.x needs for function tools. Set it empty for models that don't take the option (e.g. gpt-4.1) |
+| `DATABRICKS_HOST` | unset | with `LLM_PROVIDER=databricks`: the workspace address. The identity comes from the Databricks SDK's own variables: `DATABRICKS_CLIENT_ID` / `DATABRICKS_CLIENT_SECRET` for a service principal (Render), or `DATABRICKS_CONFIG_PROFILE` locally |
+| `LLM_MODEL` | `gpt-5.5` | OpenAI: the model name. Azure: the name of **your deployment**. Databricks: the serving endpoint. Must be listed in `chat/models.yaml` |
+| `LLM_REASONING_EFFORT` | the model's entry in `models.yaml` | overrides it when set; empty leaves the option out |
 | `CHAT_REQUESTS_PER_HOUR` | `30` | per-visitor limit on `/chat` |
 | `CHAT_LIVE_ANSWERS_PER_DAY` | `300` | live LLM answers per UTC day across all visitors; then recordings |
 | `TRUSTED_PROXY_HOPS` | `0` | proxies we control in front of the API (0 local, 1 Render, 2 Vercel → Render) |
@@ -93,6 +94,17 @@ To answer with a model deployed in Microsoft Foundry (Azure OpenAI):
 3. Restart the API. To go back, set `LLM_PROVIDER=openai` and `LLM_MODEL` to an OpenAI model name; both keys can stay in `.env`.
 
 Each deployment has its own rate quota and is billed per token to the Azure subscription. The recorded answers and the red-team results in this README were produced with OpenAI's `gpt-5.5`; re-run `backend/scripts/redteam_chat.py` before relying on another model.
+
+To answer with a model **served by Databricks** (no keys: billed as Databricks usage on the Azure bill):
+
+```
+LLM_PROVIDER=databricks
+DATABRICKS_HOST=https://adb-<workspace-id>.<n>.azuredatabricks.net
+DATABRICKS_CONFIG_PROFILE=<your CLI profile>      # locally; on Render a service principal instead
+LLM_MODEL=databricks-gpt-oss-120b                 # any databricks entry in chat/models.yaml
+```
+
+The token is fetched from the Databricks SDK before each request (Databricks tokens expire). Every listed model is called the same way; the differences are recorded per model in `chat/models.yaml`: Databricks endpoints take `max_tokens` (they reject `max_completion_tokens`, which OpenAI and Azure require for gpt-5 models), and some take a `reasoning_effort`. Reasoning models served by Databricks (GPT-OSS, Qwen) return their reasoning and their answer as separate parts; only the answer is shown (`chat/agent.text_of`). On 16 Oct 2026 tool calling worked with GPT-OSS 120B, Qwen3.5 122B and Llama 4 Maverick; Anthropic's Claude models were refused for this account (they need the account upgraded or approved).
 
 ## Snapshot layout
 

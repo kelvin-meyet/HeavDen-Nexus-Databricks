@@ -1,6 +1,8 @@
 import pytest
 
-from heavden_api.chat.agent import OpenAILLM
+from heavden_api import config
+from heavden_api.chat.agent import MAX_ANSWER_TOKENS, OpenAILLM
+from heavden_api.chat.models import PROVIDERS, load_models
 from heavden_api.config import Settings, azure_base_url
 from heavden_api.deps import build_state
 
@@ -14,6 +16,7 @@ def _settings(**overrides) -> Settings:
         "openai_api_key": None,
         "azure_openai_endpoint": None,
         "azure_openai_key": None,
+        "databricks_host": None,
         "llm_model": "some-model",
         "llm_reasoning_effort": "none",
     }
@@ -66,11 +69,53 @@ def test_the_assistant_is_built_for_the_chosen_provider(demo_snapshot):
         llm_provider="azure",
         azure_openai_endpoint=ENDPOINT,
         azure_openai_key="azure-key",
-        llm_model="my-deployment",
+        llm_model="gpt-5-mini",
         llm_reasoning_effort=None,
     )
     llm = build_state(settings).llm  # building the client makes no network call
-    assert isinstance(llm, OpenAILLM) and llm.model == "my-deployment"
+    assert isinstance(llm, OpenAILLM) and llm.model == "gpt-5-mini"
     assert str(llm.client.base_url) == ENDPOINT + "/openai/v1/"
-    assert "reasoning_effort" not in llm._options()
+    assert llm._options() == {
+        "max_completion_tokens": MAX_ANSWER_TOKENS,
+        "reasoning_effort": "none",
+    }
     assert build_state(_settings(snapshot_dir=demo_snapshot)).llm is None
+
+
+def test_a_databricks_endpoint_is_called_with_a_fresh_token_and_its_own_settings(
+    demo_snapshot, monkeypatch
+):
+    tokens = iter(["token-1", "token-2"])
+    monkeypatch.setattr(config, "databricks_token", lambda: next(tokens))
+    settings = _settings(
+        snapshot_dir=demo_snapshot,
+        llm_provider="databricks",
+        databricks_host="adb-1.azuredatabricks.net/",
+        llm_model="databricks-gpt-oss-120b",
+        llm_reasoning_effort=None,
+    )
+    llm = build_state(settings).llm  # no token is fetched until the first request
+    assert str(llm.client.base_url) == "https://adb-1.azuredatabricks.net/serving-endpoints/"
+    assert llm._options() == {"max_tokens": MAX_ANSWER_TOKENS, "reasoning_effort": "low"}
+    llm._refresh()
+    assert llm.client.api_key == "token-1"
+    llm._refresh()  # every request asks again: Databricks tokens expire
+    assert llm.client.api_key == "token-2"
+    with pytest.raises(ValueError, match="DATABRICKS_HOST"):
+        _settings(llm_provider="databricks").llm_connection()
+
+
+def test_only_listed_models_and_their_own_provider_are_accepted(demo_snapshot):
+    keyed = {"snapshot_dir": demo_snapshot, "openai_api_key": "openai-key"}
+    with pytest.raises(ValueError, match="not in models.yaml"):
+        build_state(_settings(**keyed, llm_model="gpt-4-something"))
+    with pytest.raises(ValueError, match="served by databricks"):
+        build_state(_settings(**keyed, llm_model="databricks-gpt-oss-120b"))
+    assert all(m.provider in PROVIDERS for m in load_models().values())
+
+
+def test_the_reasoning_effort_setting_overrides_the_models_own(demo_snapshot):
+    keyed = {"snapshot_dir": demo_snapshot, "openai_api_key": "k", "llm_model": "gpt-5.5"}
+    assert build_state(_settings(**keyed, llm_reasoning_effort=None)).llm.reasoning_effort == "none"
+    assert build_state(_settings(**keyed, llm_reasoning_effort="low")).llm.reasoning_effort == "low"
+    assert build_state(_settings(**keyed, llm_reasoning_effort="")).llm.reasoning_effort is None
