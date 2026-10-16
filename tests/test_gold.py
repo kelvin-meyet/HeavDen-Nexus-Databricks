@@ -14,6 +14,7 @@ import pytest
 from test_source_db import HOURS, START, _population
 
 from generator import activity, clock, hospital, landing, truth
+from heavden.agent.genie import load_spec
 from heavden.analytics import gold as gold_pandas
 from heavden.ml import features
 
@@ -292,6 +293,8 @@ def test_encounters_mask_patients_and_describe_them_as_the_features_do(spark, wa
 
     assert len(out) == len(act.encounters) and out.index.is_unique
     assert not {"first_name", "last_name", "birth_date"} & set(out.columns)  # masked
+    described = set(load_spec()["tables"]["encounters"]["columns"])  # the Genie space's columns
+    assert described <= {"encounter_id", *out.columns}
     # P-1001, P-1002, ... in order of first admission
     first = act.encounters.groupby("patient_id")["admit_ts"].min().reset_index()
     order = first.sort_values(["admit_ts", "patient_id"])["patient_id"]

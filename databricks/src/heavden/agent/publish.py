@@ -7,6 +7,8 @@
   flagged?" from Gold, as the app's `explain_patient` tool does from its snapshot: the stay's
   latest score, band, NEWS2 and top factors, the risk 6 hours earlier, and its alerts of the
   last 48 hours. The assistant calls it; anyone with access can too (`SELECT * FROM ...`).
+* **The Genie space** "HeavDen Ward Data" (plus the environment's label) over the Gold tables:
+  the assistant's tool for questions about numbers (`heavden.agent.genie`, `genie_space.yaml`).
 
 The documents ship inside the wheel (`heavden/agent/corpus_docs`, from `docs/corpus`), so what
 is published is what the code was tested with.
@@ -18,6 +20,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from heavden.agent import genie
 from heavden.agent.corpus import Chunk, chunk_corpus, load_corpus
 
 PACKAGED = Path(__file__).with_name("corpus_docs")
@@ -160,6 +163,9 @@ def main(argv: list[str] | None = None) -> None:
 
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--catalog", required=True, help="e.g. heavden_staging")
+    parser.add_argument("--warehouse-id", required=True, help="the warehouse Genie runs on")
+    parser.add_argument("--genie-folder", required=True, help="workspace folder for the space")
+    parser.add_argument("--env-label", default="", help='appended to the title, e.g. " (prod)"')
     args = parser.parse_args(argv)
     spark = SparkSession.builder.getOrCreate()
     c = args.catalog
@@ -168,3 +174,18 @@ def main(argv: list[str] | None = None) -> None:
     print(publish_chunks(spark, f"{c}.ml.corpus_chunks", rows))
     spark.sql(explain_function_sql(c))
     print(f"{c}.ml.explain_patient_risk: created or replaced")
+
+    from databricks.sdk import WorkspaceClient
+
+    spec = genie.load_spec()
+    print(
+        genie.publish_space(
+            WorkspaceClient().api_client,
+            genie.serialized_space(spec, c),
+            title=spec["title"] + args.env_label,
+            description=spec["description"],
+            warehouse_id=args.warehouse_id,
+            folder=args.genie_folder,
+            managers=spec["managers"],
+        )
+    )
