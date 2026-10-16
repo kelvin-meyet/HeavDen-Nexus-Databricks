@@ -48,5 +48,12 @@ jobs:
       - name: Validate
         run: databricks bundle validate --strict -t prod
 
+      # The assistant answers from the model card, which ships in this release: it must describe
+      # the version prod scores with (promote.yml and rollback.yml open a reminder when it changes).
+      - name: Check the model card describes prod's model
+        run: |
+          champion=$(databricks registered-models get heavden_prod.ml.deterioration_risk --include-aliases -o json             | jq -r '[.aliases[]? | select(.alias_name == "champion") | .version_num | tostring][0] // ""')
+          python3 ../.github/scripts/model_card.py check "$champion"
+
       - name: Deploy
         run: databricks bundle deploy -t prod

@@ -47,6 +47,7 @@ jobs:
       contents: read
       id-token: write
       actions: read # who approved, for the audit trail
+      issues: write # the model-card reminder
     env:
       DATABRICKS_AUTH_TYPE: azure-cli
       GH_TOKEN: ${{ github.token }}
@@ -76,6 +77,7 @@ jobs:
         run: |
           context=$(bash ../.github/scripts/review.sh context "$APPROVAL" "$(jq -cn --arg reason "$REASON" '{reason: $reason}')")
           result=$(bash ../.github/scripts/model_ops.sh rollback "$VERSION" "$context")
+          echo "$result" > "$RUNNER_TEMP/model_ops.json"
           {
             echo "## Rolled back: version $(jq -r .version <<<"$result") is \`@champion\` again"
             echo
@@ -85,3 +87,9 @@ jobs:
             echo
             echo "New patient-hours are scored by this version from the next scoring run."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # The assistant answers from the model card, which must describe prod's model: open a
+      # reminder to reissue it (release.yml refuses to deploy until it does).
+      - name: Remind to reissue the model card
+        if: inputs.target == 'prod'
+        run: python3 ../.github/scripts/model_card.py remind "$RUNNER_TEMP/model_ops.json" "rolled back"

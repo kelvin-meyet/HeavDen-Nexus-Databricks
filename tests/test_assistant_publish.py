@@ -21,7 +21,8 @@ def rows() -> pd.DataFrame:
 def test_every_document_is_published_in_chunks_with_its_front_matter(rows):
     assert publish.corpus_dir().name in {"corpus", "corpus_docs"}
     assert rows["chunk_id"].is_unique
-    assert len(rows[["doc_id", "version"]].drop_duplicates()) == 9  # protocol v1.0 and v2.0
+    # two versions each of the escalation protocol and the model card
+    assert len(rows[["doc_id", "version"]].drop_duplicates()) == 10
     protocols = rows[rows["title"].str.contains("Escalation Protocol")]
     assert {"current", "superseded"} <= set(protocols["status"])  # versions can be told apart
     first = rows.iloc[0]
