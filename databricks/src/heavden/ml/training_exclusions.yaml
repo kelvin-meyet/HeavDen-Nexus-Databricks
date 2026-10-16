@@ -27,4 +27,8 @@ heavden_staging:
     from: "2026-09-26T07:00:00Z"
     to: "2026-09-28T06:00:00Z"
     reason: "Episode 3 (rehearsal): firmware 3.2.0 sent etco2 and no motion, 26 Sep 06:00 to 28 Sep 00:00, then rolled back"
-heavden_prod: []
+heavden_prod:
+  - site_id: SITE_B
+    from: "2026-10-04T13:00:00Z"
+    to: "2026-10-06T06:00:00Z"
+    reason: "Episode 1: Site B SpO2 sensors read low (field safety notice FSN-2026-10), 4 Oct 12:00 to 6 Oct 00:00"
