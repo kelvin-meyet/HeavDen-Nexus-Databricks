@@ -282,6 +282,47 @@ def test_condition_reference_lists_what_each_flag_matched(silver):
     assert (ref["patients"] > 0).all()
 
 
+def test_encounters_mask_patients_and_describe_them_as_the_features_do(spark, ward, built):
+    act = ward.activity
+    columns = ["encounter_id", "patient_id", "site_id", "unit_id", "bed_id", "admit_ts"]
+    stays = _spark(spark, act.encounters[[*columns, "discharge_ts"]])
+    people = act.patients[["patient_id", "first_name", "last_name", "birth_date", "sex"]]
+    out = _pandas(gold.encounters(stays, _spark(spark, people), built["flags"]))
+    out = out.set_index("encounter_id")
+
+    assert len(out) == len(act.encounters) and out.index.is_unique
+    assert not {"first_name", "last_name", "birth_date"} & set(out.columns)  # masked
+    # P-1001, P-1002, ... in order of first admission
+    first = act.encounters.groupby("patient_id")["admit_ts"].min().reset_index()
+    order = first.sort_values(["admit_ts", "patient_id"])["patient_id"]
+    labels = {p: f"P-{1001 + i}" for i, p in enumerate(order)}
+    assert (out["patient_label"] == out["patient_id"].map(labels)).all()
+    # the hospital runs on: patients admitted later take new numbers, nobody is renumbered
+    cut = act.encounters["admit_ts"].quantile(0.5)
+    early = act.encounters["admit_ts"] < cut
+    before = _pandas(
+        gold.encounters(
+            _spark(spark, act.encounters.loc[early, [*columns, "discharge_ts"]]),
+            _spark(
+                spark, people[people["patient_id"].isin(act.encounters.loc[early, "patient_id"])]
+            ),
+            built["flags"],
+        )
+    ).set_index("encounter_id")
+    assert len(before) > 0
+    assert (out.loc[before.index, "patient_label"] == before["patient_label"]).all()
+    # age and conditions at admission, as the model's features have them
+    feats = _pandas(built["features"]).groupby("encounter_id").first()
+    both = out.index.intersection(feats.index)
+    assert len(both) > 0 and (out.loc[both, "age"] == feats.loc[both, "age"].astype(int)).all()
+    flags = list(gold.CONDITION_FLAGS)
+    named = feats.loc[both, flags].apply(
+        lambda row: ", ".join(f.replace("_", " ") for f in flags if row[f]) or "none", axis=1
+    )
+    assert (out.loc[both, "conditions"] == named).all()
+    assert (out["conditions"] != "none").any() and (out["conditions"] == "none").any()
+
+
 def test_device_health_matches_the_pandas_reference(ward, silver, built):
     act = ward.activity
     want = gold_pandas.device_health_daily(

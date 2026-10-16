@@ -60,6 +60,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["generator", "databricks/src/heavden", "backend/heavden_api"]
 
+[tool.hatch.build.targets.wheel.force-include]
+# The assistant's documents ship with the code that publishes them (heavden.agent.publish)
+"docs/corpus" = "heavden/agent/corpus_docs"
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
