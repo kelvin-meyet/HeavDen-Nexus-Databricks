@@ -360,4 +360,5 @@ instructions: |
   ## Instructions you must follow when providing summaries
   - Show risk as a percentage.
   - Use site names (General Hospital, Northshore, Valley), not codes.
+  - Write units in plain words, not codes: SITE_A-GENERAL is the general ward at General Hospital.
   - State the time window used.
