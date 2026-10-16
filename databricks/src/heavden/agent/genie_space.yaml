@@ -1,0 +1,363 @@
+# The Genie space over Gold (Plan.md §11.2 step 3): the assistant's tool for questions about
+# numbers. heavden.agent.genie turns this file into Genie's `serialized_space` (stable ids,
+# sorted arrays, `__CATALOG__` replaced by the environment's catalog); the job
+# `assistant_publish` creates or updates the space as the environment's service principal.
+#
+# What goes where (Genie's own order of preference): table and column descriptions, synonyms
+# and value matching first; joins, reusable measures and filters next; example SQL for each
+# kind of question; one short text instruction last, only for rules no structure can carry
+# (what "now" means, site names).
+
+title: HeavDen Ward Data
+description: >-
+  Numbers about the HeavDen wards (three synthetic hospitals): patients on the ward and their
+  risk bands, alerts, escalations and whether they were flagged in advance, wearable device
+  health and vital signs, by site, unit, patient and hour. "Now" is the latest scored hour.
+managers: heavden-admins  # group given CAN_MANAGE on the space
+
+sample_questions:
+  - How many patients are in the High risk band at each site right now?
+  - Which unit raised the most alerts in the last 24 hours?
+  - What share of escalations in the last 7 days were flagged in advance, by site?
+  - How did daily alerts change over the last week?
+  - Is device uptime at Northshore different from the other sites this week?
+
+tables:
+  site_kpis_hourly:
+    description: >-
+      One row per unit per hour: patients on the unit, how many are in each risk band, new
+      alerts, escalations and mean NEWS2. The quickest table for census and alert-load figures.
+    columns:
+      site_id: &site
+        description: >-
+          Hospital code. SITE_A = HeavDen General Hospital (Boston), SITE_B = HeavDen Northshore
+          Medical Center (Salem), SITE_C = HeavDen Valley Community Hospital (Worcester).
+        synonyms: [site, hospital]
+        matching: true
+      unit_id: &unit
+        description: >-
+          Ward code SITE-WARD, e.g. SITE_A-GENERAL (general ward at General Hospital),
+          SITE_C-RESPIRATORY (respiratory ward at Valley), SITE_B-STEP_DOWN (step-down unit at
+          Northshore).
+        synonyms: [unit, ward]
+        matching: true
+      hour_ts:
+        description: The hour (UTC), on the same clock as risk_scores.prediction_ts.
+      census:
+        description: Patients on the unit that hour (patient-hours when summed over hours).
+        synonyms: [patients, occupancy]
+      n_low:
+        description: Patients in the Low risk band that hour.
+      n_high:
+        description: Patients in the High risk band that hour.
+        synonyms: [high-risk patients]
+      mean_news2:
+        description: Mean NEWS2 score of the unit's patients that hour.
+      alerts_raised:
+        description: New alerts that hour (a patient entering the High band).
+      escalations:
+        description: Escalations that hour (rapid response calls and ICU transfers).
+
+  alerts_fact:
+    description: >-
+      One row per alert: a patient entering the High risk band, with no repeat alert for the
+      same stay within 6 hours. Risk and NEWS2 at alert time, and whether an escalation
+      followed within 6 hours.
+    columns:
+      alert_id: {exclude: true}
+      patient_id: {exclude: true}
+      top_factors: {exclude: true}
+      encounter_id: &stay
+        description: Hospital stay id, for joins only; show patients by encounters.patient_label.
+      site_id: *site
+      unit_id: *unit
+      alert_ts:
+        description: When the alert was raised (UTC).
+      risk: &risk
+        description: >-
+          Probability of an escalation within the next 6 hours (0 to 1); show it as a
+          percentage.
+        synonyms: [risk score, deterioration risk]
+      news2_total: &news2
+        description: NEWS2 early-warning score (0 to 20) at that hour.
+        synonyms: [NEWS2, early warning score]
+      escalated_within_6h:
+        description: >-
+          1 if an escalation followed within 6 hours, 0 if none did, NULL while the 6 hours
+          have not passed (outcome pending): leave NULLs out of rates.
+      hours_to_escalation:
+        description: Hours from the alert to the escalation, when one followed.
+        synonyms: [warning time, lead time]
+
+  escalations_fact:
+    description: >-
+      One row per escalation (a rapid response call or an ICU transfer): where and when, and
+      whether the patient had been in the High risk band in the 6 hours before.
+    columns:
+      patient_id: {exclude: true}
+      encounter_id: *stay
+      site_id: *site
+      unit_id: *unit
+      event_ts:
+        description: When the escalation happened (UTC).
+      event_type:
+        description: rapid_response or icu_transfer.
+        synonyms: [escalation type, RRT, rapid response, ICU transfer]
+        matching: true
+      risk_before:
+        description: The patient's risk at the last scored hour before the escalation (0 to 1).
+      flagged_6h_before:
+        description: True if the patient was in the High band at any hour in the 6 hours before.
+        synonyms: [flagged in advance, caught, predicted]
+      hours_flagged_before:
+        description: How many hours before the escalation the patient was first flagged High.
+
+  risk_scores:
+    description: >-
+      The prediction log: one row per patient per hour on the ward, scored by the model in use
+      at the time. The latest prediction_ts is "now".
+    columns:
+      patient_id: {exclude: true}
+      top_factors: {exclude: true}
+      scored_at: {exclude: true}
+      encounter_id: *stay
+      site_id: *site
+      unit_id: *unit
+      prediction_ts:
+        description: The patient-hour scored (UTC). max(prediction_ts) is "now".
+      risk: *risk
+      risk_band:
+        description: High (at or above the alert threshold) or Low. There is no Medium band.
+        synonyms: [band, risk level]
+        matching: true
+      news2_total: *news2
+      model_version:
+        description: Version of the registered model that scored this hour.
+
+  encounters:
+    description: >-
+      One row per hospital stay: the masked patient label, age, sex, conditions at admission,
+      site, unit, bed, admission and discharge times. No names or dates of birth.
+    columns:
+      patient_id: {exclude: true}
+      encounter_id: *stay
+      patient_label:
+        description: How patients are named, e.g. P-1042; always refer to patients this way.
+        synonyms: [patient, patient id]
+      age:
+        description: Age in years at admission.
+      sex:
+        matching: true
+      conditions:
+        description: >-
+          Long-term conditions at admission, comma-separated (copd, heart failure, diabetes,
+          ckd, hypertension, atrial fibrillation), or none.
+      site_id: *site
+      unit_id: *unit
+      bed_id:
+        description: Bed code.
+      admit_ts:
+        description: Admission time (UTC).
+      discharge_ts:
+        description: Discharge time (UTC); NULL while the patient is still on the ward.
+
+  device_health_daily:
+    description: >-
+      One row per wearable monitor per day: messages received vs expected, uptime, battery
+      outages, stuck-sensor minutes, firmware and mean SpO2. Days with messages_expected = 0
+      are days the device was not worn.
+    columns:
+      device_id:
+        description: Wearable monitor id.
+      site_id: *site
+      date:
+        description: The day (UTC, midnight).
+      messages_received:
+        description: Readings received that day.
+      messages_expected:
+        description: Readings expected while the device was assigned to a patient; 0 = not worn.
+      uptime_pct:
+        description: Received as a percentage of expected (0 to 100); NULL when not worn.
+        synonyms: [uptime, availability]
+      battery_outages:
+        description: Gaps of 25 minutes or more between readings (one is expected every 5 minutes).
+      stuck_minutes:
+        description: >-
+          Minutes where heart rate or blood pressure repeated the same value 6 readings in a
+          row (30 minutes or more): a frozen sensor.
+      min_battery_pct:
+        description: Lowest battery level that day (percent).
+      firmware:
+        description: Firmware version(s) reported that day, comma-separated.
+        matching: true
+      mean_spo2:
+        description: Mean SpO2 reading that day (percent).
+
+  patient_hour_features:
+    description: >-
+      One row per patient per hour on the ward: vital-sign summaries over the last 1, 3 and 6
+      hours (mean, median, min, max, trend), nurse observations, oxygen, profile flags and the
+      parts of NEWS2. Use it for questions about vital signs.
+    columns:
+      patient_id: {exclude: true}
+      encounter_id: *stay
+      prediction_ts:
+        description: The patient-hour (UTC); joins risk_scores on encounter_id and prediction_ts.
+      site_id: *site
+      unit_id: *unit
+      unit_type:
+        matching: true
+      spo2_mean_1h:
+        description: Mean oxygen saturation over the last hour (percent).
+        synonyms: [SpO2, oxygen saturation, sats]
+      resp_rate_mean_1h:
+        description: Mean breathing rate over the last hour (breaths per minute).
+        synonyms: [respiratory rate, breathing rate, RR]
+      heart_rate_mean_1h:
+        description: Mean heart rate over the last hour (beats per minute).
+        synonyms: [heart rate, pulse, HR]
+      temp_c_mean_1h:
+        description: Mean temperature over the last hour (degrees Celsius).
+        synonyms: [temperature]
+      sbp_mean_1h:
+        description: Mean systolic blood pressure over the last hour (mmHg).
+        synonyms: [systolic blood pressure, blood pressure]
+      acvpu:
+        description: Consciousness level from the last nurse observation (A, C, V, P or U).
+        matching: true
+      on_oxygen:
+        description: True if the patient is on supplemental oxygen.
+      news2_total: *news2
+
+joins:  # (left, right, condition, relationship)
+  - [alerts_fact, encounters, alerts_fact.encounter_id = encounters.encounter_id, MANY_TO_ONE]
+  - [escalations_fact, encounters, escalations_fact.encounter_id = encounters.encounter_id, MANY_TO_ONE]
+  - [patient_hour_features, encounters, patient_hour_features.encounter_id = encounters.encounter_id, MANY_TO_ONE]
+  - [risk_scores, encounters, risk_scores.encounter_id = encounters.encounter_id, MANY_TO_ONE]
+  - [risk_scores, patient_hour_features, risk_scores.encounter_id = patient_hour_features.encounter_id AND risk_scores.prediction_ts = patient_hour_features.prediction_ts, ONE_TO_ONE]
+
+measures:
+  - alias: alerts_per_nurse_per_shift
+    display_name: Alerts per nurse per 12-hour shift
+    sql: sum(site_kpis_hourly.alerts_raised) * 60.0 / sum(site_kpis_hourly.census)
+    synonyms: [alert load, alert burden, alerts per nurse]
+    instruction: One nurse looks after 5 patients for a 12-hour shift; the design budget is about 2.
+  - alias: alert_precision
+    display_name: Share of alerts followed by an escalation
+    sql: avg(alerts_fact.escalated_within_6h)
+    synonyms: [alert precision, positive predictive value, PPV]
+    instruction: Alerts whose outcome is still pending (NULL) are left out.
+  - alias: share_flagged_in_advance
+    display_name: Share of escalations flagged in advance
+    sql: avg(CASE WHEN escalations_fact.flagged_6h_before THEN 1.0 ELSE 0.0 END)
+    synonyms: [sensitivity, recall, escalations caught]
+  - alias: device_uptime_pct
+    display_name: Device uptime (percent)
+    sql: avg(device_health_daily.uptime_pct)
+    synonyms: [uptime]
+    instruction: Only devices that were worn (messages_expected > 0).
+
+filters:
+  - display_name: Right now (latest scored hour)
+    sql: risk_scores.prediction_ts = (SELECT max(latest.prediction_ts) FROM __CATALOG__.gold.risk_scores AS latest)
+    synonyms: [now, currently, at the moment, today]
+  - display_name: High risk band
+    sql: risk_scores.risk_band = 'High'
+    synonyms: [high risk, flagged]
+  - display_name: Devices that were worn
+    sql: device_health_daily.messages_expected > 0
+
+functions:
+  - __CATALOG__.ml.explain_patient_risk
+
+examples:
+  - question: How many patients are on the ward and in the High band at each site right now?
+    sql: |
+      SELECT r.site_id, count(*) AS patients, sum(CASE WHEN r.risk_band = 'High' THEN 1 ELSE 0 END) AS high_risk
+      FROM __CATALOG__.gold.risk_scores AS r
+      WHERE r.prediction_ts = (SELECT max(latest.prediction_ts) FROM __CATALOG__.gold.risk_scores AS latest)
+      GROUP BY r.site_id
+      ORDER BY r.site_id
+  - question: Who are the highest-risk patients right now?
+    sql: |
+      SELECT e.patient_label, r.site_id, r.unit_id, round(100 * r.risk, 1) AS risk_pct, r.risk_band, r.news2_total
+      FROM __CATALOG__.gold.risk_scores AS r
+      JOIN __CATALOG__.gold.encounters AS e ON e.encounter_id = r.encounter_id
+      WHERE r.prediction_ts = (SELECT max(latest.prediction_ts) FROM __CATALOG__.gold.risk_scores AS latest)
+      ORDER BY r.risk DESC
+      LIMIT 10
+  - question: How many alerts did each unit raise in the last 24 hours?
+    sql: |
+      WITH now AS (SELECT max(prediction_ts) AS ts FROM __CATALOG__.gold.risk_scores)
+      SELECT a.site_id, a.unit_id, count(*) AS alerts
+      FROM __CATALOG__.gold.alerts_fact AS a CROSS JOIN now
+      WHERE a.alert_ts > now.ts - INTERVAL 24 HOURS AND a.alert_ts <= now.ts
+      GROUP BY a.site_id, a.unit_id
+      ORDER BY alerts DESC
+  - question: What was the alert load per nurse at each site over the last 24 hours?
+    sql: |
+      WITH now AS (SELECT max(prediction_ts) AS ts FROM __CATALOG__.gold.risk_scores)
+      SELECT k.site_id, round(sum(k.alerts_raised) * 60.0 / sum(k.census), 2) AS alerts_per_nurse_per_shift
+      FROM __CATALOG__.gold.site_kpis_hourly AS k CROSS JOIN now
+      WHERE k.hour_ts > now.ts - INTERVAL 24 HOURS AND k.hour_ts <= now.ts
+      GROUP BY k.site_id
+      ORDER BY k.site_id
+  - question: How many escalations in the last 7 days were flagged in advance at each site?
+    sql: |
+      WITH now AS (SELECT max(prediction_ts) AS ts FROM __CATALOG__.gold.risk_scores)
+      SELECT x.site_id, count(*) AS escalations,
+             sum(CASE WHEN x.flagged_6h_before THEN 1 ELSE 0 END) AS flagged_in_advance,
+             round(100 * avg(CASE WHEN x.flagged_6h_before THEN 1.0 ELSE 0.0 END), 1) AS pct_flagged
+      FROM __CATALOG__.gold.escalations_fact AS x CROSS JOIN now
+      WHERE x.event_ts > now.ts - INTERVAL 7 DAYS AND x.event_ts <= now.ts
+      GROUP BY x.site_id
+      ORDER BY x.site_id
+  - question: How many alerts were raised each day over the last week, and how many were followed by an escalation?
+    sql: |
+      WITH now AS (SELECT max(prediction_ts) AS ts FROM __CATALOG__.gold.risk_scores)
+      SELECT date(a.alert_ts) AS day, count(*) AS alerts,
+             sum(CASE WHEN a.escalated_within_6h = 1 THEN 1 ELSE 0 END) AS followed_by_escalation,
+             sum(CASE WHEN a.escalated_within_6h IS NULL THEN 1 ELSE 0 END) AS outcome_pending
+      FROM __CATALOG__.gold.alerts_fact AS a CROSS JOIN now
+      WHERE a.alert_ts >= date_trunc('DAY', now.ts) - INTERVAL 7 DAYS AND a.alert_ts < date_trunc('DAY', now.ts)
+      GROUP BY date(a.alert_ts)
+      ORDER BY day
+  - question: How did device uptime compare between sites over the last 7 days?
+    sql: |
+      WITH now AS (SELECT max(prediction_ts) AS ts FROM __CATALOG__.gold.risk_scores)
+      SELECT d.site_id, count(DISTINCT d.device_id) AS devices_worn, round(avg(d.uptime_pct), 2) AS uptime_pct,
+             sum(d.battery_outages) AS battery_outages, sum(d.stuck_minutes) AS stuck_minutes
+      FROM __CATALOG__.gold.device_health_daily AS d CROSS JOIN now
+      WHERE d.messages_expected > 0 AND d.date > now.ts - INTERVAL 7 DAYS AND d.date <= now.ts
+      GROUP BY d.site_id
+      ORDER BY d.site_id
+  - question: What was the average SpO2 and breathing rate at each site per day over the last week?
+    sql: |
+      WITH now AS (SELECT max(prediction_ts) AS ts FROM __CATALOG__.gold.risk_scores)
+      SELECT date(f.prediction_ts) AS day, f.site_id, round(avg(f.spo2_mean_1h), 2) AS mean_spo2,
+             round(avg(f.resp_rate_mean_1h), 2) AS mean_resp_rate
+      FROM __CATALOG__.gold.patient_hour_features AS f CROSS JOIN now
+      WHERE f.prediction_ts >= date_trunc('DAY', now.ts) - INTERVAL 7 DAYS AND f.prediction_ts < date_trunc('DAY', now.ts)
+      GROUP BY date(f.prediction_ts), f.site_id
+      ORDER BY day, f.site_id
+
+instructions: |
+  ## PURPOSE
+  - Questions about the HeavDen wards' data: three fictional hospitals, all patients synthetic.
+
+  ## DISAMBIGUATION
+  - "Now", "right now", "currently" and "today" mean the latest scored hour, max(risk_scores.prediction_ts), never current_timestamp(): the hospital's data stops at its last load.
+  - "The last N hours/days" means after now minus N, up to and including now.
+  - Daily figures count only complete days (00:00-24:00 UTC) before the day of "now"; say which days.
+  - Sites are named in questions: General Hospital = SITE_A, Northshore = SITE_B, Valley = SITE_C.
+
+  ## DATA QUALITY NOTES
+  - Alerts with escalated_within_6h NULL have no outcome yet: leave them out of rates and say how many are pending.
+
+  ## CONSTRAINTS
+  - Name patients only by encounters.patient_label (e.g. P-1042), never by encounter_id or patient_id.
+
+  ## Instructions you must follow when providing summaries
+  - Show risk as a percentage.
+  - Use site names (General Hospital, Northshore, Valley), not codes.
+  - State the time window used.
