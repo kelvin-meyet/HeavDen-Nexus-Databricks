@@ -70,6 +70,7 @@ def build_state(
             model.reasoning_effort if effort is None else (effort.strip() or None),
             connection.base_url,
             model.token_limit,
+            **({"max_tokens": model.max_tokens} if model.max_tokens else {}),
         )
     return AppState(
         settings=settings,

@@ -46,6 +46,11 @@ backend = [
 azure = [
     "mssql-python==1.14.0",
 ]
+agent = [
+    # Mosaic AI Agent Framework: the assistant's quality test (Databricks judges) and, later,
+    # agents.deploy. Released 21 Aug 2026; needs mlflow-skinny >= 3.11.1 (serverless env 6: 3.12)
+    "databricks-agents==1.12.0",
+]
 spark = [
     "pyspark==4.0.4",
     # Delta Lake for the tests of MERGE and change data feed (Linux only: on Windows, Delta

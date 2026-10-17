@@ -1,25 +1,35 @@
-# The models the assistant may run on, and how to call each one. The switch is two settings:
-# LLM_PROVIDER and LLM_MODEL in the app (.env locally, Render's environment online), and the
-# Databricks agent's own LLM_ENDPOINT setting. A model not listed here is refused: add it, and
-# run the quality test on it (heavden/agent/evalsets/assistant.yaml) before visitors get it.
+# The models each assistant may run on, and how to call each one (the final lists, 17 Oct 2026).
+# Switching is one setting per assistant, to any model in its list:
+#   app         the app's own assistant (the model writes the SQL: the hard task):
+#               LLM_PROVIDER + LLM_MODEL (.env locally, Render's environment online)
+#   databricks  the Databricks assistant (Genie writes the SQL): its LLM_ENDPOINT setting
+# A model not in an assistant's list is refused there. The quality test runs each list at these
+# settings (quality.CONTESTANTS): add a model, run the test on it, before visitors get it.
 #
 #   provider          databricks: a serving endpoint in the workspace (hosted by Databricks,
 #                     or an AI Gateway endpoint in front of your own keys), called with a
 #                     Databricks identity, no keys. openai / azure: your own keys.
-#   reasoning_effort  sent with each request when given (left out otherwise).
+#   reasoning_effort  sent with each request when given (left out: the model's own default).
+#   max_tokens        the answer's limit when 1,200 isn't enough: for gpt-5 models it covers the
+#                     hidden reasoning too (only the tokens used are billed).
 #
 # The name is the serving endpoint (databricks), the model (openai) or YOUR deployment (azure).
+# Results and how the lists were chosen: docs/quality/README.md.
 
-models:
-  # Hosted by Databricks: tool calling tested 16 Oct 2026
-  databricks-gpt-oss-120b: {provider: databricks, reasoning_effort: low}
-  databricks-qwen35-122b-a10b: {provider: databricks}
-  databricks-llama-4-maverick: {provider: databricks}
-  # Hosted by Databricks: refused for this account on 16 Oct 2026 (Anthropic models need the
-  # account upgraded or approved); listed so the switch is ready when they open
-  databricks-claude-sonnet-5-5: {provider: databricks}
-  databricks-claude-haiku-5-5: {provider: databricks}
-  # Your own keys
+app:
+  gpt-5.5: {provider: openai, reasoning_effort: none}  # the main model; run 3: PASS as shipped
+  # The fallback, at its default reasoning: failed the app scorecard in runs 1-2 (SQL mistakes),
+  # and twice used the whole 1,200 tokens thinking (no answer), hence the higher limit
+  gpt-5-mini: {provider: azure, max_tokens: 4000}
+  # For comparison, not for visitors: failed the app scorecard as shipped (run 3); at its
+  # default, never low (at low it wrote protocol steps from memory)
+  databricks-gpt-oss-120b: {provider: databricks}
+
+databricks:
+  # Its default: passed run 2. At low it skipped the document search and wrote protocol steps
+  # from memory (run 3), so never low
+  databricks-gpt-oss-120b: {provider: databricks}
+  # Your keys, from .env, until their AI Gateway endpoints exist (then provider databricks,
+  # named by the endpoint, same settings). gpt-5-mini at its default: passed run 2
+  gpt-5-mini: {provider: azure, max_tokens: 4000}
   gpt-5.5: {provider: openai, reasoning_effort: none}
-  # 16 Oct 2026: with none it picked the right tool in 1.6 s; unset, the wrong one in 3.7 s
-  gpt-5-mini: {provider: azure, reasoning_effort: none}

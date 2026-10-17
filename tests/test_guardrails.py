@@ -8,6 +8,7 @@ from heavden_api.chat.agent import (
     ToolCall,
     accumulate_stream,
     agent_events,
+    plain_citations,
     system_prompt,
     text_of,
 )
@@ -211,6 +212,31 @@ def test_reasoning_models_answer_text_is_kept_and_their_reasoning_dropped():
     *texts, reply = list(accumulate_stream(stream))
     assert texts == ["NEWS2 is", " a score."] and reply.content == "NEWS2 is a score."
     assert "user asks" not in reply.content  # the reasoning never reaches the reader
+
+
+@pytest.mark.parametrize(
+    "written, shown",
+    [  # forms GPT-OSS wrote in the quality test on 16 Oct 2026
+        ("Call at 5 or more【2†L1-L4】.", "Call at 5 or more [2]."),
+        ("1.5 % of messages**. 【4†L1-L4】", "1.5 % of messages**. [4]"),
+        ("88 % flagged【1†ref】, AUROC 0.79 【2】.", "88 % flagged [1], AUROC 0.79 [2]."),
+        ("See the runbook【ref:5】 and【3†ref 3】.", "See the runbook [5] and [3]."),
+        ("High risk now【query_gold result】.", "High risk now."),
+        ("Sources:\n【1†L1-L7】 protocol", "Sources:\n[1] protocol"),
+        ("Plain [2] stays; so does 【 a bracket never closed", None),
+    ],
+)
+def test_a_models_own_citation_marks_are_shown_as_ours(written, shown):
+    def chunk(content):
+        delta = SimpleNamespace(content=content, tool_calls=None)
+        return SimpleNamespace(choices=[SimpleNamespace(delta=delta)])
+
+    shown = written if shown is None else shown
+    assert plain_citations(written) == shown
+    for size in (1, 3, 7):  # the same text streamed in pieces, marks split across them
+        pieces = [written[i : i + size] for i in range(0, len(written), size)]
+        *texts, reply = list(accumulate_stream([chunk(p) for p in pieces]))
+        assert "".join(texts) == shown and reply.content == shown
 
 
 # --- The endpoints -----------------------------------------------------------------------------

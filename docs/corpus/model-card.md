@@ -78,7 +78,11 @@ Responses to each band are set by the escalation protocol (HD-CLIN-001).
 
 **Against version 1, on 300 resamples of the test block's patient stays:** version 3 flagged at least as many escalations in 89% of them, had the higher AUROC in 97%, and the higher AUPRC in 52%.
 
-**Reading it:** within the same alert budget, version 3 alerted in advance for **2 more of the 28** deteriorating patients than version 1 and **5 more** than NEWS2, for about the same number of alerts per nurse. Its overall ranking (AUROC) is clearly better than version 1's under the new protocol. Its very top of the list (AUPRC) and its calibration (Brier) are about the same as version 1's: the gain is in the middle of the ranking, where protocol v2.0 now escalates patients earlier, with milder vital signs. Most alerts are still not followed by an escalation within 6 hours, for either score: escalation is rare.
+**Reading it, against NEWS2:** within the same alert budget, version 3 alerted in advance for **22 of the 28** deteriorating patients, NEWS2 for **17** (79% vs 61%): **5 more**. It also ranks patients better than NEWS2 (AUROC 0.76 vs 0.74, AUPRC 0.21 vs 0.15), with a slightly higher alert load (2.15 vs 1.79 alerts per nurse per shift) and about the same share of alerts followed by an escalation (4.0% vs 4.1%).
+
+**Reading it, against version 1:** version 3 alerted in advance for **2 more of the 28** than version 1 (22 vs 20), for about the same number of alerts per nurse (2.15 vs 2.10). Its overall ranking (AUROC 0.76 vs 0.70) is clearly better than version 1's under the new protocol. Its very top of the list (AUPRC) and its calibration (Brier) are about the same as version 1's: the gain is in the middle of the ranking, where protocol v2.0 now escalates patients earlier, with milder vital signs.
+
+Most alerts are still not followed by an escalation within 6 hours, for either score: escalation is rare.
 
 **Version 1, for comparison over time** (card v1.0): on its own test block (1 to 3 October, before protocol v2.0, 26 escalations) it flagged 23 of 26 against NEWS2's 19. Those were different days, before protocol v2.0, so the two tables can't be compared directly.
 
