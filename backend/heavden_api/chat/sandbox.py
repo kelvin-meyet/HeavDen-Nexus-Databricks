@@ -20,7 +20,9 @@ from heavden_api.snapshot import Snapshot
 # Tables the assistant may query, with what each row is (for the prompt).
 CHAT_TABLES = {
     "site_kpis_hourly": "one row per unit per hour: census, patients per risk band, new alerts, "
-    "escalations, mean NEWS2",
+    "escalations, mean NEWS2. Alert load (alerts per nurse per 12-hour shift) over a period = "
+    "sum(alerts_raised) * 60.0 / sum(census): one nurse looks after 5 patients for 12 hours; "
+    "the budget is about 2 (as Genie and the dashboards count it)",
     "alerts_fact": "one row per alert (a patient entering the High band; no repeat for the same "
     "stay within 6 h): risk and NEWS2 at alert time, whether an escalation followed within 6 h",
     "escalations_fact": "one row per escalation (rapid_response or icu_transfer): where, when, and "

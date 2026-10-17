@@ -175,3 +175,14 @@ def test_two_spaces_with_the_same_title_stop_the_job(payload):
     twins = [{"space_id": i, "title": "HeavDen Ward Data (staging)"} for i in ("a", "b")]
     with pytest.raises(RuntimeError, match="2 Genie spaces"):
         _publish(FakeApi([twins]), payload)
+
+
+def test_the_apps_assistant_counts_alert_load_as_genie_does():
+    """The app's model writes its own SQL from the table notes; without Genie's definition every
+    model guessed the alert load (quality runs 1-3)."""
+    from heavden_api.chat.sandbox import CHAT_TABLES
+
+    measure = next(
+        m for m in genie.load_spec()["measures"] if m["alias"] == "alerts_per_nurse_per_shift"
+    )
+    assert measure["sql"].replace("site_kpis_hourly.", "") in CHAT_TABLES["site_kpis_hourly"]

@@ -18,6 +18,7 @@ swap in the Databricks agent endpoint. Only text turns are kept between requests
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -26,7 +27,7 @@ from heavden_api.chat.guardrails import REFUSALS, REPO_URL, LeakDetector
 from heavden_api.chat.tools import TOOL_SPECS, Toolbox
 
 MAX_ROUNDS = 6
-MAX_ANSWER_TOKENS = 1200
+MAX_ANSWER_TOKENS = 1200  # a model's own limit in chat/models.yaml overrides it
 
 
 @dataclass
@@ -64,6 +65,35 @@ def text_of(content) -> str:
     return "".join(texts)
 
 
+# GPT-OSS cites in its own format whatever the instructions say: 【2†L1-L4】, 【1†ref】, 【ref:5】
+# (passage 2, 1, 5), or 【query_gold result】 (no passage). Marks are at most 40 characters inside.
+_MARK = re.compile(r"[^\S\n]*【([^【】]{0,40})】")  # with the spaces before it (any but a newline)
+_MARK_MAX = 42
+
+
+def plain_citations(text: str) -> str:
+    """A model's own citation marks written as ours: " [2]" (the mark's first number, which is
+    the passage); a mark without a number is dropped."""
+
+    def ours(mark: re.Match) -> str:
+        number = re.search(r"\d+", mark.group(1))
+        if number is None:
+            return ""
+        line_start = mark.start() == 0 or text[mark.start() - 1] == "\n"
+        return f"{'' if line_start else ' '}[{number.group()}]"
+
+    return _MARK.sub(ours, text)
+
+
+def _settled(text: str) -> str:
+    """The part of streamed text that a citation mark can no longer change: up to a "【" that
+    may still be closed, and without trailing spaces (a mark may follow them)."""
+    start = text.rfind("【")
+    if start >= 0 and "】" not in text[start:] and len(text) - start < _MARK_MAX:
+        text = text[:start]
+    return text.rstrip()
+
+
 def stream_reply(llm: LLM, messages: list[dict], tools: list[dict]) -> Iterator[str | LLMReply]:
     """Text deltas, then the full reply. Falls back to one chunk if the LLM can't stream."""
     if hasattr(llm, "stream"):
@@ -80,7 +110,8 @@ class OpenAILLM:
     the same API at `base_url`: Azure OpenAI in Foundry (`model` = your deployment), or a
     Databricks serving endpoint (`model` = the endpoint's name). `api_key` may be a function
     returning a fresh token for each request (Databricks tokens expire); `token_limit` is the
-    name the service gives the answer-length limit (`heavden_api.chat.models.TOKEN_LIMIT`)."""
+    name the service gives the answer-length limit (`heavden_api.chat.models.TOKEN_LIMIT`), and
+    `max_tokens` its value (for gpt-5 models it also covers the hidden reasoning)."""
 
     # reasoning_effort: how long the model thinks before answering; each model's setting is in
     # chat/models.yaml. Tool calls work with any setting (checked 16 Oct 2026); "none" is the
@@ -92,6 +123,7 @@ class OpenAILLM:
         reasoning_effort: str | None = "none",
         base_url: str | None = None,
         token_limit: str = "max_completion_tokens",
+        max_tokens: int = MAX_ANSWER_TOKENS,
     ):
         from openai import OpenAI
 
@@ -101,9 +133,10 @@ class OpenAILLM:
         self.model = model
         self.reasoning_effort = reasoning_effort
         self.token_limit = token_limit
+        self.max_tokens = max_tokens
 
     def _options(self) -> dict:
-        options: dict = {self.token_limit: MAX_ANSWER_TOKENS}
+        options: dict = {self.token_limit: self.max_tokens}
         if self.reasoning_effort:
             options["reasoning_effort"] = self.reasoning_effort
         return options
@@ -121,7 +154,7 @@ class OpenAILLM:
         calls = [
             ToolCall(c.id, c.function.name, c.function.arguments) for c in message.tool_calls or []
         ]
-        return LLMReply(text_of(message.content) or None, calls)
+        return LLMReply(plain_citations(text_of(message.content)) or None, calls)
 
     def stream(self, messages: list[dict], tools: list[dict]) -> Iterator[str | LLMReply]:
         self._refresh()
@@ -133,8 +166,9 @@ class OpenAILLM:
 
 def accumulate_stream(chunks) -> Iterator[str | LLMReply]:
     """Turn streamed Chat Completions chunks into text deltas plus the final reply.
-    Tool calls arrive in pieces keyed by index (id and name first, then argument fragments)."""
-    text: list[str] = []
+    Tool calls arrive in pieces keyed by index (id and name first, then argument fragments).
+    Citation marks may arrive in pieces too, so text is sent once no mark can change it."""
+    raw, sent = "", 0
     calls: dict[int, dict] = {}
     for chunk in chunks:
         if not chunk.choices:
@@ -142,8 +176,11 @@ def accumulate_stream(chunks) -> Iterator[str | LLMReply]:
         delta = chunk.choices[0].delta
         piece = text_of(getattr(delta, "content", None))
         if piece:
-            text.append(piece)
-            yield piece
+            raw += piece
+            ready = plain_citations(_settled(raw))
+            if len(ready) > sent:
+                yield ready[sent:]
+                sent = len(ready)
         for part in getattr(delta, "tool_calls", None) or []:
             call = calls.setdefault(part.index, {"id": "", "name": "", "arguments": ""})
             if part.id:
@@ -151,8 +188,11 @@ def accumulate_stream(chunks) -> Iterator[str | LLMReply]:
             if part.function is not None:
                 call["name"] += part.function.name or ""
                 call["arguments"] += part.function.arguments or ""
+    text = plain_citations(raw)
+    if len(text) > sent:
+        yield text[sent:]
     yield LLMReply(
-        "".join(text) or None,
+        text or None,
         [ToolCall(c["id"], c["name"], c["arguments"]) for _, c in sorted(calls.items())],
     )
 
@@ -166,17 +206,64 @@ class ChatAnswer:
     redacted: bool = False
 
 
+_SQL_RULES = """\
+SQL rules: one SELECT; only the gold.* tables below; aggregate rather than dump rows; round
+numbers; risk is a probability (0-1), so show it as a percentage. An alert is a patient
+entering the High band (risk >= {high:.4f}). There are two bands: High and Low.
+"The last N hours/days" means ts > now - N AND ts <= now (as the dashboards count it).
+"Right now" means the hour now itself: patients on the ward now are the risk_scores rows at
+prediction_ts = now. A stay whose latest row is before now has left the ward, so never take
+each stay's latest row as its current state.
+For daily figures, count only complete days (00:00-24:00 UTC) and say which days; the first
+and last day of a window are often partial. Compute differences and percentages in SQL; never
+do arithmetic in your head. If a query fails, read the error, fix the SQL and try again.
+
+Tables:
+{schema}"""
+
+GENIE_RULES = """\
+SQL rules: query_gold writes the SQL itself, from one plain-English question. Ask exactly
+what you need, with the time window and sites or units in words (e.g. "alerts per unit in the
+last 24 hours"); one figure per question, another call for another figure. Keep the window in
+the user's words: never turn it into dates or timestamps, as query_gold knows "now" and counts
+"the last N hours/days" the way the dashboards do. It returns the SQL
+it ran and the rows; if they don't answer the question, rephrase once. Risk is a probability
+(0-1), so show it as a percentage. An alert is a patient entering the High band; there are two
+bands, High and Low. For daily figures, complete days only; say which days. Use the numbers it
+returns and never do arithmetic in your head: ask query_gold for differences or percentages."""
+
+
 def system_prompt(
     as_of: str,
-    bands: dict,
-    schema: str,
+    bands: dict | None,
+    schema: str = "",
     data_start: str | None = None,
     canary: str = "",
+    data_tool: str = "sql",
 ) -> str:
+    """The instructions. `data_tool` "sql": query_gold runs the LLM's DuckDB SQL over `schema`
+    (demo mode); "genie": query_gold asks the Genie space a plain-English question (Databricks),
+    so the SQL rules and the table list become `GENIE_RULES` and no alert threshold is needed."""
+    genie = data_tool == "genie"
+    if genie:
+        now_line = (
+            f'"Now" is {as_of} (UTC), the latest scored hour; use this timestamp instead of\n'
+            'today\'s date. query_gold uses the same "now". Timestamps are UTC.'
+        )
+        query_tool = "one plain-English question; it writes and runs the SQL"
+        codes = "In questions to query_gold either works; in answers always\nuse the"
+        data_rules = GENIE_RULES
+    else:
+        now_line = (
+            f'"Now" is {as_of} (UTC); use this timestamp instead of\n'
+            f"now() or current_date in SQL, written as TIMESTAMPTZ '{as_of}'. Timestamps are UTC."
+        )
+        query_tool = "DuckDB SQL over gold tables"
+        codes = "In SQL use the codes; in answers always use the"
+        data_rules = _SQL_RULES.format(high=bands["high"], schema=schema)
     return f"""You are the HeavDen-Nexus assistant for staff of a FICTIONAL hospital network.
 All patients and data are synthetic. Data covers {data_start or "the last 14 days"} to now.
-"Now" is {as_of} (UTC); use this timestamp instead of
-now() or current_date in SQL, written as TIMESTAMPTZ '{as_of}'. Timestamps are UTC.
+{now_line}
 [{canary}]
 
 Scope: questions about the HeavDen wards' data, the hospital's documents (protocols, NEWS2,
@@ -204,12 +291,15 @@ emergency, say you can't advise on real patients and they should contact their c
 or emergency services.
 
 Choose tools by question type:
-- numbers, counts, rates, trends, comparisons -> query_gold (DuckDB SQL over gold tables)
+- numbers, counts, rates, trends, comparisons -> query_gold ({query_tool})
 - protocols, NEWS2, devices, safety notices, drift procedures, the model and how well it
   performs (the model card has the evaluation; don't compute your own metrics)
-  -> search_documents
+  -> search_documents, for the current versions (as_of null). "Now" above dates the ward
+  data, not the documents: pass as_of only when the question names a past date.
 - why one patient is (or isn't) high risk -> explain_patient (find the patient's label with
-  query_gold first if the question only describes them, e.g. "the highest-risk patient")
+  query_gold first if the question only describes them, e.g. "the highest-risk patient").
+  If it returns on_ward_now false, the patient has left the ward: say so and give their last
+  scored hour; don't describe them as flagged now.
 Some questions need two tools (e.g. a patient's risk and what the protocol says to do).
 
 Follow-ups: earlier answers may end with a "Context from this turn" note listing the SQL, rows,
@@ -217,7 +307,7 @@ documents or patient behind them. Use it to resolve references such as "that uni
 "the same by day". Re-run a tool for any figure you report now rather than reusing an old
 number, unless the question is about the earlier answer itself. Don't repeat the note.
 
-Sites: the data uses codes, people use names. In SQL use the codes; in answers always use the
+Sites: the data uses codes, people use names. {codes}
 names, never the codes:
 - SITE_A -> General Hospital (HeavDen General Hospital, Boston)
 - SITE_B -> Northshore (HeavDen Northshore Medical Center, Salem)
@@ -227,16 +317,7 @@ Units (unit_id) are SITE-WARD codes; in answers write them in plain words, e.g. 
 Valley", SITE_B-STEP_DOWN -> "the step-down unit at Northshore". Refer to patients by their
 label (e.g. P-1735), never by encounter_id. Column names and codes belong only in SQL.
 
-SQL rules: one SELECT; only the gold.* tables below; aggregate rather than dump rows; round
-numbers; risk is a probability (0-1), so show it as a percentage. An alert is a patient
-entering the High band (risk >= {bands["high"]:.4f}). There are two bands: High and Low.
-"The last N hours/days" means ts > now - N AND ts <= now (as the dashboards count it).
-For daily figures, count only complete days (00:00-24:00 UTC) and say which days; the first
-and last day of a window are often partial. Compute differences and percentages in SQL; never
-do arithmetic in your head. If a query fails, read the error, fix the SQL and try again.
-
-Tables:
-{schema}
+{data_rules}
 
 Answer rules:
 - Be brief and concrete. Answer only what was asked; don't add extra comparisons.
@@ -266,10 +347,11 @@ def agent_events(
     messages.append({"role": "user", "content": question})
     steps: list[dict] = []
 
+    specs = getattr(toolbox, "specs", TOOL_SPECS)
     for round_ in range(1, max_rounds + 1):
         streamed: list[str] = []
         reply: LLMReply | None = None
-        for item in stream_reply(llm, messages, TOOL_SPECS):
+        for item in stream_reply(llm, messages, specs):
             if isinstance(item, LLMReply):
                 reply = item
                 break

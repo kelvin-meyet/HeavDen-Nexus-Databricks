@@ -4,7 +4,9 @@
 
 locals {
   lake_host = "${azurerm_storage_account.lake.name}.dfs.core.windows.net"
-  schemas   = ["bronze", "silver", "gold", "ml", "monitoring"]
+  # assistant: the assistant's MLflow traces (quality tests, and later real chats), in Unity
+  # Catalog tables that MLflow creates there
+  schemas = ["bronze", "silver", "gold", "ml", "monitoring", "assistant"]
 
   catalog_schemas = {
     for pair in setproduct(var.environments, local.schemas) :

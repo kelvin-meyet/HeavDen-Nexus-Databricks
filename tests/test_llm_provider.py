@@ -1,8 +1,9 @@
 import pytest
 
-from heavden_api import config
+from heavden_api import config, deps
+from heavden_api.chat import models
 from heavden_api.chat.agent import MAX_ANSWER_TOKENS, OpenAILLM
-from heavden_api.chat.models import PROVIDERS, load_models
+from heavden_api.chat.models import ASSISTANTS, PROVIDERS, load_models
 from heavden_api.config import Settings, azure_base_url
 from heavden_api.deps import build_state
 
@@ -75,23 +76,27 @@ def test_the_assistant_is_built_for_the_chosen_provider(demo_snapshot):
     llm = build_state(settings).llm  # building the client makes no network call
     assert isinstance(llm, OpenAILLM) and llm.model == "gpt-5-mini"
     assert str(llm.client.base_url) == ENDPOINT + "/openai/v1/"
-    assert llm._options() == {
-        "max_completion_tokens": MAX_ANSWER_TOKENS,
-        "reasoning_effort": "none",
-    }
+    # the fallback thinks at its default (no reasoning_effort sent), with room to answer: at
+    # 1,200 tokens it used them all thinking, twice (quality run 2)
+    assert llm._options() == {"max_completion_tokens": 4000}
+    assert OpenAILLM("k", "m")._options()["max_completion_tokens"] == MAX_ANSWER_TOKENS
     assert build_state(_settings(snapshot_dir=demo_snapshot)).llm is None
 
 
 def test_a_databricks_endpoint_is_called_with_a_fresh_token_and_its_own_settings(
-    demo_snapshot, monkeypatch
+    demo_snapshot, monkeypatch, tmp_path
 ):
+    # the app's own list has no Databricks endpoint today: give it one
+    listed = tmp_path / "models.yaml"
+    listed.write_text("app:\n  an-endpoint: {provider: databricks, reasoning_effort: low}\n")
+    monkeypatch.setattr(deps, "profile", lambda *a: models.profile(*a, path=listed))
     tokens = iter(["token-1", "token-2"])
     monkeypatch.setattr(config, "databricks_token", lambda: next(tokens))
     settings = _settings(
         snapshot_dir=demo_snapshot,
         llm_provider="databricks",
         databricks_host="adb-1.azuredatabricks.net/",
-        llm_model="databricks-gpt-oss-120b",
+        llm_model="an-endpoint",
         llm_reasoning_effort=None,
     )
     llm = build_state(settings).llm  # no token is fetched until the first request
@@ -107,11 +112,22 @@ def test_a_databricks_endpoint_is_called_with_a_fresh_token_and_its_own_settings
 
 def test_only_listed_models_and_their_own_provider_are_accepted(demo_snapshot):
     keyed = {"snapshot_dir": demo_snapshot, "openai_api_key": "openai-key"}
-    with pytest.raises(ValueError, match="not in models.yaml"):
+    with pytest.raises(ValueError, match="not in the app list of models.yaml"):
         build_state(_settings(**keyed, llm_model="gpt-4-something"))
     with pytest.raises(ValueError, match="served by databricks"):
         build_state(_settings(**keyed, llm_model="databricks-gpt-oss-120b"))
-    assert all(m.provider in PROVIDERS for m in load_models().values())
+    with pytest.raises(ValueError, match="served by azure"):
+        build_state(_settings(**keyed, llm_model="gpt-5-mini"))
+    assert all(m.provider in PROVIDERS for a in ASSISTANTS for m in load_models(a).values())
+
+
+def test_each_assistant_switches_between_its_own_final_list():
+    assert set(load_models("app")) == {"gpt-5.5", "gpt-5-mini", "databricks-gpt-oss-120b"}
+    assert set(load_models("databricks")) == {"databricks-gpt-oss-120b", "gpt-5-mini", "gpt-5.5"}
+    # GPT-OSS at low wrote protocol steps from memory (quality run 3): its default, never low
+    for assistant in ASSISTANTS:
+        assert load_models(assistant)["databricks-gpt-oss-120b"].reasoning_effort is None
+    assert load_models("app")["gpt-5.5"].reasoning_effort == "none"  # the main model
 
 
 def test_the_reasoning_effort_setting_overrides_the_models_own(demo_snapshot):

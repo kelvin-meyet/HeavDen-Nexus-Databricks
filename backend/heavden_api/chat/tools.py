@@ -61,8 +61,9 @@ TOOL_SPECS = [
                     "query": {"type": "string", "description": "What to look for."},
                     "as_of": {
                         "type": ["string", "null"],
-                        "description": "YYYY-MM-DD to use the document versions in force that "
-                        "day (e.g. a past protocol), or null for the current versions.",
+                        "description": "null for the current versions (the default, also for "
+                        "'the model in use' or 'the protocol now'). YYYY-MM-DD only when the "
+                        "question names a past date, to use the versions in force that day.",
                     },
                 },
                 "required": ["query", "as_of"],
@@ -116,12 +117,21 @@ ORDER BY alert_ts
 
 
 class Toolbox:
-    """Runs tool calls for one chat turn and numbers document passages across the turn."""
+    """Runs tool calls for one chat turn and numbers document passages across the turn.
+    `specs` are the tools offered to the LLM; `chat/databricks_tools.py` serves the same three
+    tools from Databricks."""
+
+    specs = TOOL_SPECS
 
     def __init__(self, state: AppState, sandbox: SqlSandbox):
         self.state = state
         self.sandbox = sandbox
         self.citations: list[dict] = []
+
+    def documents(self):
+        """The document search: a `heavden.agent.retrieval.Retriever`, or anything with the same
+        `search(query, k, as_of=...)`."""
+        return self.state.retriever()
 
     def call(self, name: str, arguments: dict) -> tuple[str, dict]:
         handler = {
@@ -159,7 +169,7 @@ class Toolbox:
         return json.dumps(payload, default=str), step
 
     def search_documents(self, query: str, as_of: str | None = None) -> tuple[str, dict]:
-        retriever = self.state.retriever()
+        retriever = self.documents()
         if retriever is None:
             return json.dumps({"error": "no document index"}), {"tool": "search_documents"}
         day = date.fromisoformat(as_of) if as_of else None
