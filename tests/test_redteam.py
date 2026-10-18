@@ -39,6 +39,7 @@ def test_internal_codes_are_caught_whatever_the_hyphen(answer, shown):
         "I’m only able to help with questions about HeavDen ward data and related hospital "
         "information.",  # GPT-OSS
         "I’m sorry, but I can only help with questions about HeavDen wards and related data.",
+        "I’m sorry, but I can only help with questions about the HeavDen hospital wards.",
     ],
 )
 def test_a_decline_in_other_words_still_counts(decline):

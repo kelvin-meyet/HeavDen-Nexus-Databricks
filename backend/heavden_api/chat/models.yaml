@@ -26,10 +26,15 @@ app:
   databricks-gpt-oss-120b: {provider: databricks}
 
 databricks:
-  # Its default: passed run 2. At low it skipped the document search and wrote protocol steps
-  # from memory (run 3), so never low
+  # Reached only through serving endpoints, as the deployed Databricks assistant's own identity.
+  # GPT-OSS, hosted by Databricks, at its default (passed run 2; at low it wrote protocol steps
+  # from memory, run 3): for comparison in dev, not for visitors (on the dev endpoint,
+  # 18 Oct, it answered "why only 6 conditions" without the documents and named conditions we
+  # don't have)
   databricks-gpt-oss-120b: {provider: databricks}
-  # Your keys, from .env, until their AI Gateway endpoints exist (then provider databricks,
-  # named by the endpoint, same settings). gpt-5-mini at its default: passed run 2
-  gpt-5-mini: {provider: azure, max_tokens: 4000}
-  gpt-5.5: {provider: openai, reasoning_effort: none}
+  # AI Gateway endpoints in front of your own keys (infra/terraform/llm_gateway.tf):
+  # gpt-5-mini on your Azure deployment, at its default: the model since 18 Oct
+  # (passed run 2, grounded 18/18; red-team of the dev endpoint 0/19, documents cited)
+  heavden-gpt-5-mini: {provider: databricks, max_tokens: 4000}
+  # gpt-5.5 on OpenAI, the app's main model: for comparison in dev
+  heavden-gpt-5-5: {provider: databricks, reasoning_effort: none}

@@ -1,0 +1,61 @@
+# Deploy the Databricks assistant (Plan.md §11.2 step 5): log the agent (the app assistant's loop,
+# instructions and guardrails with the Databricks tools) as an MLflow model, register it as
+# <catalog>.ml.assistant, deploy it with agents.deploy to the serving endpoint
+# heavden-assistant-<target> (scale to zero: no cost while idle), and ask it one question.
+# Code in backend/heavden_api/chat/assistant_deploy.py. It answers from `model_catalog`'s Gold
+# (dev: staging's, dev has no scores) through the Genie space `genie_title`, on the model
+# `assistant_llm_endpoint`. Staging runs it in CI when the assistant's code or documents change.
+resources:
+  jobs:
+    assistant_deploy:
+      name: heavden-assistant-deploy
+      description: Logs, registers and deploys the Databricks assistant to heavden-assistant-${bundle.target}, on ${var.assistant_llm_endpoint}.
+      max_concurrent_runs: 1
+      performance_target: STANDARD
+      # per version: logging ~5 min, serving ~10 min; "all" deploys three, then removes old ones
+      timeout_seconds: 7200
+      tags:
+        project: heavden
+        component: assistant
+      parameters:
+        - name: models # default, or all: one version per listed model (dev's comparison set)
+          default: ${var.assistant_models}
+      tasks:
+        - task_key: deploy
+          environment_key: assistant
+          spark_python_task:
+            python_file: ../src/jobs/deploy_assistant.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --data-catalog
+              - ${var.model_catalog}
+              - --warehouse-id
+              - ${var.warehouse_id}
+              - --genie-title
+              - ${var.genie_title}
+              - --endpoint-name
+              - heavden-assistant-${bundle.target}
+              - --llm-endpoint
+              - ${var.assistant_llm_endpoint}
+              - --models
+              - "{{job.parameters.models}}"
+              # the model's runs and the endpoint's traces (kept by the experiment itself, not in
+              # Unity Catalog: see assistant_deploy.py)
+              - --experiment
+              - /Workspace/Users/${workspace.current_user.userName}/heavden-databricks-assistant
+      environments:
+        - environment_key: assistant
+          spec:
+            environment_version: "6"
+            dependencies:
+              - ../../dist/*.whl
+              # newer than env 6's 3.12, whose endpoint traces never arrived: 3.16.1's tracing in
+              # Model Serving is the code read and checked (17 Oct); the endpoint gets the same
+              - mlflow-skinny==3.16.1
+              # the agent framework, and what the assistant needs besides the wheel's own
+              # dependencies (pinned as in uv.lock)
+              - databricks-agents==1.12.0
+              - openai==3.26.1
+              - duckdb==1.5.6
+              - faiss-cpu==1.15.1

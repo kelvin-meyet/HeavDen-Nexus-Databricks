@@ -7,7 +7,13 @@ databricks_host     = "https://adb-<workspace-id>.<n>.azuredatabricks.net"
 my_ip               = "<from https://ifconfig.me>"
 alert_emails        = ["<where budget alerts go>", "<optional second address>"]
 
+# The Azure OpenAI deployment behind heavden-gpt-5-mini (from its "Target URI" in the Foundry
+# portal; the key goes into the secret scope heavden-llm, never here)
+azure_openai_endpoint    = "https://<resource>.openai.azure.com"
+azure_openai_api_version = "<the api-version in the Target URI>"
+
 # Optional (defaults shown)
 # location      = "centralus"
 # budget_amount = 200
 # budget_start  = "2026-10-01T00:00:00Z"
+# azure_openai_deployment = "gpt-5-mini"

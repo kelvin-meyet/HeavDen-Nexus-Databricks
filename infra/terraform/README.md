@@ -13,6 +13,7 @@ Creates everything the platform needs around the existing Azure Databricks works
 | Catalogs `heavden_dev` / `heavden_staging` / `heavden_prod`, each with `bronze`, `silver`, `gold`, `ml`, `monitoring` | the medallion layout, owned by the `heavden-admins` group |
 | External volume `heavden_<env>.bronze.landing` | the environment's landing folder, read by Auto Loader |
 | Service principals `heavden-ci-dev` / `-staging` / `-prod` (Entra ID + workspace), GitHub OIDC trust, catalog and connection grants | the identities GitHub Actions deploys as (`identities.tf`) |
+| Secret scope `heavden-llm` (created empty), serving endpoints `heavden-gpt-5-5` (OpenAI) and `heavden-gpt-5-mini` (Azure OpenAI), query rights for the staging and prod service principals | the Databricks assistant's models on Kelvin's own keys, switched like the models Databricks hosts (`llm_gateway.tf`) |
 
 ## Use
 
@@ -32,6 +33,8 @@ All providers authenticate with the Azure CLI login, so no keys are stored in fi
 At the end of the project, `terraform destroy` removes everything except `heavden_prod`, which refuses to be destroyed while it holds tables (drop them first, on purpose).
 
 ## Notes
+
+- **The keys behind `heavden-gpt-5-5` and `heavden-gpt-5-mini` never pass through Terraform.** The first apply creates the empty scope (`terraform apply -target=databricks_secret_scope.llm`); the keys are then put in with `databricks secrets put-secret heavden-llm openai-api-key` and `... azure-openai-key` (each prompts for its value); a full apply creates the two endpoints, which read them. Nothing bills while idle; the tokens bill to the OpenAI account and the Azure subscription. Each endpoint allows 60 calls a minute and records its usage (`system.serving.endpoint_usage`).
 
 - Azure SQL accepts connections from Azure services (Databricks serverless runs inside Azure) and from `my_ip`, for loading. The data is synthetic.
 - `azurerm` has no setting for the SQL free offer, so the database is created with `azapi` (`useFreeLimit`, `freeLimitExhaustionBehavior = AutoPause`). Only one free database is allowed per subscription.

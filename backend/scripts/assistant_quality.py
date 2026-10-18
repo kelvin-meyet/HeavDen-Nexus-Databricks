@@ -91,6 +91,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--vector-search-index", help="else the packaged document index")
     parser.add_argument("--experiment", default="/Shared/heavden-assistant-quality")
     parser.add_argument("--out", type=Path, default=ROOT / "data" / "quality")
+    parser.add_argument("--gate", action="store_true", help="exit 1 if any scorecard fails (CI)")
     args = parser.parse_args(argv)
 
     import mlflow
@@ -170,6 +171,9 @@ def main(argv: list[str] | None = None) -> None:
     print("\n" + text + f"\n\nSaved to {path}")
     if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
         Path(summary).write_text(text + "\n", encoding="utf-8")
+    if args.gate and not all(c.passed for c in cards):
+        failed = [c.model for c in cards if not c.passed]
+        raise SystemExit(f"quality gate failed: {', '.join(failed)}")
 
 
 if __name__ == "__main__":
