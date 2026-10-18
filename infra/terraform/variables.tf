@@ -67,3 +67,22 @@ variable "github_oidc_subject_prefix" {
   type        = string
   default     = "repo:kelvin-meyet@167044815/HeavDen-Nexus-Databricks@1407984379"
 }
+
+# The Azure OpenAI deployment behind the heavden-gpt-5-mini endpoint (llm_gateway.tf). None of
+# these is a secret: the key goes into the secret scope heavden-llm instead. All three are on the
+# deployment's page in the Azure AI Foundry portal ("Target URI").
+variable "azure_openai_endpoint" {
+  description = "The Azure OpenAI resource's address, e.g. https://<resource>.openai.azure.com"
+  type        = string
+}
+
+variable "azure_openai_deployment" {
+  description = "Name of the gpt-5-mini deployment in that resource."
+  type        = string
+  default     = "gpt-5-mini"
+}
+
+variable "azure_openai_api_version" {
+  description = "The api-version in the deployment's Target URI, e.g. 2025-04-01-preview."
+  type        = string
+}

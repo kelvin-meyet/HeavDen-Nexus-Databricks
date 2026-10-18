@@ -12,7 +12,8 @@ from heavden_api.chat.agent import (
     system_prompt,
     text_of,
 )
-from heavden_api.chat.guardrails import REFUSALS, LeakDetector, screen_question
+from heavden_api.chat.guardrails import REFUSALS, LeakDetector, plain_names, screen_question
+from heavden_api.chat.redteam import INTERNAL_CODE
 
 pytest.importorskip("faiss")
 
@@ -82,6 +83,35 @@ def test_every_marker_appears_in_the_real_prompt():
     flat = re.sub(r"\s+", " ", prompt.lower())
     assert [m for m in PROMPT_MARKERS if m not in flat] == []
     assert LeakDetector("x").leaks(prompt)  # a verbatim dump is always caught
+
+
+# --- Codes a model writes anyway become names --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "written,shown",
+    [
+        # GPT-OSS on the dev Databricks assistant, 17 Oct, with its non-breaking hyphen
+        (
+            "who is in **the general ward at General Hospital (SITE_A\u2011GENERAL)**.",
+            "who is in **the general ward at General Hospital**.",
+        ),
+        # ... and on the app, 17 Oct
+        (
+            "The **general ward at General Hospital** (unit `SITE_A\u2011GENERAL`) recorded",
+            "The **general ward at General Hospital** recorded",
+        ),
+        ("Valley (`SITE_C`) has 1.", "Valley has 1."),
+        ("Valley (site id: SITE_C) has 1.", "Valley has 1."),
+        ("Most alerts were at SITE_B.", "Most alerts were at Northshore."),
+        ("- SITE_B-STEP_DOWN: 3", "- The step-down unit at Northshore: 3"),
+        ("**SITE_C-RESPIRATORY** had 2", "**The respiratory ward at Valley** had 2"),
+        ("P-1876 is on SITE_ABC.", "P-1876 is on SITE_ABC."),  # not a code: left alone
+    ],
+)
+def test_codes_in_an_answer_become_names(written, shown):
+    assert plain_names(written) == shown
+    assert not INTERNAL_CODE.search(shown)  # what the red-team checks
 
 
 class StreamingLLM:

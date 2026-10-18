@@ -9,6 +9,10 @@
    marker hidden in the system prompt, distinctive instruction phrases and secret-key patterns.
    A leaking answer is replaced by a refusal.
 
+`plain_names`, also after the LLM, is a tidy-up rather than a guard: site and unit codes a model
+writes anyway (some copy them from the rows) become the names the instructions ask for. The
+Databricks assistant applies it to its answer, which it sends once whole.
+
 None of this makes leaks impossible: a paraphrase can slip through. The real protection is
 that the prompt holds nothing secret: no keys, no internal URLs. Keys live only in the server's
 environment, never in the prompt.
@@ -121,3 +125,33 @@ class LeakDetector:
         if self.canary.lower() in lowered or _SECRET.search(text):
             return True
         return sum(marker in lowered for marker in PROMPT_MARKERS) >= 1
+
+
+SITE_NAMES = {"A": "General Hospital", "B": "Northshore", "C": "Valley"}
+WARD_NAMES = {
+    "GENERAL": "general ward",
+    "STEP_DOWN": "step-down unit",
+    "RESPIRATORY": "respiratory ward",
+}
+# SITE_A or SITE_A-GENERAL, with any hyphen a model may write (U+2010-2013), maybe in backticks
+_CODE = (
+    r"`?\bSITE_(?P<site>[ABC])"
+    r"(?:[-\u2010-\u2013](?P<ward>GENERAL|STEP_DOWN|RESPIRATORY))?\b`?"
+)
+# ... in brackets, maybe labelled: "(SITE_A-GENERAL)", "(unit `SITE_A-GENERAL`)", "(id: SITE_A)"
+_CODE_IN_BRACKETS = re.compile(rf"\s*\(\s*(?:(?i:unit|site|ward|code|id)\b[\s:]*)*{_CODE}\s*\)")
+_CODE_ALONE = re.compile(_CODE)
+
+
+def plain_names(answer: str) -> str:
+    """The answer with site and unit codes in words. A code in brackets after its name is
+    dropped ("the general ward at General Hospital (SITE_A-GENERAL)"); any other code becomes
+    the name (SITE_B-STEP_DOWN -> "the step-down unit at Northshore")."""
+    return _CODE_ALONE.sub(_name, _CODE_IN_BRACKETS.sub("", answer))
+
+
+def _name(code: re.Match) -> str:
+    site = SITE_NAMES[code["site"]]
+    name = f"the {WARD_NAMES[code['ward']]} at {site}" if code["ward"] else site
+    before = code.string[: code.start()].rstrip(" *_#>|-")  # list marks and bold don't count
+    return name[0].upper() + name[1:] if not before or before[-1] in ".!?\n" else name

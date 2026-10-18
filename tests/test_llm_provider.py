@@ -123,7 +123,13 @@ def test_only_listed_models_and_their_own_provider_are_accepted(demo_snapshot):
 
 def test_each_assistant_switches_between_its_own_final_list():
     assert set(load_models("app")) == {"gpt-5.5", "gpt-5-mini", "databricks-gpt-oss-120b"}
-    assert set(load_models("databricks")) == {"databricks-gpt-oss-120b", "gpt-5-mini", "gpt-5.5"}
+    assert set(load_models("databricks")) == {
+        "databricks-gpt-oss-120b",
+        "heavden-gpt-5-mini",  # AI Gateway endpoints in front of the keys (llm_gateway.tf)
+        "heavden-gpt-5-5",
+    }
+    # the Databricks assistant reaches every model through a serving endpoint, never a key
+    assert {m.provider for m in load_models("databricks").values()} == {"databricks"}
     # GPT-OSS at low wrote protocol steps from memory (quality run 3): its default, never low
     for assistant in ASSISTANTS:
         assert load_models(assistant)["databricks-gpt-oss-120b"].reasoning_effort is None

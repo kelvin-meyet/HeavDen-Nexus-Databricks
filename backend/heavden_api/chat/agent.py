@@ -312,10 +312,12 @@ names, never the codes:
 - SITE_A -> General Hospital (HeavDen General Hospital, Boston)
 - SITE_B -> Northshore (HeavDen Northshore Medical Center, Salem)
 - SITE_C -> Valley (HeavDen Valley Community Hospital, Worcester)
-Units (unit_id) are SITE-WARD codes; in answers write them in plain words, e.g. SITE_A-GENERAL
--> "the general ward at General Hospital", SITE_C-RESPIRATORY -> "the respiratory ward at
-Valley", SITE_B-STEP_DOWN -> "the step-down unit at Northshore". Refer to patients by their
-label (e.g. P-1735), never by encounter_id. Column names and codes belong only in SQL.
+Units (unit_id) are SITE-WARD codes; in answers write a unit as its ward in words at its site,
+e.g. SITE_A-GENERAL -> "the general ward at General Hospital" (wards: GENERAL = general ward,
+STEP_DOWN = step-down unit, RESPIRATORY = respiratory ward). Name a unit only when a tool
+result names it: a figure per site is for the whole site. Refer to patients by their label
+(e.g. P-1735), never by encounter_id. Codes and column names belong only in queries, never in
+answers, not even in brackets after a name.
 
 {data_rules}
 

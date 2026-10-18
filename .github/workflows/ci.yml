@@ -14,6 +14,10 @@ on:
         description: "Staging: also copy the Azure SQL source into Bronze (wakes the database)"
         type: boolean
         default: false
+      assistant:
+        description: "Staging: deploy, red-team and test the Databricks assistant even if it didn't change"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -219,3 +223,84 @@ jobs:
       # a throwaway alias, so the first real one in prod is not also the first try.
       - name: Check that model aliases can be moved
         run: databricks bundle run model_ops -t staging --params action=selftest
+
+  # The Databricks assistant (Plan.md §11.2 steps 5-6), after the staging run has published what it
+  # reads: deployed to heavden-assistant-staging, red-teamed on its endpoint (whichever model its
+  # LLM_ENDPOINT names), and the quality test on every model in the `databricks:` list, at the
+  # settings they ship with. Only when its code, documents or settings changed (or on request):
+  # a deploy takes ~20-30 min, and the quality test ~30 min and ~$1.50 of warehouse time.
+  assistant-staging:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [staging]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: staging
+    concurrency:
+      group: staging-assistant
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DATABRICKS_AUTH_TYPE: azure-cli
+      DATABRICKS_HOST: https://adb-7405604448133690.10.azuredatabricks.net
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # the merge and the main it was merged into
+
+      - name: Did the Databricks assistant change?
+        id: changed
+        env:
+          ON_REQUEST: ${{ inputs.assistant }}
+        run: |
+          paths='^(backend/heavden_api/chat/|backend/scripts/(assistant_quality|redteam_chat)\.py|docs/corpus/|databricks/src/heavden/agent/|databricks/resources/assistant|databricks/src/jobs/(deploy|publish)_assistant\.py|databricks/databricks\.yml|pyproject\.toml|uv\.lock)'
+          if [ "$ON_REQUEST" = "true" ] || git diff --name-only HEAD^1 HEAD | grep -qE "$paths"; then
+            echo "assistant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "assistant=false" >> "$GITHUB_OUTPUT"
+            echo "No change to the Databricks assistant: nothing to deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: azure/login@v3.1.0
+        if: steps.changed.outputs.assistant == 'true'
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - uses: databricks/setup-cli@v1.17.0
+        if: steps.changed.outputs.assistant == 'true'
+        with:
+          version: 1.17.0
+
+      - uses: astral-sh/setup-uv@v6
+        if: steps.changed.outputs.assistant == 'true'
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      # Prints ASSISTANT_DEPLOY_RESULT: the version, the model, minutes to serve, one answer
+      - name: Deploy the Databricks assistant
+        if: steps.changed.outputs.assistant == 'true'
+        working-directory: databricks
+        run: databricks bundle run assistant_deploy -t staging
+
+      # The 19 prompts of heavden_api/chat/redteam.py, sent to the endpoint; fails on any problem
+      - name: Red-team the Databricks assistant
+        if: steps.changed.outputs.assistant == 'true'
+        run: uv run --locked python backend/scripts/redteam_chat.py --endpoint heavden-assistant-staging
+
+      # Tokens from the first sign-in last about an hour
+      - uses: azure/login@v3.1.0
+        if: steps.changed.outputs.assistant == 'true'
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Quality test of every model the Databricks assistant may use
+        if: steps.changed.outputs.assistant == 'true'
+        run: >
+          uv run --locked --group agent --group rag --group backend
+          python backend/scripts/assistant_quality.py --targets databricks --gate

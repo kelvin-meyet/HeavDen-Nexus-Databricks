@@ -18,10 +18,9 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 from heavden.agent.sql_guard import SqlRejected
-from heavden_api.chat.sandbox import SqlSandbox
-from heavden_api.snapshot import to_records
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # the demo's snapshot and sandbox: the Databricks assistant never loads them
+    from heavden_api.chat.sandbox import SqlSandbox
     from heavden_api.deps import AppState
 
 ROWS_TO_LLM = 50
@@ -201,6 +200,8 @@ class Toolbox:
         return json.dumps({"passages": passages}), step
 
     def explain_patient(self, patient: str) -> tuple[str, dict]:
+        from heavden_api.snapshot import to_records
+
         patient = patient.strip().upper()
         if re.fullmatch(r"P-?\d+", patient):
             patient = "P-" + patient.removeprefix("P").removeprefix("-")

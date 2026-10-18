@@ -76,6 +76,19 @@ variables:
     description: Added to the dashboards' names so staging's and prod's copies, which share one
       workspace, can be told apart (dev's carry the "[dev <user>]" prefix instead).
     default: ""
+  assistant_llm_endpoint:
+    description: The Databricks assistant's model, an endpoint in the `databricks:` list of
+      backend/heavden_api/chat/models.yaml. Changing it and merging is the switch. gpt-5-mini
+      since 18 Oct (red-team of the dev endpoint, docs/quality/README.md).
+    default: heavden-gpt-5-mini
+  assistant_models:
+    description: What a deploy of the Databricks assistant puts on its endpoint - "default" (one
+      version on assistant_llm_endpoint) or "all" (one version per model in the `databricks:`
+      list, each labelled with its model; the default keeps the traffic; older versions removed).
+    default: default
+  genie_title:
+    description: The Genie space the Databricks assistant asks, the one over `model_catalog`.
+    default: HeavDen Ward Data (staging)
 
 targets:
   # Personal development: resources are prefixed with "[dev <user>]" and schedules are paused.
@@ -119,4 +132,5 @@ targets:
       catalog: heavden_prod
       model_catalog: heavden_prod
       env_label: " (prod)"
+      genie_title: HeavDen Ward Data (prod)
       sql_schema: prod
