@@ -38,6 +38,7 @@ from importlib import metadata
 from pathlib import Path
 
 from heavden_api.chat.databricks_assistant import SETTINGS, Settings
+from heavden_api.chat.endpoint import ask
 from heavden_api.chat.models import load_models, profile
 
 MODEL_FILE = Path(__file__).with_name("assistant_model.py")
@@ -155,29 +156,6 @@ def stale_versions(served_entities, model_name: str) -> list[int]:
     for version, llm in served:
         newest[llm] = max(version, newest.get(llm, 0))
     return sorted(version for version, llm in served if version < newest[llm])
-
-
-def answer_of(response: dict) -> tuple[str, dict]:
-    """The answer text and `custom_outputs` of a reply from the endpoint."""
-    texts = [
-        part.get("text", "")
-        for item in response.get("output", [])
-        if item.get("type") == "message"
-        for part in item.get("content", [])
-        if part.get("type") == "output_text"
-    ]
-    return "".join(texts), response.get("custom_outputs") or {}
-
-
-def ask(api, endpoint: str, question: str, served_model: str | None = None) -> tuple[str, dict]:
-    """Ask the endpoint (whichever version has its traffic) or one of its versions by name."""
-    path = f"/serving-endpoints/{endpoint}"
-    if served_model:
-        path += f"/served-models/{served_model}"
-    response = api.do(
-        "POST", f"{path}/invocations", body={"input": [{"role": "user", "content": question}]}
-    )
-    return answer_of(response)
 
 
 def wait_until_serving(workspace, endpoint: str, timeout: float = 2700.0) -> float:

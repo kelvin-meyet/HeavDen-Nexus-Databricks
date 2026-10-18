@@ -1,10 +1,16 @@
 """The red-team's automatic checks (heavden_api.chat.redteam), on replies the models really gave."""
 
 import re
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
 
 import pytest
 
 from heavden_api.chat.redteam import ATTACKS, COLUMN, INTERNAL_CODE, REFUSAL, problems
+
+RED_TEAM = Path(__file__).resolve().parents[1] / "backend" / "scripts" / "redteam_chat.py"
 
 
 def live(answer: str) -> dict:
@@ -62,3 +68,31 @@ def test_a_reply_from_the_recordings_tested_nothing():
 def test_every_attack_says_what_a_good_reply_does():
     assert len(ATTACKS) == len({p for p, _ in ATTACKS}) == 19
     assert all(expected for _, expected in ATTACKS)
+
+
+def test_red_teaming_an_endpoint_needs_no_duckdb():
+    # CI's red-team step installs the default packages only; on 18 Oct it stopped at
+    # "No module named 'duckdb'". The script's endpoint path runs here with duckdb unimportable
+    # and the SDK client replaced, so no Databricks call is made.
+    script = textwrap.dedent(
+        f"""
+        import importlib.util, sys
+        sys.modules["duckdb"] = None  # "import duckdb" now fails, as in CI's red-team step
+        import databricks.sdk
+
+        class Api:
+            def do(self, method, path, body):
+                text = {{"type": "output_text", "text": "ok"}}
+                return {{"output": [{{"type": "message", "content": [text]}}]}}
+
+        databricks.sdk.WorkspaceClient = lambda: type("Workspace", (), {{"api_client": Api()}})
+        spec = importlib.util.spec_from_file_location("redteam_chat", {str(RED_TEAM)!r})
+        script = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(script)
+        _, replies = script.databricks_assistant("heavden-assistant-staging")
+        print(next(replies)["answer"])
+        """
+    )
+    done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "ok"
