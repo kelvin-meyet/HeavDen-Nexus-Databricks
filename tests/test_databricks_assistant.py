@@ -14,6 +14,7 @@ from heavden.agent.publish import corpus_dir
 from heavden.agent.retrieval import HashingEmbedder, Retriever
 from heavden_api.chat import assistant_deploy as deploy
 from heavden_api.chat import databricks_assistant as da
+from heavden_api.chat import endpoint
 from heavden_api.chat.agent import LLMReply, ToolCall
 from heavden_api.chat.databricks_tools import GenieAnswer
 from heavden_api.chat.guardrails import LeakDetector
@@ -302,4 +303,4 @@ def test_an_endpoint_reply_is_read_back_into_answer_and_outputs():
         ],
         "custom_outputs": {"steps": [{"tool": "query_gold"}], "guardrail": None},
     }
-    assert deploy.answer_of(response) == ("General 9.", response["custom_outputs"])
+    assert endpoint.answer_of(response) == ("General 9.", response["custom_outputs"])

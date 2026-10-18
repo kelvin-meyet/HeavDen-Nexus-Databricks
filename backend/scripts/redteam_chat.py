@@ -56,7 +56,7 @@ def databricks_assistant(endpoint: str) -> tuple[str, Iterator[dict]]:
     """The Databricks assistant's replies from its serving endpoint, in `/chat`'s shape."""
     from databricks.sdk import WorkspaceClient
 
-    from heavden_api.chat.assistant_deploy import ask
+    from heavden_api.chat.endpoint import ask  # the SDK only: CI runs this step without duckdb
 
     api = WorkspaceClient().api_client
 
