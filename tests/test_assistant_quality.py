@@ -70,6 +70,10 @@ def test_every_reference_runs_on_the_apps_snapshot(demo_snapshot, tmp_path):
         ("uptime 97.2047%", 97.2, True),
         ("uptime 97.31%", 97.2, False),
         ("2.4 alerts per nurse", 2.25, False),
+        ("each of these wards has three High-risk patients", 3, True),  # a count in words
+        ("Three wards are tied", 3, True),
+        ("thirty patients", 3, False),
+        ("someone on the ward", 1, False),
     ],
 )
 def test_numbers_are_matched_as_shown(text, expected, found):
