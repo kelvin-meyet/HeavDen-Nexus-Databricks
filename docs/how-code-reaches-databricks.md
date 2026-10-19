@@ -37,7 +37,7 @@ GitHub tag v* ── GitHub Actions, as heavden-ci-prod, after approval ──�
 |---|---|---|---|
 | dev | the developer, from a laptop | while building | anything, on small seeded data |
 | staging | CI ([`ci.yml`](../.github/workflows/ci.yml), job `staging`) | every merge to `main` | deploy, then Bronze → Silver → Gold on fixed seeded data, then a training smoke test |
-| prod | CI ([`release.yml`](../.github/workflows/release.yml)) | a `v*` release tag, after a required reviewer approves | deploy only; runs are started on demand with [`prod-run.yml`](../.github/workflows/prod-run.yml), also after approval |
+| prod | CI ([`release.yml`](../.github/workflows/release.yml)) | a `v*` release tag, after a required reviewer approves | deploy; when the Databricks assistant changed since the last release, also its documents, Genie space and endpoint (red-teamed). Data runs are started on demand with [`prod-run.yml`](../.github/workflows/prod-run.yml), also after approval |
 
 On every pull request, CI also validates the bundle for all three targets, signed in as `heavden-ci-dev`. That identity can't read or write any data.
 
@@ -49,7 +49,7 @@ Merging a pull request reaches **staging only**. Every change to **prod** waits 
 |---|---|---|
 | Open or update a pull request | lint, tests (also on Databricks' library versions), bundle validation as `heavden-ci-dev` | no |
 | Merge to `main` | staging: deploy, pipeline, training (a smoke test on 2 days) as `heavden-ci-staging` | no |
-| Push a release tag (`git tag -a v0.x.0` and `git push origin v0.x.0`) | **prod deploy**: jobs and pipelines updated to that release's code, nothing run | **yes**, environment `prod-deploy` |
+| Push a release tag (`git tag -a v0.x.0` and `git push origin v0.x.0`) | **prod deploy**: jobs and pipelines updated to that release's code, no data run. If the Databricks assistant changed since the last release: its documents, patient explanation and Genie space are published, then its endpoint is deployed and red-teamed | **yes**, environment `prod-deploy`; a second time for the assistant's endpoint |
 | Start **prod-run** (Actions → prod-run → Run workflow; tick ingestion, pipeline, scoring, drift check and/or training) | **prod run** as `heavden-ci-prod` | **yes**, environment `prod-run` |
 | Start **staging-run** (the same steps against staging, to rehearse a drift episode) | **staging run** as `heavden-ci-staging` | no |
 | A drift check reaches "act" | a **retrain request** opens and waits | **yes**, `retrain-approval` (rehearsals in staging: `staging-approval`) |

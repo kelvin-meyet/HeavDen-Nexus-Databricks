@@ -1,8 +1,14 @@
 # Deploys to prod when a release tag (v*) is pushed, after Kelvin approves the run in the
-# prod-deploy environment (Plan.md §16.2). It only deploys: prod's ingestion, pipeline and drift
-# episodes run on demand (Phase 3), never on every release.
+# prod-deploy environment (Plan.md §16.2). It deploys code: prod's ingestion, pipeline and drift
+# episodes run on demand (prod-run.yml), never on every release.
 #
-#   git tag v0.1.0 && git push origin v0.1.0
+# When the Databricks assistant changed since the previous release (the files that also deploy it
+# to staging: .github/scripts/assistant_changed.py), the release also publishes what it reads
+# (documents, patient explanation, Genie space) and, after a second approval, deploys it to
+# heavden-assistant-prod and red-teams it there. It stays private (Plan.md §11.2): only the Review
+# App, its traces and this red-team reach it.
+#
+#   git tag -a v0.6.0 -m "..." && git push origin v0.6.0
 
 name: release
 
@@ -20,11 +26,13 @@ concurrency:
 jobs:
   deploy-prod:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40 # deploy ~5 min; the assistant's publish ~8 min, after a pipeline update the first time
     environment: prod-deploy
     permissions:
       contents: read
       id-token: write
+    outputs:
+      assistant: ${{ steps.changed.outputs.assistant }}
     env:
       DATABRICKS_AUTH_TYPE: azure-cli
     defaults:
@@ -32,6 +40,8 @@ jobs:
         working-directory: databricks
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the tags, to compare with the previous release
 
       - uses: azure/login@v3.1.0
         with:
@@ -57,3 +67,81 @@ jobs:
 
       - name: Deploy
         run: databricks bundle deploy -t prod
+
+      # A prod without the assistant's endpoint (the first release with it) counts as a change.
+      - name: Did the Databricks assistant change since the last release?
+        id: changed
+        run: |
+          previous=$(git describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null || true)
+          if ! databricks serving-endpoints get heavden-assistant-prod >/dev/null 2>&1; then
+            echo "Prod has no Databricks assistant yet."
+            assistant=true
+          elif git diff --name-only "$previous" HEAD | python3 ../.github/scripts/assistant_changed.py; then
+            echo "The files above changed since $previous."
+            assistant=true
+          else
+            echo "No change to the Databricks assistant since $previous: nothing to publish or deploy." >> "$GITHUB_STEP_SUMMARY"
+            assistant=false
+          fi
+          echo "assistant=$assistant" >> "$GITHUB_OUTPUT"
+
+      # The patient explanation and the Genie space read gold.encounters, which the pipeline
+      # builds, and a release never runs the pipeline. So the first release with the assistant
+      # (v0.6.0) runs one update here. One is enough: a release brings no data (an episode's
+      # data comes with prod-run.yml, which updates twice).
+      - name: Build gold.encounters if prod has never had it
+        if: steps.changed.outputs.assistant == 'true'
+        run: |
+          exists=$(databricks tables exists heavden_prod.gold.encounters | jq -r .table_exists)
+          if [ "$exists" != "true" ]; then
+            databricks bundle run medallion -t prod
+          else
+            echo "gold.encounters exists: no pipeline update."
+          fi
+
+      # ml.corpus_chunks, ml.explain_patient_risk and the Genie space "HeavDen Ward Data (prod)"
+      - name: Publish what the assistant reads
+        if: steps.changed.outputs.assistant == 'true'
+        run: databricks bundle run assistant_publish -t prod
+
+  # The endpoint (~20 min: log, register, serve, ask one question) and its red-team (~4 min), as
+  # in staging (ci.yml), in a job of its own for a fresh sign-in (a sign-in lasts about an hour).
+  # GitHub asks for a second prod-deploy approval here.
+  assistant-prod:
+    needs: [deploy-prod]
+    if: needs.deploy-prod.outputs.assistant == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: prod-deploy
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DATABRICKS_AUTH_TYPE: azure-cli
+      DATABRICKS_HOST: https://adb-7405604448133690.10.azuredatabricks.net
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - uses: databricks/setup-cli@v1.17.0
+        with:
+          version: 1.17.0
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      # Prints ASSISTANT_DEPLOY_RESULT: the version, the model, minutes to serve, one answer
+      - name: Deploy the Databricks assistant
+        working-directory: databricks
+        run: databricks bundle run assistant_deploy -t prod
+
+      # The 19 prompts of heavden_api/chat/redteam.py, sent to the endpoint; fails on any problem
+      - name: Red-team the Databricks assistant
+        run: uv run --locked python backend/scripts/redteam_chat.py --endpoint heavden-assistant-prod
