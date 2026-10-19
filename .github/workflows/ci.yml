@@ -225,15 +225,16 @@ jobs:
         run: databricks bundle run model_ops -t staging --params action=selftest
 
   # The Databricks assistant (Plan.md §11.2 steps 5-6), after the staging run has published what it
-  # reads: deployed to heavden-assistant-staging, red-teamed on its endpoint (whichever model its
-  # LLM_ENDPOINT names), and the quality test on every model in the `databricks:` list, at the
-  # settings they ship with. Only when its code, documents or settings changed (or on request):
-  # a deploy takes ~20-30 min, and the quality test ~30 min and ~$1.50 of warehouse time.
+  # reads: deployed to heavden-assistant-staging and red-teamed on its endpoint (whichever model
+  # its LLM_ENDPOINT names); then `assistant-quality`. Only when its code, documents or settings
+  # changed (or on request): a deploy takes ~20-30 min.
   assistant-staging:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: [staging]
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 90
+    outputs:
+      assistant: ${{ steps.changed.outputs.assistant }}
     environment: staging
     concurrency:
       group: staging-assistant
@@ -291,16 +292,42 @@ jobs:
         if: steps.changed.outputs.assistant == 'true'
         run: uv run --locked python backend/scripts/redteam_chat.py --endpoint heavden-assistant-staging
 
-      # Tokens from the first sign-in last about an hour
+  # The quality test of every model in the `databricks:` list of chat/models.yaml, at the settings
+  # it ships with (tests/test_ci_workflow.py keeps this list in step), one job each: a fresh
+  # sign-in per model and ~18 min each, inside the hour a sign-in's tokens last. In one job the
+  # three took ~53 min and the third lost its sign-in (19 Oct). ~$1.50 of warehouse time in all.
+  assistant-quality:
+    needs: [assistant-staging]
+    if: needs.assistant-staging.outputs.assistant == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: staging
+    strategy:
+      fail-fast: false # every model gets its scorecard, even when one fails
+      matrix:
+        model: [databricks-gpt-oss-120b, heavden-gpt-5-mini, heavden-gpt-5-5]
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DATABRICKS_AUTH_TYPE: azure-cli
+      DATABRICKS_HOST: https://adb-7405604448133690.10.azuredatabricks.net
+    steps:
+      - uses: actions/checkout@v4
+
       - uses: azure/login@v3.1.0
-        if: steps.changed.outputs.assistant == 'true'
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           allow-no-subscriptions: true
 
-      - name: Quality test of every model the Databricks assistant may use
-        if: steps.changed.outputs.assistant == 'true'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Quality test of ${{ matrix.model }}
         run: >
           uv run --locked --group agent --group rag --group backend
-          python backend/scripts/assistant_quality.py --targets databricks --gate
+          python backend/scripts/assistant_quality.py --targets databricks
+          --models ${{ matrix.model }}@shipped --gate
