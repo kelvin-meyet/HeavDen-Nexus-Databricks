@@ -296,7 +296,10 @@ jobs:
   # it ships with (tests/test_ci_workflow.py keeps this list in step), one job each: a fresh
   # sign-in per model and ~18 min each, inside the hour a sign-in's tokens last. In one job the
   # three took ~53 min and the third lost its sign-in (19 Oct). ~$1.50 of warehouse time in all.
+  # Only the model staging serves can fail the run; the others are scored and a failure there
+  # is a warning (a switch of model changes assistant_llm_endpoint, which gates the new one).
   assistant-quality:
+    name: assistant-quality (${{ matrix.model }}${{ matrix.served && ', served' || '' }})
     needs: [assistant-staging]
     if: needs.assistant-staging.outputs.assistant == 'true'
     runs-on: ubuntu-latest
@@ -306,6 +309,9 @@ jobs:
       fail-fast: false # every model gets its scorecard, even when one fails
       matrix:
         model: [databricks-gpt-oss-120b, heavden-gpt-5-mini, heavden-gpt-5-5]
+        include:
+          - model: heavden-gpt-5-mini # = assistant_llm_endpoint in databricks/databricks.yml
+            served: true
     permissions:
       contents: read
       id-token: write
@@ -330,4 +336,4 @@ jobs:
         run: >
           uv run --locked --group agent --group rag --group backend
           python backend/scripts/assistant_quality.py --targets databricks
-          --models ${{ matrix.model }}@shipped --gate
+          --models ${{ matrix.model }}@shipped ${{ matrix.served && '--gate' || '' }}

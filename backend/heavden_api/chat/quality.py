@@ -49,6 +49,12 @@ MAX_MISSES = {
 }
 _PLAIN = str.maketrans({**{c: "-" for c in "‐‑‒–—−"}, "‘": "'", "’": "'"})
 _NUMBER = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
+# Counts an answer may write in words ("three wards"). Added 19 Oct 2026, after CI run 39182748146
+# scored "each has three High-risk patients" as a wrong count (that run stays a FAIL on record).
+_COUNT_WORDS = (
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen "
+    "fifteen sixteen seventeen eighteen nineteen twenty"
+).split()
 # What the assistant is told about names (system_prompt), so the judge doesn't call "General
 # Hospital" unsupported when the rows say SITE_A.
 NAMES = (
@@ -88,10 +94,15 @@ def _decimals(number: str) -> int:
 
 
 def mentions_number(text: str, expected: float, min_decimals: int = 0) -> bool:
-    """`expected` appears in `text`: a count exactly; a decimal to the coarser of the two
-    precisions shown (97.36 matches "97.4", "97" or "97.36", not "97.3"; a reference rounded to
-    90.3 matches "90.32"), counting only figures shown with at least `min_decimals` decimals."""
-    for token in _NUMBER.findall(normalise(text)):
+    """`expected` appears in `text`: a count exactly (up to twenty also in words); a decimal to
+    the coarser of the two precisions shown (97.36 matches "97.4", "97" or "97.36", not "97.3"; a
+    reference rounded to 90.3 matches "90.32"), counting only figures shown with at least
+    `min_decimals` decimals."""
+    text = normalise(text)
+    if isinstance(expected, int) and 0 <= expected < len(_COUNT_WORDS):
+        if re.search(rf"\b{_COUNT_WORDS[expected]}\b", text, re.IGNORECASE):
+            return True
+    for token in _NUMBER.findall(text):
         token = token.replace(",", "")
         if isinstance(expected, int):
             if _decimals(token) == 0 and int(token) == expected:
