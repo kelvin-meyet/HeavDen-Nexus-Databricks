@@ -181,6 +181,12 @@ class Settings:
     chat_live_answers_per_day: int = field(
         default_factory=lambda: int(os.environ.get("CHAT_LIVE_ANSWERS_PER_DAY", "300"))
     )
+    # Container Apps: the Azure Table that keeps that count across restarts, written as the
+    # managed identity, e.g. https://<account>.table.core.windows.net/websitecounters. Unset
+    # (locally): counted in memory.
+    chat_budget_table_url: str | None = field(
+        default_factory=lambda: os.environ.get("CHAT_BUDGET_TABLE_URL") or None
+    )
     # proxies we control in front of the API: 0 local, 1 Render, 2 Vercel -> Render.
     # The visitor's address is that many entries from the right of X-Forwarded-For.
     trusted_proxy_hops: int = field(
@@ -190,10 +196,24 @@ class Settings:
     def __post_init__(self):
         if self.mode not in ("demo", "live"):
             raise ValueError(f"MODE must be 'demo' or 'live', not {self.mode!r}")
+        if self.chat_budget_table_url and not self.managed_identity:
+            raise ValueError(
+                "CHAT_BUDGET_TABLE_URL is written as the managed identity: "
+                "set MANAGED_IDENTITY_CLIENT_ID"
+            )
         if self.snapshot_url and not self.managed_identity:
             raise ValueError(
                 "SNAPSHOT_URL is read as the managed identity: set MANAGED_IDENTITY_CLIENT_ID"
             )
+
+    def chat_budget(self):
+        """The daily cap on live answers: in the Azure Table on Container Apps, else in memory."""
+        from heavden_api.chat.limits import DailyBudget, TableBudget
+
+        if not self.chat_budget_table_url:
+            return DailyBudget(self.chat_live_answers_per_day)
+        token = managed_identity_token(self.managed_identity, STORAGE_SCOPE)
+        return TableBudget(self.chat_live_answers_per_day, self.chat_budget_table_url, token)
 
     def snapshot_reader(self) -> Callable[[str], bytes]:
         """Reads the published snapshot's files from Blob Storage as the managed identity."""

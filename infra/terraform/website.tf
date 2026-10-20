@@ -18,6 +18,10 @@
 # Databricks is off, the site keeps serving the last snapshot. A new snapshot needs no new image or
 # deploy; pointing current.json back is the rollback.
 #
+# The daily cap on live chat answers is kept in the Azure Table `websitecounters` (one row per UTC
+# day), because the API is stopped whenever nobody visits and an in-memory count would restart at
+# zero. The identity can write that table and nothing else; no visitor data is stored.
+#
 # Cost: the Consumption plan's free grant (per subscription and month: 180,000 vCPU-seconds,
 # 360,000 GiB-seconds, 2 million requests) covers ~100 awake hours at 0.5 vCPU / 1 GiB; scaled to
 # zero it costs nothing, and the environment has no fixed fee. Logs are capped at 0.05 GB a day.
@@ -86,6 +90,19 @@ resource "databricks_grant" "ci_publishes_snapshots" {
 resource "azurerm_role_assignment" "web_snapshots" {
   scope                = "${azurerm_storage_account.lake.id}/blobServices/default/containers/${azurerm_storage_container.lake["website"].name}"
   role_definition_name = "Storage Blob Data Reader"
+  principal_id         = azurerm_user_assigned_identity.web.principal_id
+  principal_type       = "ServicePrincipal"
+}
+
+# The daily cap's count: one row per UTC day (chat/limits.py TableBudget)
+resource "azurerm_storage_table" "chat_budget" {
+  name               = "websitecounters"
+  storage_account_id = azurerm_storage_account.lake.id
+}
+
+resource "azurerm_role_assignment" "web_chat_budget" {
+  scope                = azurerm_storage_table.chat_budget.resource_manager_id
+  role_definition_name = "Storage Table Data Contributor"
   principal_id         = azurerm_user_assigned_identity.web.principal_id
   principal_type       = "ServicePrincipal"
 }
@@ -195,6 +212,10 @@ resource "azurerm_container_app" "api" {
         value = "/tmp/snapshot"
       }
       env {
+        name  = "CHAT_BUDGET_TABLE_URL"
+        value = "${azurerm_storage_account.lake.primary_table_endpoint}${azurerm_storage_table.chat_budget.name}"
+      }
+      env {
         name  = "LLM_PROVIDER"
         value = "azure"
       }
@@ -238,6 +259,7 @@ resource "azurerm_container_app" "api" {
     databricks_grant.web_gold,
     databricks_grant.web_ml,
     azurerm_role_assignment.web_snapshots,
+    azurerm_role_assignment.web_chat_budget,
     databricks_permissions.warehouse,
     azurerm_role_assignment.web_openai,
   ]

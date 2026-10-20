@@ -14,7 +14,7 @@ from heavden.agent.retrieval import Embedder, FastEmbedder, Retriever
 from heavden_api.chat.agent import LLM, OpenAILLM, system_prompt
 from heavden_api.chat.databricks_tools import DatabricksToolbox, Genie, Warehouse
 from heavden_api.chat.guardrails import LeakDetector
-from heavden_api.chat.limits import DailyBudget, RateLimiter
+from heavden_api.chat.limits import DailyBudget, RateLimiter, TableBudget
 from heavden_api.chat.memory import ConversationStore
 from heavden_api.chat.models import profile
 from heavden_api.chat.recorded import Recordings
@@ -42,7 +42,7 @@ class AppState:
     sandbox: SqlSandbox | None  # demo: the assistant's locked-down SQL engine
     recordings: Recordings
     rate_limiter: RateLimiter
-    live_budget: DailyBudget
+    live_budget: DailyBudget | TableBudget
     leak_detector: LeakDetector
     conversations: ConversationStore
     llm: LLM | None = None  # None: /chat replays recordings
@@ -140,7 +140,7 @@ def build_state(
         sandbox=sandbox,
         recordings=Recordings.load(),
         rate_limiter=RateLimiter(settings.chat_requests_per_hour),
-        live_budget=DailyBudget(settings.chat_live_answers_per_day),
+        live_budget=settings.chat_budget(),
         leak_detector=LeakDetector.create(),
         conversations=ConversationStore(),
         llm=llm,
