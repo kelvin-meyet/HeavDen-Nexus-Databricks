@@ -132,10 +132,15 @@ class Settings:
             os.environ.get("SNAPSHOT_DIR", ROOT / "data" / "demo_snapshot")
         )
     )
-    # Container Apps: where the snapshot is published in Azure Blob Storage (its current.json
-    # names it), read as the managed identity, e.g. https://<account>.blob.core.windows.net/
+    # Container Apps: where the snapshot is published in Azure Blob Storage (its pointer,
+    # current-v<format>.json, names it), read as the managed identity, e.g. https://<account>.blob.core.windows.net/
     # website/prod. Unset (locally): SNAPSHOT_DIR as it is.
     snapshot_url: str | None = field(default_factory=lambda: os.environ.get("SNAPSHOT_URL") or None)
+    # the document index built into the image from the documents in git (heavden_api.documents);
+    # unset (locally): the snapshot's own rag/ folder
+    rag_dir: Path | None = field(
+        default_factory=lambda: Path(os.environ["RAG_DIR"]) if os.environ.get("RAG_DIR") else None
+    )
     # where fastembed caches the embedding model (~130 MB, downloaded on first search)
     embed_cache_dir: Path = field(
         default_factory=lambda: Path(os.environ.get("EMBED_CACHE_DIR", ROOT / "data" / "models"))

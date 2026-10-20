@@ -36,6 +36,10 @@ on:
         description: "Check for drift (after scoring)"
         type: boolean
         default: false
+      website_snapshot:
+        description: "Export and publish the website's snapshot (after scoring)"
+        type: boolean
+        default: false
       episode:
         description: "The drift episode just loaded, if any (recorded with the check)"
         type: string
@@ -64,4 +68,5 @@ jobs:
       train: ${{ inputs.train }}
       score: ${{ inputs.score }}
       drift_check: ${{ inputs.drift_check }}
+      website_snapshot: ${{ inputs.website_snapshot }}
       episode: ${{ inputs.episode }}

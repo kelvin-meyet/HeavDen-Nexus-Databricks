@@ -130,7 +130,7 @@ Key decisions:
 Requirements: Python 3.12 with [uv](https://docs.astral.sh/uv/), Node 22, and Java 17+ for Synthea.
 
 ```bash
-uv sync --all-groups
+uv sync --all-groups --no-group serving   # every group but `serving` (the website image's ML library versions)
 uv run nbstripout --install --attributes .gitattributes   # once per clone
 ```
 

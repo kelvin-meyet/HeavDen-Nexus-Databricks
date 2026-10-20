@@ -48,6 +48,9 @@ on:
       drift_check:
         type: boolean
         default: false
+      website_snapshot:
+        type: boolean
+        default: false
       episode:
         type: string
         default: ""
@@ -163,6 +166,21 @@ jobs:
             jq -r '"Monitor: \(.monitor // "not reported"). Agrees with the check: \(.monitor_agrees // "not reported")."' <<<"$result"
             echo
             jq -r '.breaches[] | "- \(.)"' <<<"$result"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The website's snapshot: the last 28 days of Gold and the model in use, checked, then
+      # published for the website's next start (prod); staging builds and checks it only. Like
+      # the drift check, a run without its result line fails.
+      - name: Export the website snapshot
+        if: inputs.website_snapshot
+        shell: bash
+        run: |
+          databricks bundle run website_snapshot -t "$TARGET" 2>&1 | tee "$RUNNER_TEMP/website.log"
+          result=$(grep -o 'WEBSITE_SNAPSHOT {.*}' "$RUNNER_TEMP/website.log" | tail -1 | sed 's/^WEBSITE_SNAPSHOT //' || true)
+          jq -e .snapshot <<<"$result" >/dev/null 2>&1 || { echo "::error::the export printed no result line"; exit 1; }
+          {
+            jq -r '"## Website snapshot (\(env.TARGET)): \(.snapshot), \(if .published then "published" else "built and checked, not published" end)"' <<<"$result"
+            jq -r '"Data \(.data_start[0:16]) to \(.as_of[0:16]) UTC, \(.rows.patient_hour_features) patient-hours; model v\(.model_version), threshold \(.threshold); \(.log_check)."' <<<"$result"
           } >> "$GITHUB_STEP_SUMMARY"
 
   request-retrain:

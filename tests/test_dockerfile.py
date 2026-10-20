@@ -1,6 +1,7 @@
 """The API's image (backend/Dockerfile): public, so what goes into it is checked here."""
 
 import re
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,7 +50,25 @@ def test_the_image_installs_only_the_apis_libraries():
     syncs = re.findall(r"uv sync [^\n]+", DOCKERFILE.read_text(encoding="utf-8"))
     assert len(syncs) == 2
     for sync in syncs:
-        assert "--locked --no-dev --group backend --group rag --no-editable" in sync.replace(
-            " --no-install-project", ""
+        flags = sync.replace(" --no-install-project", "")
+        assert (
+            "--locked --no-dev --group backend --group rag --group serving --no-editable" in flags
         )
         assert not re.search(r"--group (spark|agent|notebooks|azure)|--all-groups", sync)
+
+
+def test_the_image_runs_the_model_with_the_libraries_it_was_trained_with():
+    # the `serving` group is exactly what Databricks serverless environment 6 has: the training
+    # and scoring jobs' libraries (a model pickled there may not load or score the same elsewhere)
+    groups = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
+        "dependency-groups"
+    ]
+    env6 = (ROOT / "databricks" / "requirements-serverless-env6.txt").read_text(encoding="utf-8")
+    pins = [line for line in env6.splitlines() if line and not line.startswith("#")]
+    assert sorted(p.lower() for p in groups["serving"]) == sorted(p.lower() for p in pins)
+
+
+def test_the_image_builds_its_document_index_from_git():
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    assert re.search(r"^RUN /app/\.venv/bin/python -m heavden_api\.documents /app/rag ", text, re.M)
+    assert "RAG_DIR=/app/rag" in text

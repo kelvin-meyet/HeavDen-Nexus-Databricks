@@ -87,7 +87,7 @@ ORDER BY 1, 2
 BOARD = """
 SELECT r.encounter_id, e.patient_label, e.age, e.sex, e.conditions,
        r.site_id, r.unit_id, e.bed_id, e.admit_ts,
-       r.risk, r.risk_band, r.news2_total, r.top_factors,
+       r.risk, r.risk_band, r.news2_total, r.top_factors, r.model_version,
        earlier.risk AS risk_6h_ago
 FROM gold.risk_scores r
 JOIN gold.encounters e ON e.encounter_id = r.encounter_id

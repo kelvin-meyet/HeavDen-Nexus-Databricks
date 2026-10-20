@@ -1,21 +1,25 @@
-"""The demo snapshot: the gold tables, the model and the RAG index as files (Plan.md §11, §13).
+"""The snapshot: the gold tables and the model as files (Plan.md §11, §13).
 
-In Phase 0 the snapshot is built locally from the generator (`backend/scripts/
-build_demo_snapshot.py`). In Phase 6 the same layout is exported from Databricks, and the
-backend keeps serving it after the credits end.
+The website's snapshot is exported from prod's Gold on Databricks (`heavden_api.export`, job
+`website_snapshot`); the demo snapshot is built locally from the generator (`backend/scripts/
+build_demo_snapshot.py`). Both are written by `write_snapshot`.
 
-On Container Apps the snapshot is data, not part of the image. An export on Databricks publishes
-it to the volume `heavden_prod.ml.website` (`publish_snapshot`: `snapshots/<name>/`, then
-`current.json`, which names it and lists each file's size and SHA-256). That volume is a folder
-of the `website` container in Azure Blob Storage, and the API downloads what `current.json` names
-from there when it starts (`fetch_snapshot` with `blob_reader`), so starting needs no Databricks.
-A new snapshot needs no new image, and pointing `current.json` back is the rollback. Layout:
+On Container Apps the snapshot is data, not part of the image. The export publishes it to the
+volume `heavden_prod.ml.website` (`publish_snapshot`: `snapshots/<name>/` and its pointer, which
+names it and lists each file's size and SHA-256; then, unless a release stages it for the new
+image's smoke test, `current-v<format>.json`). That volume is a folder of the `website` container
+in Azure Blob Storage, and the API downloads what the pointer for its own format names from there
+when it starts (`fetch_snapshot` with `blob_reader`), so starting needs no Databricks. A new
+snapshot needs no new image, and pointing back (`point_to`) is the rollback. Layout:
 
-    manifest.json                  as_of, model version, risk bands, row counts
+    manifest.json                  as_of, model version, risk bands, row counts, library versions
     gold/<table>.parquet           one file per gold table (queried as gold.<table> in DuckDB)
     model/model.joblib             the champion CalibratedModel
     model/background.parquet       training rows that explanations are measured against
-    rag/                           the FAISS retriever files (heavden.agent.retrieval)
+    model/check.parquet            patient-hours with the risk the model gave them where the
+                                   snapshot was written: loading re-scores them (`check_model`)
+    rag/                           demo only: the FAISS retriever files (the image has its own,
+                                   built from the documents in git: heavden_api.documents)
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+from importlib.metadata import version
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 
@@ -39,7 +44,10 @@ from heavden.analytics import gold
 from heavden.ml import scoring
 from heavden.ml.train import CalibratedModel
 
-SCHEMA_VERSION = 1
+# The snapshot's format. Raise it with any change the previous code can't read (a file, a column,
+# a manifest field it needs): the export then writes a pointer only the new code reads (POINTER).
+# 2: model/check.parquet and the library versions.
+SCHEMA_VERSION = 2
 GOLD_TABLES = (
     "patient_hour_features",
     "risk_scores",
@@ -51,11 +59,24 @@ GOLD_TABLES = (
 )
 BACKGROUND_ROWS = 2000
 FULL_CENSUS = 0.5  # "now" is the latest hour with at least half the usual census
+CHECK_ROWS = 200
+CHECK_RISK = "check_risk"
+# the same libraries give the same floats; any real difference is far larger
+CHECK_TOLERANCE = 1e-9
+LIBRARIES = ("scikit-learn", "lightgbm", "pandas", "numpy")
+
+
+def library_versions() -> dict[str, str]:
+    return {name: version(name) for name in LIBRARIES}
 
 
 def snapshot_as_of(table: pd.DataFrame) -> pd.Timestamp:
     """The latest prediction hour with a full ward (a stray stay can run to the very end)."""
-    census = table.groupby("prediction_ts").size()
+    return full_ward_hour(table.groupby("prediction_ts").size())
+
+
+def full_ward_hour(census: pd.Series) -> pd.Timestamp:
+    """The latest hour of `census` (patients per prediction hour) with a full ward."""
     return census[census >= FULL_CENSUS * census.median()].index.max()
 
 
@@ -71,6 +92,7 @@ class Manifest:
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
     schema_version: int = SCHEMA_VERSION
     synthetic: bool = True
+    libraries: dict[str, str] = field(default_factory=library_versions)  # where it was written
 
     @property
     def as_of_ts(self) -> pd.Timestamp:
@@ -135,7 +157,6 @@ def build_snapshot(
     rag_dir: Path | None = None,
 ) -> Manifest:
     """Score every patient-hour, derive the gold tables and write the snapshot to `out_dir`."""
-    out_dir = Path(out_dir)
     as_of = snapshot_as_of(table)
     table = table[table["prediction_ts"] <= as_of]
     risk = scoring.score_table(model, table, bands, background, model_version)
@@ -151,30 +172,84 @@ def build_snapshot(
         ),
         "encounters": encounters_dimension(activity, table),
     }
+    return write_snapshot(
+        out_dir, tables, model, background, bands, model_name, model_version, as_of, rag_dir
+    )
 
+
+def check_hours(model: CalibratedModel, features: pd.DataFrame) -> pd.DataFrame:
+    """CHECK_ROWS patient-hours with the risk `model` gives them here (`CHECK_RISK`)."""
+    rows = features.sample(min(CHECK_ROWS, len(features)), random_state=0)
+    return rows.assign(**{CHECK_RISK: model.predict_proba(rows)[:, 1]})
+
+
+def write_snapshot(
+    out_dir: Path,
+    tables: dict[str, pd.DataFrame],
+    model: CalibratedModel,
+    background: pd.DataFrame,
+    bands: scoring.RiskBands,
+    model_name: str,
+    model_version: str,
+    as_of: pd.Timestamp,
+    rag_dir: Path | None = None,
+) -> Manifest:
+    """Write a snapshot of the gold `tables` (every one of GOLD_TABLES) and `model` to
+    `out_dir`, with background rows sampled from `background` (the model's training rows) and
+    check hours scored here."""
+    out_dir = Path(out_dir)
     if out_dir.exists():
         shutil.rmtree(out_dir)
     (out_dir / "gold").mkdir(parents=True)
     (out_dir / "model").mkdir()
-    for name, frame in tables.items():
-        frame.to_parquet(out_dir / "gold" / f"{name}.parquet", index=False)
+    for name in GOLD_TABLES:
+        tables[name].to_parquet(out_dir / "gold" / f"{name}.parquet", index=False)
     joblib.dump(model, out_dir / "model" / "model.joblib")
     sample = background.sample(min(BACKGROUND_ROWS, len(background)), random_state=0)
     sample.to_parquet(out_dir / "model" / "background.parquet", index=False)
+    check = check_hours(model, tables["patient_hour_features"])
+    check.to_parquet(out_dir / "model" / "check.parquet", index=False)
     if rag_dir is not None:
         shutil.copytree(rag_dir, out_dir / "rag")
 
     manifest = Manifest(
         as_of=as_of.isoformat(),
-        data_start=table["prediction_ts"].min().isoformat(),
+        data_start=tables["patient_hour_features"]["prediction_ts"].min().isoformat(),
         model_name=model_name,
         model_version=str(model_version),
         model_type=type(model.base).__name__,
         bands=bands.to_dict(),
-        rows={name: len(frame) for name, frame in tables.items()},
+        rows={name: len(tables[name]) for name in GOLD_TABLES},
     )
     (out_dir / "manifest.json").write_text(json.dumps(asdict(manifest), indent=1))
     return manifest
+
+
+def check_model(root: Path, manifest: Manifest) -> CalibratedModel:
+    """Load the snapshot's model and re-score its check hours: it must give the risks it gave
+    where the snapshot was written. A model pickled by other library versions can fail to load,
+    fail to score or score differently (20 Oct 2026: prod's v1, pickled by scikit-learn 1.7.2,
+    can't score in 1.9.1), and the website would show wrong numbers without this."""
+    here = library_versions()
+    versions = ", ".join(
+        f"{name} {manifest.libraries.get(name, '?')} there, {here[name]} here" for name in here
+    )
+    check = pd.read_parquet(root / "model" / "check.parquet")
+    try:
+        model = joblib.load(root / "model" / "model.joblib")
+        risk = model.predict_proba(check.drop(columns=CHECK_RISK))[:, 1]
+    except Exception as error:
+        raise RuntimeError(
+            f"snapshot {root}: its model can't score here ({type(error).__name__}: {error}). "
+            f"Libraries: {versions}"
+        ) from error
+    gap = float(np.max(np.abs(risk - check[CHECK_RISK].to_numpy())))
+    if gap > CHECK_TOLERANCE:
+        raise RuntimeError(
+            f"snapshot {root}: its model scores its {len(check)} check hours differently here "
+            f"(max gap {gap:.2e}). Libraries: {versions}"
+        )
+    return model
 
 
 @dataclass
@@ -198,12 +273,13 @@ class Snapshot:
         manifest = Manifest(**json.loads(manifest_path.read_text()))
         if manifest.schema_version != SCHEMA_VERSION:
             raise ValueError(
-                f"snapshot schema {manifest.schema_version}, expected {SCHEMA_VERSION}"
+                f"snapshot schema {manifest.schema_version}, expected {SCHEMA_VERSION}: "
+                "rebuild it (the demo: backend/scripts/build_demo_snapshot.py)"
             )
         return cls(
             root=root,
             manifest=manifest,
-            model=joblib.load(root / "model" / "model.joblib"),
+            model=check_model(root, manifest),
             background=pd.read_parquet(root / "model" / "background.parquet"),
         )
 
@@ -229,12 +305,19 @@ def to_records(frame: pd.DataFrame) -> list[dict]:
     ]
 
 
-POINTER = "current.json"
+# One pointer per snapshot format: an image reads only the one for the format its code reads, so a
+# snapshot in a newer format (written by a newer release's export) never reaches an older image.
+POINTER = f"current-v{SCHEMA_VERSION}.json"
 _NAME = re.compile(r"[\w.-]+")
 
 
+def staged_pointer(name: str) -> str:
+    """Where a published snapshot's own pointer waits until the website is pointed at it."""
+    return f"snapshots/{name}.json"
+
+
 def file_listing(folder: Path) -> dict[str, dict]:
-    """Every file of a snapshot folder with its size and SHA-256, as `current.json` lists them."""
+    """Every file of a snapshot folder with its size and SHA-256, as its pointer lists them."""
     folder = Path(folder)
     return {
         path.relative_to(folder).as_posix(): {
@@ -246,38 +329,67 @@ def file_listing(folder: Path) -> dict[str, dict]:
     }
 
 
-def publish_snapshot(folder: Path, volume: Path, name: str) -> dict:
-    """Copy a snapshot folder to `<volume>/snapshots/<name>/`, then write `current.json` naming
-    it. The pointer is written last, so until then the API keeps downloading the previous
-    snapshot. `volume` is a volume path (`/Volumes/...`, a folder on Databricks compute)."""
+def publish_snapshot(folder: Path, volume: Path, name: str, move_pointer: bool = True) -> dict:
+    """Copy a snapshot folder to `<volume>/snapshots/<name>/` and write its pointer next to it
+    (`snapshots/<name>.json`: the name, the format, every file's size and SHA-256). With
+    `move_pointer` it is copied to POINTER last, so the website serves the new snapshot from its
+    next start and the previous one until then. Without (a release), the snapshot waits there
+    until the new image has passed its smoke test on it (`point_to`). `volume` is a volume path
+    (`/Volumes/...`). Files are copied without their metadata: a volume can't set any."""
     if not _NAME.fullmatch(name):
         raise ValueError(f"a snapshot name is letters, digits, '.', '-' or '_', not {name!r}")
     target = Path(volume) / "snapshots" / name
     if target.exists():
         raise FileExistsError(f"{target} exists: a published snapshot is never changed")
-    shutil.copytree(folder, target)
-    pointer = {"snapshot": name, "files": file_listing(target)}
-    (Path(volume) / POINTER).write_text(json.dumps(pointer, indent=1))
+    for path in file_listing(folder):
+        (target / path).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(Path(folder) / path, target / path)
+    pointer = {"snapshot": name, "schema_version": SCHEMA_VERSION, "files": file_listing(target)}
+    text = json.dumps(pointer, indent=1)
+    (Path(volume) / staged_pointer(name)).write_text(text)
+    if move_pointer:
+        (Path(volume) / POINTER).write_text(text)
     return pointer
 
 
-def fetch_snapshot(read: Callable[[str], bytes], into: Path) -> Path:
-    """Download the snapshot `current.json` names into `into/<name>/`, checking every file
-    against the size and SHA-256 listed there, and return that folder. `read(path)` gives a
-    file of the published folder (`blob_reader` on Container Apps)."""
-    pointer = json.loads(read(POINTER))
-    name = pointer["snapshot"]
-    if not _NAME.fullmatch(name):
-        raise ValueError(f"{POINTER} names {name!r}, not a snapshot")
+def read_pointer(read: Callable[[str], bytes], path: str = POINTER) -> dict:
+    """A pointer, refused unless it names a snapshot in the format this code reads."""
+    pointer = json.loads(read(path))
+    if not _NAME.fullmatch(str(pointer.get("snapshot"))):
+        raise ValueError(f"{path} names {pointer.get('snapshot')!r}, not a snapshot")
+    if pointer.get("schema_version") != SCHEMA_VERSION:
+        raise ValueError(
+            f"{path}: snapshot format {pointer.get('schema_version')}, this code reads "
+            f"{SCHEMA_VERSION}"
+        )
+    return pointer
+
+
+def point_to(read: Callable[[str], bytes], write: Callable[[str, bytes], None], name: str) -> dict:
+    """Make `name` the snapshot the website serves from its next start: copy its own pointer to
+    POINTER. Also the rollback, to an earlier snapshot's name."""
+    pointer = read_pointer(read, staged_pointer(name))
+    if pointer["snapshot"] != name:
+        raise ValueError(f"{staged_pointer(name)} names {pointer['snapshot']!r}, not {name!r}")
+    write(POINTER, json.dumps(pointer, indent=1).encode())
+    return pointer
+
+
+def fetch_snapshot(read: Callable[[str], bytes], into: Path, pointer: str = POINTER) -> Path:
+    """Download the snapshot `pointer` names (by default the one the website serves) into
+    `into/<name>/`, checking every file against the size and SHA-256 listed there, and return
+    that folder. `read(path)` gives a file of the volume (`blob_reader` on Container Apps)."""
+    listing = read_pointer(read, pointer)
+    name = listing["snapshot"]
     folder = Path(into) / name
-    for path, expected in pointer["files"].items():
+    for path, expected in listing["files"].items():
         parts = PurePosixPath(path).parts
         if PurePosixPath(path).is_absolute() or ".." in parts:
-            raise ValueError(f"{POINTER} lists {path!r}, outside the snapshot")
+            raise ValueError(f"{pointer} lists {path!r}, outside the snapshot")
         data = read(f"snapshots/{name}/{path}")
         found = {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
         if found != expected:
-            raise ValueError(f"snapshot {name}: {path} is not the file {POINTER} lists")
+            raise ValueError(f"snapshot {name}: {path} is not the file {pointer} lists")
         (folder / path).parent.mkdir(parents=True, exist_ok=True)
         (folder / path).write_bytes(data)
     return folder

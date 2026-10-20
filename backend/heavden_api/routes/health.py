@@ -19,6 +19,7 @@ def health(s: AppState = Depends(state)) -> dict:
         "data_start": s.data_start.isoformat(),
         "model": {"name": m.model_name, "version": m.model_version, "type": m.model_type},
         "risk_bands": m.bands,
-        "documents": s.snapshot.rag_dir is not None,
+        "documents": s.documents_dir is not None,
         "rows": m.rows if s.live is None else {},
+        "snapshot": s.snapshot.root.name,  # the published snapshot's name on Container Apps
     }

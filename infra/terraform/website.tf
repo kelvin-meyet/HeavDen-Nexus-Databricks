@@ -178,7 +178,7 @@ resource "azurerm_container_app" "api" {
       name   = "api"
       image  = var.api_image
       cpu    = 0.5
-      memory = "1Gi" # measured: 345 MiB after start-up, 554 MiB after a document search
+      memory = "1Gi" # measured 20 Oct (snapshot mode, prod-sized data): peak 588-659 MiB
 
       env {
         name  = "MODE"
@@ -265,4 +265,23 @@ resource "azurerm_container_app" "api" {
     databricks_permissions.warehouse,
     azurerm_role_assignment.web_openai,
   ]
+}
+
+# Releases deploy new images (release.yml, job website) as prod's deploy identity: it may change
+# this app and nothing else in Azure. A revision runs as the website's identity, so updating the
+# app also needs the right to assign that identity (to what it may change: this app).
+resource "azurerm_role_assignment" "ci_deploys_api" {
+  count                = length(azurerm_container_app.api)
+  scope                = azurerm_container_app.api[0].id
+  role_definition_name = "Contributor"
+  principal_id         = azuread_service_principal.ci["prod"].object_id
+  principal_type       = "ServicePrincipal"
+}
+
+resource "azurerm_role_assignment" "ci_assigns_web_identity" {
+  count                = length(azurerm_container_app.api)
+  scope                = azurerm_user_assigned_identity.web.id
+  role_definition_name = "Managed Identity Operator"
+  principal_id         = azuread_service_principal.ci["prod"].object_id
+  principal_type       = "ServicePrincipal"
 }

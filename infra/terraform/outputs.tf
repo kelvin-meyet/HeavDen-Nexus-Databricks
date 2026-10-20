@@ -53,3 +53,8 @@ output "web_client_id" {
 output "api_url" {
   value = one([for app in azurerm_container_app.api : "https://${app.ingress[0].fqdn}"])
 }
+
+# The repository variable WEBSITE_APP_ID: where releases deploy new images (release.yml)
+output "api_app_id" {
+  value = one(azurerm_container_app.api[*].id)
+}

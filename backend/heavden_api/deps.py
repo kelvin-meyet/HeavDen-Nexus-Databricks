@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pandas as pd
 from fastapi import Request
@@ -78,14 +79,20 @@ class AppState:
             self.as_of.isoformat(), None, data_start=start, canary=canary, data_tool="genie"
         )
 
+    @property
+    def documents_dir(self) -> Path | None:
+        """The document index: the image's own (RAG_DIR), else the snapshot's (the demo)."""
+        return self.settings.rag_dir or self.snapshot.rag_dir
+
     def retriever(self) -> Retriever | None:
-        """The document index, built on first use (loading the embedding model takes seconds)."""
-        if self.snapshot.rag_dir is None:
+        """The document index, loaded on first use (loading the embedding model takes seconds)."""
+        folder = self.documents_dir
+        if folder is None:
             return None
         with self._lock:
             if self._retriever is None:
                 embedder = self.embedder or FastEmbedder(cache_dir=self.settings.embed_cache_dir)
-                self._retriever = Retriever.load(self.snapshot.rag_dir, embedder)
+                self._retriever = Retriever.load(folder, embedder)
         return self._retriever
 
 
