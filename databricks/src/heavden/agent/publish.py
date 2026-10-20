@@ -5,8 +5,9 @@
   feed is on, so a Vector Search index can sync from it.
 * **`ml.explain_patient_risk(patient)`**: a SQL table function answering "why is this patient
   flagged?" from Gold, as the app's `explain_patient` tool does from its snapshot: the stay's
-  latest score, band, NEWS2 and top factors, the risk 6 hours earlier, and its alerts of the
-  last 48 hours. The assistant calls it; anyone with access can too (`SELECT * FROM ...`).
+  latest score, band, NEWS2 and top factors, the risk 6 hours earlier, and its alerts in the
+  48 hours up to that hour. The assistant calls it; anyone with access can too
+  (`SELECT * FROM ...`).
 * **The Genie space** "HeavDen Ward Data" (plus the environment's label) over the Gold tables:
   the assistant's tool for questions about numbers (`heavden.agent.genie`, `genie_space.yaml`).
 
@@ -80,8 +81,8 @@ WITH asked AS (
            'escalated_within_6h', a.escalated_within_6h)))) AS recent_alerts_48h
   FROM {gold}.alerts_fact a
   JOIN latest l ON a.encounter_id = l.encounter_id
-  CROSS JOIN now
-  WHERE a.alert_ts > now.as_of - INTERVAL 48 HOURS AND a.alert_ts <= now.as_of
+  -- the 48 h up to the patient's own last scored hour (for someone who left, before they left)
+  WHERE a.alert_ts > l.prediction_ts - INTERVAL 48 HOURS AND a.alert_ts <= l.prediction_ts
   GROUP BY a.encounter_id
 )
 SELECT l.*, l.prediction_ts = now.as_of AS on_ward_now,
@@ -108,7 +109,7 @@ def explain_function_sql(catalog: str) -> str:
         "  patient STRING COMMENT 'A patient label such as P-1042, or a stay id'\n"
         f") RETURNS TABLE ({EXPLAIN_COLUMNS})\n"
         "COMMENT 'Why is this patient flagged? Latest risk score, band, NEWS2 and top factors, the "
-        "risk 6 hours earlier and the alerts of the last 48 hours (synthetic data).'\n"
+        "risk 6 hours earlier and the alerts of the 48 hours up to it (synthetic data).'\n"
         f"RETURN {body}"
     )
 

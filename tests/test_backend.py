@@ -114,13 +114,9 @@ def test_snapshot_round_trips(client, tmp_path_factory):
     assert np.isclose(reloaded.manifest.risk_bands.high, snapshot.manifest.bands["high"])
 
 
-def test_live_mode_is_not_available_yet(tmp_path):
+def test_mode_is_demo_or_live():
     with pytest.raises(ValueError, match="MODE"):
         Settings(mode="prod")
-    app = create_app(Settings(mode="live", snapshot_dir=tmp_path))
-    with pytest.raises(RuntimeError, match="Phase 5"):
-        with fastapi_testclient.TestClient(app):
-            pass
 
 
 def test_missing_snapshot_explains_how_to_build_one(tmp_path):

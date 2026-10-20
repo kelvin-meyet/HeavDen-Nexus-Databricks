@@ -5,7 +5,7 @@ engine-specific functions. Parameters use `:name`. `:as_of` is the current hour 
 the snapshot's last hour in demo mode, the latest scored hour in live mode.
 """
 
-SITE_FILTER = "(CAST(:site_id AS VARCHAR) IS NULL OR site_id = :site_id)"
+SITE_FILTER = "(CAST(:site_id AS STRING) IS NULL OR site_id = :site_id)"
 
 SUMMARY = f"""
 WITH now AS (
@@ -95,9 +95,9 @@ LEFT JOIN gold.risk_scores earlier
        ON earlier.encounter_id = r.encounter_id
       AND earlier.prediction_ts = :as_of - INTERVAL 6 HOURS
 WHERE r.prediction_ts = :as_of
-  AND (CAST(:site_id AS VARCHAR) IS NULL OR r.site_id = :site_id)
-  AND (CAST(:unit_id AS VARCHAR) IS NULL OR r.unit_id = :unit_id)
-  AND (CAST(:band AS VARCHAR) IS NULL OR r.risk_band = :band)
+  AND (CAST(:site_id AS STRING) IS NULL OR r.site_id = :site_id)
+  AND (CAST(:unit_id AS STRING) IS NULL OR r.unit_id = :unit_id)
+  AND (CAST(:band AS STRING) IS NULL OR r.risk_band = :band)
 ORDER BY r.risk DESC, r.news2_total DESC, r.encounter_id
 LIMIT :limit
 """

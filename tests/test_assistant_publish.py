@@ -69,12 +69,14 @@ def _gold(spark):
             "escalated_within_6h": [0.0, None, 1.0],
         }
     )
+    # E-2's is older than 48 h; E-1's is within the 48 h before E-1 left, though not within the
+    # ward's last 48 h
     old = pd.DataFrame(
         {
-            "encounter_id": ["E-2"],
-            "alert_ts": [T0 - pd.Timedelta(days=3)],
-            "risk": [0.5],
-            "escalated_within_6h": [1.0],
+            "encounter_id": ["E-2", "E-1"],
+            "alert_ts": [T0 - pd.Timedelta(days=3), T0 - pd.Timedelta(hours=40)],
+            "risk": [0.5, 0.3],
+            "escalated_within_6h": [1.0, 0.0],
         }
     )
     for name, df in (
@@ -102,7 +104,8 @@ def test_the_function_explains_a_patients_latest_hour_like_the_apps_tool(spark):
         assert [a["risk"] for a in alerts] == [0.08, 0.2]
     by_stay = _explain(spark, "E-1").iloc[0]  # a stay id works too, and a discharged stay
     assert by_stay["patient_label"] == "P-1001" and not bool(by_stay["on_ward_now"])
-    assert json.loads(by_stay["recent_alerts_48h"]) == []
+    # the 48 h before the stay's own last hour (19 Oct: it was the ward's, so always [])
+    assert [a["risk"] for a in json.loads(by_stay["recent_alerts_48h"])] == [0.3]
     assert _explain(spark, "P-9999").empty
 
 

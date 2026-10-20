@@ -106,11 +106,13 @@ ORDER BY r.prediction_ts DESC
 LIMIT 1
 """
 
+# the 48 hours up to the patient's own last scored hour: for someone who has left, the hours
+# before they left (not the ward's last 48 hours, when they were no longer there)
 PATIENT_ALERTS_SQL = """
 SELECT alert_ts, round(risk, 4) AS risk, escalated_within_6h
 FROM gold.alerts_fact
-WHERE encounter_id = :encounter_id AND alert_ts > :as_of - INTERVAL 48 HOURS
-  AND alert_ts <= :as_of
+WHERE encounter_id = :encounter_id AND alert_ts > :last_hour - INTERVAL 48 HOURS
+  AND alert_ts <= :last_hour
 ORDER BY alert_ts
 """
 
@@ -200,6 +202,8 @@ class Toolbox:
         return json.dumps({"passages": passages}), step
 
     def explain_patient(self, patient: str) -> tuple[str, dict]:
+        import pandas as pd
+
         from heavden_api.snapshot import to_records
 
         patient = patient.strip().upper()
@@ -217,7 +221,10 @@ class Toolbox:
         row["recent_alerts_48h"] = to_records(
             self.state.source.query(
                 PATIENT_ALERTS_SQL,
-                {"encounter_id": row["encounter_id"], "as_of": self.state.as_of},
+                {
+                    "encounter_id": row["encounter_id"],
+                    "last_hour": pd.Timestamp(row["prediction_ts"]),
+                },
             )
         )
         row["risk_bands"] = self.state.snapshot.manifest.bands

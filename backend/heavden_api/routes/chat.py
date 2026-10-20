@@ -24,11 +24,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from heavden_api.chat.agent import agent_events, run_agent, system_prompt
+from heavden_api.chat.agent import agent_events, run_agent
 from heavden_api.chat.guardrails import REFUSALS, screen_question
 from heavden_api.chat.limits import client_address
 from heavden_api.chat.memory import as_messages
-from heavden_api.chat.tools import Toolbox
 from heavden_api.deps import AppState, state
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -71,13 +70,6 @@ def _plan(body: ChatRequest, request: Request, s: AppState) -> tuple[str, dict]:
     return "live", {}
 
 
-def _system(s: AppState) -> str:
-    m = s.snapshot.manifest
-    return system_prompt(
-        m.as_of, m.bands, s.sandbox.schema_text(), m.data_start, s.leak_detector.canary
-    )
-
-
 def _guardrail_reply(category: str) -> dict:
     return {
         "mode": "guardrail",
@@ -101,8 +93,8 @@ def chat(body: ChatRequest, request: Request, s: AppState = Depends(state)) -> d
     try:
         result = run_agent(
             s.llm,
-            Toolbox(s, s.sandbox),
-            _system(s),
+            s.toolbox(),
+            s.system_prompt(),
             body.message,
             as_messages(remembered),
             detector=s.leak_detector,
@@ -155,8 +147,8 @@ def _live_events(body: ChatRequest, s: AppState) -> Iterator[dict]:
     try:
         for event in agent_events(
             s.llm,
-            Toolbox(s, s.sandbox),
-            _system(s),
+            s.toolbox(),
+            s.system_prompt(),
             body.message,
             as_messages(remembered),
             detector=s.leak_detector,

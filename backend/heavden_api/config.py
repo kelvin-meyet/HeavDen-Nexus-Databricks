@@ -39,6 +39,16 @@ def azure_base_url(endpoint: str) -> str:
     return f"https://{host}/openai/v1/"
 
 
+def databricks_api():
+    """The Databricks API client for live mode, as the identity in the environment (see
+    `databricks_token`). A request may take 150 s: a cold Genie call has hung ~120 s, and the
+    SDK's default 60 s would give up and send it again, starting a second conversation."""
+    from databricks.sdk import WorkspaceClient
+    from databricks.sdk.config import Config
+
+    return WorkspaceClient(config=Config(http_timeout_seconds=150)).api_client
+
+
 def databricks_token() -> str:
     """A current token for the Databricks identity in the environment: a service principal
     (DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET) on Render, a CLI profile
@@ -56,8 +66,21 @@ class LLMConnection:
 
 @dataclass(frozen=True)
 class Settings:
-    # demo: snapshot files (DuckDB, FAISS, local model). live: Databricks (Phase 5).
+    # demo: snapshot files (DuckDB, FAISS, local model). live: prod's Gold on the SQL warehouse,
+    # the chat's numbers from prod's Genie space; the model, documents and recordings still come
+    # from the snapshot.
     mode: str = field(default_factory=lambda: os.environ.get("MODE", "demo"))
+    # live mode, as the Databricks identity in the environment (DATABRICKS_HOST with
+    # DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET on Render; DATABRICKS_CONFIG_PROFILE locally)
+    live_catalog: str = field(
+        default_factory=lambda: os.environ.get("LIVE_CATALOG", "heavden_prod")
+    )
+    warehouse_id: str = field(
+        default_factory=lambda: os.environ.get("WAREHOUSE_ID", "0a14d0d391ce8af6")
+    )
+    genie_title: str = field(
+        default_factory=lambda: os.environ.get("GENIE_TITLE", "HeavDen Ward Data (prod)")
+    )
     snapshot_dir: Path = field(
         default_factory=lambda: Path(
             os.environ.get("SNAPSHOT_DIR", ROOT / "data" / "demo_snapshot")

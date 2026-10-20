@@ -78,20 +78,26 @@ def _table(statement_response: dict) -> tuple[list[str], list[list]]:
 
 
 class Warehouse:
-    """SQL on a SQL warehouse through the Statement Execution API."""
+    """SQL on a SQL warehouse through the Statement Execution API. With `catalog`, unqualified
+    names resolve in it (`gold.risk_scores` is `<catalog>.gold.risk_scores`)."""
 
-    def __init__(self, api, warehouse_id: str, timeout: float = 120.0):
+    def __init__(self, api, warehouse_id: str, timeout: float = 120.0, catalog: str | None = None):
         self.api, self.warehouse_id, self.timeout = api, warehouse_id, timeout
+        self.catalog = catalog
 
-    def run(self, statement: str, **params: str) -> tuple[list[str], list[list]]:
+    def execute(self, statement: str, parameters: list[dict] | None = None) -> dict:
+        """The finished statement, all result chunks in `result.data_array`. `parameters` are
+        the API's own ({"name", "value", "type"}; no value is NULL)."""
         body = {
             "warehouse_id": self.warehouse_id,
             "statement": statement,
-            "parameters": [{"name": k, "value": v, "type": "STRING"} for k, v in params.items()],
+            "parameters": parameters or [],
             "wait_timeout": "30s",
             "disposition": "INLINE",
             "format": "JSON_ARRAY",
         }
+        if self.catalog:
+            body["catalog"] = self.catalog
         response = self.api.do("POST", "/api/2.0/sql/statements", body=body)
         deadline = time.monotonic() + self.timeout
         while response["status"]["state"] in ("PENDING", "RUNNING"):  # a warehouse waking up
@@ -102,7 +108,17 @@ class Warehouse:
         if response["status"]["state"] != "SUCCEEDED":
             error = (response["status"].get("error") or {}).get("message", "unknown error")
             raise ToolError(f"the query failed: {error}")
-        return _table(response)
+        result = response.get("result") or {}
+        link = result.get("next_chunk_internal_link")
+        while link:  # a large result comes in chunks
+            chunk = self.api.do("GET", link)
+            result.setdefault("data_array", []).extend(chunk.get("data_array") or [])
+            link = chunk.get("next_chunk_internal_link")
+        return response
+
+    def run(self, statement: str, **params: str) -> tuple[list[str], list[list]]:
+        parameters = [{"name": k, "value": v, "type": "STRING"} for k, v in params.items()]
+        return _table(self.execute(statement, parameters))
 
 
 @dataclass(frozen=True)
