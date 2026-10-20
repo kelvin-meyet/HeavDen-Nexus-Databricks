@@ -101,7 +101,7 @@ resource "azurerm_storage_table" "chat_budget" {
 }
 
 resource "azurerm_role_assignment" "web_chat_budget" {
-  scope                = azurerm_storage_table.chat_budget.resource_manager_id
+  scope                = "${azurerm_storage_account.lake.id}/tableServices/default/tables/${azurerm_storage_table.chat_budget.name}"
   role_definition_name = "Storage Table Data Contributor"
   principal_id         = azurerm_user_assigned_identity.web.principal_id
   principal_type       = "ServicePrincipal"
@@ -114,6 +114,8 @@ resource "azurerm_role_assignment" "web_openai" {
   principal_type       = "ServicePrincipal"
 }
 
+# Needs the subscription's Microsoft.OperationalInsights and Microsoft.App providers registered
+# (once per subscription: az provider register --namespace <name>).
 # The API's logs, kept 30 days (included in the ingestion price). The daily cap bounds the cost
 # if something starts logging in a loop: the website writes a few KB a day.
 resource "azurerm_log_analytics_workspace" "web" {
