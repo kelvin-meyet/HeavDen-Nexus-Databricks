@@ -138,6 +138,6 @@ def test_the_table_is_used_on_container_apps_and_memory_locally(monkeypatch):
     monkeypatch.setattr(config, "managed_identity_token", lambda client_id, scope: lambda: "t")
     assert isinstance(Settings(chat_budget_table_url=None).chat_budget(), DailyBudget)
     cap = Settings(chat_budget_table_url=TABLE, managed_identity="web-id").chat_budget()
-    assert isinstance(cap, TableBudget) and cap.limit == 300
+    assert isinstance(cap, TableBudget) and cap.limit == 100
     with pytest.raises(ValueError, match="MANAGED_IDENTITY_CLIENT_ID"):
         Settings(chat_budget_table_url=TABLE, managed_identity=None)

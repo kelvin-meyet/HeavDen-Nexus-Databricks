@@ -182,9 +182,10 @@ class Settings:
     chat_requests_per_hour: int = field(
         default_factory=lambda: int(os.environ.get("CHAT_REQUESTS_PER_HOUR", "30"))
     )
-    # live (LLM) answers per UTC day across all visitors; past it, recordings are replayed
+    # live (LLM) answers per UTC day across all visitors; past it, recordings are replayed.
+    # 100 (20 Oct): at most ~$4 a day even on gpt-5.5 (~4 cents an answer)
     chat_live_answers_per_day: int = field(
-        default_factory=lambda: int(os.environ.get("CHAT_LIVE_ANSWERS_PER_DAY", "300"))
+        default_factory=lambda: int(os.environ.get("CHAT_LIVE_ANSWERS_PER_DAY", "100"))
     )
     # Container Apps: the Azure Table that keeps that count across restarts, written as the
     # managed identity, e.g. https://<account>.table.core.windows.net/websitecounters. Unset
