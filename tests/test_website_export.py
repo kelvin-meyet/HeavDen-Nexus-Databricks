@@ -84,6 +84,33 @@ def test_the_export_is_a_snapshot_the_website_loads(demo_snapshot, tmp_path):
     assert loaded.rag_dir is None  # documents come with the image
 
 
+class PlanMetrics:
+    """What Spark Connect's toPandas() leaves in DataFrame.attrs on Databricks serverless."""
+
+
+def test_spark_metrics_left_on_the_tables_are_not_written(demo_snapshot, tmp_path):
+    # prod's first export (release v0.6.1): "Object of type PlanMetrics is not JSON serializable"
+    tables = gold(demo_snapshot)
+    loaded = Snapshot.load(demo_snapshot)
+    background = loaded.background.copy()
+    for frame in (*tables.values(), background):
+        frame.attrs = {"metrics": [PlanMetrics()], "observed_metrics": []}
+    now = as_of(tables)
+    m = loaded.manifest
+    write_snapshot(
+        tmp_path / "web",
+        export.website_tables(tables, now, 2),
+        loaded.model,
+        background,
+        m.risk_bands,
+        m.model_name,
+        m.model_version,
+        now,
+    )
+    assert Snapshot.load(tmp_path / "web").manifest.rows["patient_hour_features"] == 40 * 48
+    assert tables["risk_scores"].attrs["observed_metrics"] == []  # the caller's frames untouched
+
+
 def test_the_log_check_re_scores_the_models_own_hours(demo_snapshot):
     now = as_of(gold(demo_snapshot))
     tables = export.website_tables(gold(demo_snapshot), now)
