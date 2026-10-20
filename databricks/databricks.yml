@@ -89,6 +89,15 @@ variables:
   genie_title:
     description: The Genie space the Databricks assistant asks, the one over `model_catalog`.
     default: HeavDen Ward Data (staging)
+  assistant_users:
+    description: Service principals (application ids, comma-separated) that may use the
+      assistant's function and Genie space besides the deploying identity - in prod, the
+      website's managed identity (Terraform output web_client_id). assistant_publish grants them.
+    default: ""
+  website_volume:
+    description: Where website_snapshot publishes the website's snapshot (a volume path); empty
+      builds and checks it without publishing. Only prod has one (Terraform, website.tf).
+    default: ""
 
 targets:
   # Personal development: resources are prefixed with "[dev <user>]" and schedules are paused.
@@ -133,4 +142,6 @@ targets:
       model_catalog: heavden_prod
       env_label: " (prod)"
       genie_title: HeavDen Ward Data (prod)
+      assistant_users: e3c64e9c-df94-49d1-b14f-cbef9de5e7a0 # the website (Terraform output web_client_id)
+      website_volume: /Volumes/heavden_prod/ml/website
       sql_schema: prod

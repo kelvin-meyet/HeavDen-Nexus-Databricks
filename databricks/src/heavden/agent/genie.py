@@ -4,7 +4,8 @@
   spec. Ids are derived from what they name, so an unchanged spec gives the same payload; arrays
   are sorted as the API requires; `__CATALOG__` becomes the environment's catalog.
 * `publish_space(api, ...)`: creates the space, or updates it in place (found by title), then
-  gives the managers group CAN_MANAGE. `api` is a Databricks `ApiClient` (`.do(...)`); plain
+  gives the managers group CAN_MANAGE and the listed service principals (the website's identity
+  in prod) CAN_RUN. `api` is a Databricks `ApiClient` (`.do(...)`); plain
   REST calls, so any SDK version on serverless will do.
 
 Run as a module to write the payload to a file instead, e.g. to try a space by hand:
@@ -165,9 +166,11 @@ def publish_space(
     warehouse_id: str,
     folder: str,
     managers: str,
+    users: list[str] | tuple[str, ...] = (),
 ) -> str:
-    """Create the space or update it in place, then give `managers` CAN_MANAGE. Returns what
-    it did."""
+    """Create the space or update it in place, then give `managers` CAN_MANAGE and `users`
+    (service principals' application ids) CAN_RUN. PATCH adds to the space's permissions without
+    removing others. Returns what it did."""
     body = {
         "title": title,
         "description": description,
@@ -184,14 +187,14 @@ def publish_space(
     else:
         api.do("PATCH", f"/api/2.0/genie/spaces/{space_id}", body=body)
         action = "updated"
-    api.do(
-        "PATCH",
-        f"/api/2.0/permissions/genie/{space_id}",
-        body={"access_control_list": [{"group_name": managers, "permission_level": "CAN_MANAGE"}]},
-    )
+    acl = [{"group_name": managers, "permission_level": "CAN_MANAGE"}] + [
+        {"service_principal_name": user, "permission_level": "CAN_RUN"} for user in users
+    ]
+    api.do("PATCH", f"/api/2.0/permissions/genie/{space_id}", body={"access_control_list": acl})
+    runners = f"; CAN_RUN for {len(users)} service principal(s)" if users else ""
     return (
         f"Genie space {title!r} ({space_id}): {action}; {summary(payload)}; "
-        f"CAN_MANAGE for {managers}"
+        f"CAN_MANAGE for {managers}{runners}"
     )
 
 

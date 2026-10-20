@@ -30,6 +30,19 @@ def test_every_document_is_published_in_chunks_with_its_front_matter(rows):
     assert rows["effective_date"].map(type).eq(type(T0.date())).all()
 
 
+WEB_ID = "0b6d7c1e-4f2a-4c55-9a1e-2f3b4c5d6e7f"
+
+
+def test_assistant_users_are_application_ids_granted_execute_on_every_publish():
+    assert publish.assistant_users("") == []
+    assert publish.assistant_users(f" {WEB_ID} ,") == [WEB_ID]
+    assert publish.function_grants("heavden_prod", [WEB_ID]) == [
+        f"GRANT EXECUTE ON FUNCTION heavden_prod.ml.explain_patient_risk TO `{WEB_ID}`"
+    ]
+    with pytest.raises(ValueError, match="application ids"):
+        publish.assistant_users("heavden-web-prod`; DROP TABLE x; --")
+
+
 def _gold(spark):
     """Two stays of one patient (P-1001) and one of another, scored hourly, with alerts."""
     hours = pd.date_range(T0, periods=12, freq="h")
@@ -69,12 +82,14 @@ def _gold(spark):
             "escalated_within_6h": [0.0, None, 1.0],
         }
     )
+    # E-2's is older than 48 h; E-1's is within the 48 h before E-1 left, though not within the
+    # ward's last 48 h
     old = pd.DataFrame(
         {
-            "encounter_id": ["E-2"],
-            "alert_ts": [T0 - pd.Timedelta(days=3)],
-            "risk": [0.5],
-            "escalated_within_6h": [1.0],
+            "encounter_id": ["E-2", "E-1"],
+            "alert_ts": [T0 - pd.Timedelta(days=3), T0 - pd.Timedelta(hours=40)],
+            "risk": [0.5, 0.3],
+            "escalated_within_6h": [1.0, 0.0],
         }
     )
     for name, df in (
@@ -102,7 +117,8 @@ def test_the_function_explains_a_patients_latest_hour_like_the_apps_tool(spark):
         assert [a["risk"] for a in alerts] == [0.08, 0.2]
     by_stay = _explain(spark, "E-1").iloc[0]  # a stay id works too, and a discharged stay
     assert by_stay["patient_label"] == "P-1001" and not bool(by_stay["on_ward_now"])
-    assert json.loads(by_stay["recent_alerts_48h"]) == []
+    # the 48 h before the stay's own last hour (19 Oct: it was the ward's, so always [])
+    assert [a["risk"] for a in json.loads(by_stay["recent_alerts_48h"])] == [0.3]
     assert _explain(spark, "P-9999").empty
 
 

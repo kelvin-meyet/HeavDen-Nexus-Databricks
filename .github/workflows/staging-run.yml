@@ -45,6 +45,10 @@ on:
         description: "Check for drift (after scoring)"
         type: boolean
         default: true
+      website_snapshot:
+        description: "Build and check the website's snapshot (staging doesn't publish it)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -68,4 +72,5 @@ jobs:
       train: ${{ inputs.train }}
       score: ${{ inputs.score }}
       drift_check: ${{ inputs.drift_check }}
+      website_snapshot: ${{ inputs.website_snapshot }}
       episode: ${{ inputs.episode }}

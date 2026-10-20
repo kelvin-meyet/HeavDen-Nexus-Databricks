@@ -86,3 +86,15 @@ variable "azure_openai_api_version" {
   description = "The api-version in the deployment's Target URI, e.g. 2025-04-01-preview."
   type        = string
 }
+
+# The website (website.tf). Neither is a secret.
+variable "azure_openai_resource_id" {
+  description = "Resource ID of the Azure OpenAI / Foundry resource above (portal: the resource, JSON View, Resource ID). The website's identity gets Cognitive Services OpenAI User on it."
+  type        = string
+}
+
+variable "api_image" {
+  description = "The API image the container app is created with, e.g. ghcr.io/kelvin-meyet/heavden-api:v0.6.1. Empty: no container app yet (the identity and its grants are created anyway). Releases deploy later images."
+  type        = string
+  default     = ""
+}

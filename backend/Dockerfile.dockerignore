@@ -1,0 +1,12 @@
+# An allowlist for backend/Dockerfile: the image is public, so only what the API needs reaches
+# the build. Everything else (.env, Terraform state, personal notes, the rest of data/) can't.
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!generator/
+!databricks/src/heavden/
+!backend/heavden_api/
+!docs/corpus/
+**/__pycache__
+**/*.pyc

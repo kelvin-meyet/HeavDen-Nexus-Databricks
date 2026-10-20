@@ -38,3 +38,11 @@ prod:  # live episodes (Plan.md §6.4)
     scenarios: [protocol_change]
     seed: 3117
     settings: {protocol_change: {start_after_hours: 0}}
+  # v3 became champion on 16 Oct, after prod's last data, so every hour in the prediction log is
+  # v1's. A normal week under the protocol (to 20 Oct), scored by v3: the website's board, its
+  # what-if and its High threshold all come from the model in use.
+  - name: settled-week
+    hours: 144
+    scenarios: [protocol_change]
+    seed: 3118
+    settings: {protocol_change: {start_after_hours: 0}}

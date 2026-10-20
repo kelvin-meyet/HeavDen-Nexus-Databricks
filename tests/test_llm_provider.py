@@ -18,6 +18,7 @@ def _settings(**overrides) -> Settings:
         "azure_openai_endpoint": None,
         "azure_openai_key": None,
         "databricks_host": None,
+        "managed_identity": None,
         "llm_model": "some-model",
         "llm_reasoning_effort": "none",
     }
@@ -56,6 +57,57 @@ def test_misconfiguration_is_reported_not_guessed():
         _settings(llm_provider="azure", azure_openai_key="azure-key").llm_connection()
     with pytest.raises(ValueError, match="LLM_PROVIDER"):
         _settings(llm_provider="foundry").llm_connection()
+
+
+def test_on_container_apps_azure_openai_is_reached_as_the_managed_identity(monkeypatch):
+    asked = []
+    monkeypatch.setattr(
+        config,
+        "managed_identity_token",
+        lambda client_id, scope: lambda: asked.append((client_id, scope)) or "entra-token",
+    )
+    azure = {"llm_provider": "azure", "azure_openai_endpoint": ENDPOINT}
+    connection = _settings(**azure, managed_identity="web-id").llm_connection()
+    assert connection.base_url == ENDPOINT + "/openai/v1/"
+    assert connection.api_key() == "entra-token"  # a function: asked before each request
+    assert asked == [("web-id", "https://ai.azure.com/.default")]
+    # a key, when there is one (locally), is used as before
+    keyed = _settings(**azure, managed_identity="web-id", azure_openai_key="azure-key")
+    assert keyed.llm_connection().api_key == "azure-key"
+
+
+def test_live_mode_signs_in_to_databricks_as_the_managed_identity(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATABRICKS_HOST", "https://adb-1.azuredatabricks.net")
+    monkeypatch.setenv("DATABRICKS_CONFIG_FILE", str(tmp_path / "none"))  # no local profiles
+
+    def offline(*args, **kwargs):  # the SDK asks the host for its metadata; no network in tests
+        raise ConnectionError("offline")
+
+    monkeypatch.setattr("databricks.sdk.config.get_host_metadata", offline)
+    monkeypatch.setattr(
+        config, "managed_identity_token", lambda client_id, scope: lambda: f"{client_id}:{scope}"
+    )
+    cfg = config.databricks_api("web-id")._cfg
+    assert cfg.auth_type == "azure-managed-identity" and cfg.http_timeout_seconds == 150
+    assert cfg.authenticate() == {
+        "Authorization": "Bearer web-id:2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default"
+    }
+
+
+def test_the_identity_token_comes_from_azure_identity(monkeypatch):
+    calls = []
+
+    class Credential:
+        def __init__(self, client_id):
+            calls.append(client_id)
+
+        def get_token(self, scope):
+            calls.append(scope)
+            return type("Token", (), {"token": "t"})()
+
+    monkeypatch.setattr("azure.identity.ManagedIdentityCredential", Credential)
+    token = config.managed_identity_token("web-id", "scope/.default")
+    assert (token(), calls) == ("t", ["web-id", "scope/.default"])
 
 
 def test_keys_never_appear_when_settings_are_printed():

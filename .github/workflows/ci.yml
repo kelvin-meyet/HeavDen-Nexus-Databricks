@@ -85,6 +85,48 @@ jobs:
           tests/test_training.py tests/test_batch_scoring.py tests/test_model_ops.py
           tests/test_profiling.py tests/test_assistant_publish.py
 
+  # The website's API on its image's libraries, installed the way the image installs them: the
+  # `serving` group pins serverless environment 6's versions, so the model runs on the libraries
+  # it was trained with, and the API with an older pandas, scikit-learn and Starlette than uv.lock's.
+  api-on-serving-libraries:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: API tests
+        run: >
+          uv run --locked --no-dev --group backend --group rag --group serving
+          --with pytest==9.1.1 --with httpx==0.28.1
+          pytest -q tests/test_backend.py tests/test_live_mode.py tests/test_snapshot_store.py
+          tests/test_website_export.py tests/test_table_budget.py tests/test_chat.py
+          tests/test_guardrails.py tests/test_memory.py tests/test_llm_provider.py
+          tests/test_scoring_gold.py tests/test_rag.py tests/test_databricks_tools.py
+          tests/test_dockerfile.py
+
+  # The website's image, built as a release builds it (release.yml pushes and deploys it, after a
+  # smoke test on prod's snapshot): a broken Dockerfile or lock shows here, not at the release.
+  api-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -f backend/Dockerfile -t heavden-api:ci .
+
+      - name: It runs the model on Databricks' libraries and has its document index
+        run: >
+          docker run --rm --entrypoint python heavden-api:ci -c
+          "import heavden_api.app, sklearn, lightgbm, os;
+          assert (sklearn.__version__, lightgbm.__version__) == ('1.7.2', '4.6.0');
+          assert os.path.exists('/app/rag/vectors.npy'); print('ok', sklearn.__version__)"
+
   web:
     runs-on: ubuntu-latest
     timeout-minutes: 15

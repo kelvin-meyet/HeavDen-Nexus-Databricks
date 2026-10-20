@@ -2,7 +2,8 @@
 
     uv run uvicorn heavden_api.app:app --reload        # http://127.0.0.1:8000/docs
 
-`MODE=demo` (default) serves the snapshot in `SNAPSHOT_DIR`. `MODE=live` arrives in Phase 5.
+`MODE=demo` (default) serves the snapshot in `SNAPSHOT_DIR`. `MODE=live` reads prod on Databricks
+(see `config.Settings`).
 """
 
 from __future__ import annotations
@@ -20,13 +21,18 @@ from heavden_api.routes import analytics, chat, documents, health, risk
 
 
 def create_app(
-    settings: Settings | None = None, embedder: Embedder | None = None, llm: LLM | None = None
+    settings: Settings | None = None,
+    embedder: Embedder | None = None,
+    llm: LLM | None = None,
+    api=None,
 ) -> FastAPI:
+    """`api`: live mode's Databricks API client (tests pass a fake; by default the identity in
+    the environment)."""
     settings = settings or Settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        app.state.heavden = build_state(settings, embedder, llm)
+        app.state.heavden = build_state(settings, embedder, llm, api)
         yield
 
     app = FastAPI(

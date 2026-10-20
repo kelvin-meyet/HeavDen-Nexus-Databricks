@@ -171,6 +171,20 @@ def test_an_existing_space_is_found_on_any_page_and_updated_in_place(payload):
     assert patch[1] == "/api/2.0/genie/spaces/s1" and "parent_path" not in patch[3]
 
 
+def test_listed_service_principals_may_ask_the_space(payload):
+    # prod: the website's managed identity asks Genie; PATCH keeps whatever else is granted
+    api = FakeApi([[{"space_id": "s1", "title": "HeavDen Ward Data (prod)"}]])
+    message = genie.publish_space(
+        api, payload, "HeavDen Ward Data (prod)", "about", "wh1", "/x", "admins", users=["web-id"]
+    )
+    grant = next(c for c in api.calls if "permissions" in c[1])
+    assert grant[0] == "PATCH" and grant[3]["access_control_list"] == [
+        {"group_name": "admins", "permission_level": "CAN_MANAGE"},
+        {"service_principal_name": "web-id", "permission_level": "CAN_RUN"},
+    ]
+    assert message.endswith("CAN_MANAGE for admins; CAN_RUN for 1 service principal(s)")
+
+
 def test_two_spaces_with_the_same_title_stop_the_job(payload):
     twins = [{"space_id": i, "title": "HeavDen Ward Data (staging)"} for i in ("a", "b")]
     with pytest.raises(RuntimeError, match="2 Genie spaces"):

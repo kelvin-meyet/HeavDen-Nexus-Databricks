@@ -12,6 +12,11 @@ alert_emails        = ["<where budget alerts go>", "<optional second address>"]
 azure_openai_endpoint    = "https://<resource>.openai.azure.com"
 azure_openai_api_version = "<the api-version in the Target URI>"
 
+# The website (website.tf): the same resource's ID (portal: the resource, JSON View), and the API
+# image to create the container app with, once it is in GHCR (leave empty until then)
+azure_openai_resource_id = "/subscriptions/<id>/resourceGroups/<group>/providers/Microsoft.CognitiveServices/accounts/<resource>"
+# api_image = "ghcr.io/kelvin-meyet/heavden-api:<tag>"
+
 # Optional (defaults shown)
 # location      = "centralus"
 # budget_amount = 200
