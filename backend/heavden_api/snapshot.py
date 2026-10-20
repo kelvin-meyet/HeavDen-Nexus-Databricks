@@ -183,6 +183,15 @@ def check_hours(model: CalibratedModel, features: pd.DataFrame) -> pd.DataFrame:
     return rows.assign(**{CHECK_RISK: model.predict_proba(rows)[:, 1]})
 
 
+def write_parquet(frame: pd.DataFrame, path: Path) -> None:
+    """`frame` as Parquet, without its `attrs`. pandas writes attrs into the file as JSON, and on
+    Databricks serverless (Spark Connect) `toPandas()` leaves the query's PlanMetrics there,
+    which aren't JSON: prod's first export failed on them (20 Oct 2026)."""
+    plain = frame.copy(deep=False)
+    plain.attrs = {}
+    plain.to_parquet(path, index=False)
+
+
 def write_snapshot(
     out_dir: Path,
     tables: dict[str, pd.DataFrame],
@@ -203,12 +212,12 @@ def write_snapshot(
     (out_dir / "gold").mkdir(parents=True)
     (out_dir / "model").mkdir()
     for name in GOLD_TABLES:
-        tables[name].to_parquet(out_dir / "gold" / f"{name}.parquet", index=False)
+        write_parquet(tables[name], out_dir / "gold" / f"{name}.parquet")
     joblib.dump(model, out_dir / "model" / "model.joblib")
     sample = background.sample(min(BACKGROUND_ROWS, len(background)), random_state=0)
-    sample.to_parquet(out_dir / "model" / "background.parquet", index=False)
+    write_parquet(sample, out_dir / "model" / "background.parquet")
     check = check_hours(model, tables["patient_hour_features"])
-    check.to_parquet(out_dir / "model" / "check.parquet", index=False)
+    write_parquet(check, out_dir / "model" / "check.parquet")
     if rag_dir is not None:
         shutil.copytree(rag_dir, out_dir / "rag")
 
