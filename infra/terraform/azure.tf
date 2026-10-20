@@ -39,8 +39,9 @@ resource "azurerm_storage_account" "lake" {
 
 # landing: what the generator writes (vitals JSON, delayed outcomes), one folder per environment.
 # catalogs: managed storage for the heavden_<env> catalogs (the metastore has no root of its own).
+# website: the snapshots the public website serves, written through a volume (website.tf).
 resource "azurerm_storage_container" "lake" {
-  for_each           = toset(["landing", "catalogs"])
+  for_each           = toset(["landing", "catalogs", "website"])
   name               = each.key
   storage_account_id = azurerm_storage_account.lake.id
 }

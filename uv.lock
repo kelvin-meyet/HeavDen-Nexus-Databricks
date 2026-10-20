@@ -1277,6 +1277,7 @@ azure = [
     { name = "mssql-python" },
 ]
 backend = [
+    { name = "azure-identity" },
     { name = "duckdb" },
     { name = "fastapi" },
     { name = "openai" },
@@ -1319,6 +1320,7 @@ requires-dist = [
 agent = [{ name = "databricks-agents", specifier = "==1.12.0" }]
 azure = [{ name = "mssql-python", specifier = "==1.14.0" }]
 backend = [
+    { name = "azure-identity", specifier = ">=1.26.0" },
     { name = "duckdb", specifier = ">=1.5.6" },
     { name = "fastapi", specifier = ">=0.143.0" },
     { name = "openai", specifier = ">=3.26.1" },

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -20,7 +21,7 @@ from heavden_api.chat.recorded import Recordings
 from heavden_api.chat.sandbox import SqlSandbox
 from heavden_api.chat.tools import Toolbox
 from heavden_api.config import Settings, databricks_api
-from heavden_api.snapshot import Snapshot
+from heavden_api.snapshot import Snapshot, fetch_snapshot
 from heavden_api.sources import DataSource, DemoSource, LiveSource
 
 
@@ -100,13 +101,23 @@ def connect_live(settings: Settings, api) -> tuple[LiveSource, LiveTools]:
 
 
 def build_state(
-    settings: Settings, embedder: Embedder | None = None, llm: LLM | None = None, api=None
+    settings: Settings,
+    embedder: Embedder | None = None,
+    llm: LLM | None = None,
+    api=None,
+    read_snapshot: Callable[[str], bytes] | None = None,
 ) -> AppState:
-    """`api`: the Databricks API client for live mode (tests pass a fake); by default the
-    identity in the environment."""
-    snapshot = Snapshot.load(settings.snapshot_dir)
+    """`api`: the Databricks API client for live mode; `read_snapshot`: reads the published
+    snapshot's files (with SNAPSHOT_URL). Tests pass fakes; by default both use the website's
+    managed identity (Databricks: or the identity in the environment)."""
+    folder = settings.snapshot_dir
+    if settings.snapshot_url:  # Blob Storage: starting never needs Databricks
+        read = read_snapshot or settings.snapshot_reader()
+        folder = fetch_snapshot(read, settings.snapshot_dir)
+        print(f"snapshot {folder.name} from {settings.snapshot_url}", flush=True)
+    snapshot = Snapshot.load(folder)
     if settings.mode == "live":
-        source, live = connect_live(settings, api or databricks_api())
+        source, live = connect_live(settings, api or databricks_api(settings.managed_identity))
         sandbox = None
     else:
         source, live, sandbox = DemoSource(snapshot), None, SqlSandbox(snapshot)

@@ -7,7 +7,8 @@
   flagged?" from Gold, as the app's `explain_patient` tool does from its snapshot: the stay's
   latest score, band, NEWS2 and top factors, the risk 6 hours earlier, and its alerts in the
   48 hours up to that hour. The assistant calls it; anyone with access can too
-  (`SELECT * FROM ...`).
+  (`SELECT * FROM ...`). The listed service principals (the website's identity in prod) get
+  EXECUTE on it, and CAN_RUN on the Genie space, each time it is published.
 * **The Genie space** "HeavDen Ward Data" (plus the environment's label) over the Gold tables:
   the assistant's tool for questions about numbers (`heavden.agent.genie`, `genie_space.yaml`).
 
@@ -17,6 +18,7 @@ is published is what the code was tested with.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -25,6 +27,7 @@ from heavden.agent import genie
 from heavden.agent.corpus import Chunk, chunk_corpus, load_corpus
 
 PACKAGED = Path(__file__).with_name("corpus_docs")
+APPLICATION_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 REPO = Path(__file__).resolve().parents[4] / "docs" / "corpus"  # a source checkout
 
 
@@ -157,6 +160,24 @@ def publish_chunks(spark, table: str, rows: pd.DataFrame) -> str:
     )
 
 
+def assistant_users(listed: str) -> list[str]:
+    """Service principals' application ids, comma-separated (the bundle variable
+    `assistant_users`). Each must be an id: they go into GRANT statements."""
+    users = [user.strip() for user in listed.split(",") if user.strip()]
+    wrong = [user for user in users if not APPLICATION_ID.fullmatch(user)]
+    if wrong:
+        raise ValueError(f"assistant_users must be application ids, not {wrong}")
+    return users
+
+
+def function_grants(catalog: str, users: list[str]) -> list[str]:
+    """EXECUTE on the explain function for each user, given again after every CREATE OR
+    REPLACE so a replaced function never loses it."""
+    return [
+        f"GRANT EXECUTE ON FUNCTION {catalog}.ml.explain_patient_risk TO `{user}`" for user in users
+    ]
+
+
 def main(argv: list[str] | None = None) -> None:
     import argparse
 
@@ -167,14 +188,20 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--warehouse-id", required=True, help="the warehouse Genie runs on")
     parser.add_argument("--genie-folder", required=True, help="workspace folder for the space")
     parser.add_argument("--env-label", default="", help='appended to the title, e.g. " (prod)"')
+    parser.add_argument(
+        "--assistant-users", default="", help="application ids that may use the function and space"
+    )
     args = parser.parse_args(argv)
+    users = assistant_users(args.assistant_users)
     spark = SparkSession.builder.getOrCreate()
     c = args.catalog
 
     rows = chunk_rows(chunk_corpus(load_corpus(corpus_dir())))
     print(publish_chunks(spark, f"{c}.ml.corpus_chunks", rows))
     spark.sql(explain_function_sql(c))
-    print(f"{c}.ml.explain_patient_risk: created or replaced")
+    for grant in function_grants(c, users):
+        spark.sql(grant)
+    print(f"{c}.ml.explain_patient_risk: created or replaced; EXECUTE for {len(users)} user(s)")
 
     from databricks.sdk import WorkspaceClient
 
@@ -188,5 +215,6 @@ def main(argv: list[str] | None = None) -> None:
             warehouse_id=args.warehouse_id,
             folder=args.genie_folder,
             managers=spec["managers"],
+            users=users,
         )
     )

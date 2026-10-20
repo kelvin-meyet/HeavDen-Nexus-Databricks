@@ -116,9 +116,10 @@ resource "databricks_grant" "billing_read" {
 }
 
 # The staging and prod service principals publish the Clinical Ops dashboard with their own
-# credentials, so its queries run as them on the shared SQL warehouse. CAN_USE runs queries; it
-# grants no data access (that comes from the catalog grants above). The owner keeps CAN_MANAGE
-# and workspace admins keep theirs.
+# credentials, so its queries run as them on the shared SQL warehouse; the website's identity
+# (website.tf) runs its page queries and Genie's there too. CAN_USE runs queries; it grants no
+# data access (that comes from the grants). The owner keeps CAN_MANAGE and workspace admins keep
+# theirs. This resource is the warehouse's whole permission list: add entries here, not elsewhere.
 resource "databricks_permissions" "warehouse" {
   sql_endpoint_id = databricks_sql_endpoint.shared.id
 
@@ -128,5 +129,10 @@ resource "databricks_permissions" "warehouse" {
       service_principal_name = databricks_service_principal.ci[access_control.value].application_id
       permission_level       = "CAN_USE"
     }
+  }
+
+  access_control {
+    service_principal_name = databricks_service_principal.web.application_id
+    permission_level       = "CAN_USE"
   }
 }

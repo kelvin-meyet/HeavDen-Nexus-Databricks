@@ -29,6 +29,7 @@ resources:
               - --genie-folder
               - ${workspace.root_path}/genie
               - --env-label=${var.env_label}
+              - --assistant-users=${var.assistant_users}
       environments:
         - environment_key: assistant
           spec:

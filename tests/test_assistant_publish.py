@@ -30,6 +30,19 @@ def test_every_document_is_published_in_chunks_with_its_front_matter(rows):
     assert rows["effective_date"].map(type).eq(type(T0.date())).all()
 
 
+WEB_ID = "0b6d7c1e-4f2a-4c55-9a1e-2f3b4c5d6e7f"
+
+
+def test_assistant_users_are_application_ids_granted_execute_on_every_publish():
+    assert publish.assistant_users("") == []
+    assert publish.assistant_users(f" {WEB_ID} ,") == [WEB_ID]
+    assert publish.function_grants("heavden_prod", [WEB_ID]) == [
+        f"GRANT EXECUTE ON FUNCTION heavden_prod.ml.explain_patient_risk TO `{WEB_ID}`"
+    ]
+    with pytest.raises(ValueError, match="application ids"):
+        publish.assistant_users("heavden-web-prod`; DROP TABLE x; --")
+
+
 def _gold(spark):
     """Two stays of one patient (P-1001) and one of another, scored hourly, with alerts."""
     hours = pd.date_range(T0, periods=12, freq="h")

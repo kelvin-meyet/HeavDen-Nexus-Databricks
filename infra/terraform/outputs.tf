@@ -42,3 +42,14 @@ output "tenant_id" {
 output "ci_client_ids" {
   value = { for env, app in azuread_application.ci : env => app.client_id }
 }
+
+# Bundle variable assistant_users for prod (databricks.yml): the website's identity, granted
+# EXECUTE on the explain function and CAN_RUN on prod's Genie space by assistant_publish.
+output "web_client_id" {
+  value = azurerm_user_assigned_identity.web.client_id
+}
+
+# Vercel's BACKEND_URL
+output "api_url" {
+  value = one([for app in azurerm_container_app.api : "https://${app.ingress[0].fqdn}"])
+}

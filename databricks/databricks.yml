@@ -89,6 +89,11 @@ variables:
   genie_title:
     description: The Genie space the Databricks assistant asks, the one over `model_catalog`.
     default: HeavDen Ward Data (staging)
+  assistant_users:
+    description: Service principals (application ids, comma-separated) that may use the
+      assistant's function and Genie space besides the deploying identity - in prod, the
+      website's managed identity (Terraform output web_client_id). assistant_publish grants them.
+    default: ""
 
 targets:
   # Personal development: resources are prefixed with "[dev <user>]" and schedules are paused.

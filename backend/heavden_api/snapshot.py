@@ -2,7 +2,14 @@
 
 In Phase 0 the snapshot is built locally from the generator (`backend/scripts/
 build_demo_snapshot.py`). In Phase 6 the same layout is exported from Databricks, and the
-backend keeps serving it after the credits end. Layout:
+backend keeps serving it after the credits end.
+
+On Container Apps the snapshot is data, not part of the image. An export on Databricks publishes
+it to the volume `heavden_prod.ml.website` (`publish_snapshot`: `snapshots/<name>/`, then
+`current.json`, which names it and lists each file's size and SHA-256). That volume is a folder
+of the `website` container in Azure Blob Storage, and the API downloads what `current.json` names
+from there when it starts (`fetch_snapshot` with `blob_reader`), so starting needs no Databricks.
+A new snapshot needs no new image, and pointing `current.json` back is the rollback. Layout:
 
     manifest.json                  as_of, model version, risk bands, row counts
     gold/<table>.parquet           one file per gold table (queried as gold.<table> in DuckDB)
@@ -13,11 +20,16 @@ backend keeps serving it after the credits end. Layout:
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import shutil
+import urllib.request
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from urllib.parse import quote
 
 import joblib
 import numpy as np
@@ -215,3 +227,74 @@ def to_records(frame: pd.DataFrame) -> list[dict]:
         {k: (v.item() if isinstance(v, np.generic) else v) for k, v in row.items()}
         for row in frame.to_dict("records")
     ]
+
+
+POINTER = "current.json"
+_NAME = re.compile(r"[\w.-]+")
+
+
+def file_listing(folder: Path) -> dict[str, dict]:
+    """Every file of a snapshot folder with its size and SHA-256, as `current.json` lists them."""
+    folder = Path(folder)
+    return {
+        path.relative_to(folder).as_posix(): {
+            "bytes": path.stat().st_size,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+        for path in sorted(folder.rglob("*"))
+        if path.is_file()
+    }
+
+
+def publish_snapshot(folder: Path, volume: Path, name: str) -> dict:
+    """Copy a snapshot folder to `<volume>/snapshots/<name>/`, then write `current.json` naming
+    it. The pointer is written last, so until then the API keeps downloading the previous
+    snapshot. `volume` is a volume path (`/Volumes/...`, a folder on Databricks compute)."""
+    if not _NAME.fullmatch(name):
+        raise ValueError(f"a snapshot name is letters, digits, '.', '-' or '_', not {name!r}")
+    target = Path(volume) / "snapshots" / name
+    if target.exists():
+        raise FileExistsError(f"{target} exists: a published snapshot is never changed")
+    shutil.copytree(folder, target)
+    pointer = {"snapshot": name, "files": file_listing(target)}
+    (Path(volume) / POINTER).write_text(json.dumps(pointer, indent=1))
+    return pointer
+
+
+def fetch_snapshot(read: Callable[[str], bytes], into: Path) -> Path:
+    """Download the snapshot `current.json` names into `into/<name>/`, checking every file
+    against the size and SHA-256 listed there, and return that folder. `read(path)` gives a
+    file of the published folder (`blob_reader` on Container Apps)."""
+    pointer = json.loads(read(POINTER))
+    name = pointer["snapshot"]
+    if not _NAME.fullmatch(name):
+        raise ValueError(f"{POINTER} names {name!r}, not a snapshot")
+    folder = Path(into) / name
+    for path, expected in pointer["files"].items():
+        parts = PurePosixPath(path).parts
+        if PurePosixPath(path).is_absolute() or ".." in parts:
+            raise ValueError(f"{POINTER} lists {path!r}, outside the snapshot")
+        data = read(f"snapshots/{name}/{path}")
+        found = {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+        if found != expected:
+            raise ValueError(f"snapshot {name}: {path} is not the file {POINTER} lists")
+        (folder / path).parent.mkdir(parents=True, exist_ok=True)
+        (folder / path).write_bytes(data)
+    return folder
+
+
+def blob_reader(url: str, token: Callable[[], str]) -> Callable[[str], bytes]:
+    """Files under `url` (https://<account>.blob.core.windows.net/<container>/<folder>) read
+    from Azure Blob Storage with an Entra ID token: the website's managed identity, which has
+    Storage Blob Data Reader on that container and nothing else."""
+
+    def read(path: str) -> bytes:
+        request = urllib.request.Request(
+            f"{url.rstrip('/')}/{quote(path)}",
+            # an Entra ID token needs the service version named (2017-11-09 or later)
+            headers={"Authorization": f"Bearer {token()}", "x-ms-version": "2021-08-06"},
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return response.read()
+
+    return read

@@ -39,20 +39,60 @@ def azure_base_url(endpoint: str) -> str:
     return f"https://{host}/openai/v1/"
 
 
-def databricks_api():
-    """The Databricks API client for live mode, as the identity in the environment (see
-    `databricks_token`). A request may take 150 s: a cold Genie call has hung ~120 s, and the
-    SDK's default 60 s would give up and send it again, starting a second conversation."""
+# What the website's managed identity asks Entra ID tokens for: Azure Databricks (its first-party
+# application id), Azure OpenAI's v1 API and Azure Storage (the snapshot)
+DATABRICKS_SCOPE = "2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default"
+AZURE_OPENAI_SCOPE = "https://ai.azure.com/.default"
+STORAGE_SCOPE = "https://storage.azure.com/.default"
+
+
+def managed_identity_token(client_id: str, scope: str) -> Callable[[], str]:
+    """A function giving a current token for `scope` as the user-assigned managed identity
+    `client_id` (Container Apps signs it in: no secret exists). azure-identity keeps the token
+    and asks for a new one shortly before it expires."""
+    from azure.identity import ManagedIdentityCredential
+
+    credential = ManagedIdentityCredential(client_id=client_id)
+    return lambda: credential.get_token(scope).token
+
+
+def _bearer(token: Callable[[], str]):
+    """`token` as a Databricks SDK sign-in: a bearer header, asked for on every request. (The
+    Python SDK has no managed-identity sign-in of its own.)"""
+    from databricks.sdk.credentials_provider import CredentialsStrategy
+
+    class Bearer(CredentialsStrategy):
+        def auth_type(self) -> str:
+            return "azure-managed-identity"
+
+        def __call__(self, cfg):
+            return lambda: {"Authorization": f"Bearer {token()}"}
+
+    return Bearer()
+
+
+def databricks_api(managed_identity: str | None = None):
+    """The Databricks API client for live mode: as the website's managed identity on Container
+    Apps (`managed_identity` = its client id; a service principal in the workspace), otherwise as
+    the identity in the environment (see `databricks_token`). A request may take 150 s: a cold
+    Genie call has hung ~120 s, and the SDK's default 60 s would give up and send it again,
+    starting a second conversation."""
     from databricks.sdk import WorkspaceClient
     from databricks.sdk.config import Config
 
-    return WorkspaceClient(config=Config(http_timeout_seconds=150)).api_client
+    strategy = (
+        _bearer(managed_identity_token(managed_identity, DATABRICKS_SCOPE))
+        if managed_identity
+        else None
+    )
+    config = Config(http_timeout_seconds=150, credentials_strategy=strategy)
+    return WorkspaceClient(config=config).api_client
 
 
 def databricks_token() -> str:
     """A current token for the Databricks identity in the environment: a service principal
-    (DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET) on Render, a CLI profile
-    (DATABRICKS_CONFIG_PROFILE) locally. The SDK refreshes it before it expires."""
+    (DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET) or a CLI profile (DATABRICKS_CONFIG_PROFILE).
+    The SDK refreshes it before it expires."""
     from databricks.sdk import WorkspaceClient
 
     return WorkspaceClient().config.authenticate()["Authorization"].removeprefix("Bearer ")
@@ -70,8 +110,13 @@ class Settings:
     # the chat's numbers from prod's Genie space; the model, documents and recordings still come
     # from the snapshot.
     mode: str = field(default_factory=lambda: os.environ.get("MODE", "demo"))
-    # live mode, as the Databricks identity in the environment (DATABRICKS_HOST with
-    # DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET on Render; DATABRICKS_CONFIG_PROFILE locally)
+    # Container Apps: the client id of the website's user-assigned managed identity. When set, the
+    # API signs in to Databricks (live mode) and Azure OpenAI as it, and no secret exists. Unset
+    # (locally): the CLI profile (DATABRICKS_CONFIG_PROFILE) and the key in .env.
+    managed_identity: str | None = field(
+        default_factory=lambda: os.environ.get("MANAGED_IDENTITY_CLIENT_ID") or None
+    )
+    # live mode reads prod at DATABRICKS_HOST
     live_catalog: str = field(
         default_factory=lambda: os.environ.get("LIVE_CATALOG", "heavden_prod")
     )
@@ -81,11 +126,16 @@ class Settings:
     genie_title: str = field(
         default_factory=lambda: os.environ.get("GENIE_TITLE", "HeavDen Ward Data (prod)")
     )
+    # the snapshot's folder; with SNAPSHOT_URL set, where it is downloaded to at start-up
     snapshot_dir: Path = field(
         default_factory=lambda: Path(
             os.environ.get("SNAPSHOT_DIR", ROOT / "data" / "demo_snapshot")
         )
     )
+    # Container Apps: where the snapshot is published in Azure Blob Storage (its current.json
+    # names it), read as the managed identity, e.g. https://<account>.blob.core.windows.net/
+    # website/prod. Unset (locally): SNAPSHOT_DIR as it is.
+    snapshot_url: str | None = field(default_factory=lambda: os.environ.get("SNAPSHOT_URL") or None)
     # where fastembed caches the embedding model (~130 MB, downloaded on first search)
     embed_cache_dir: Path = field(
         default_factory=lambda: Path(os.environ.get("EMBED_CACHE_DIR", ROOT / "data" / "models"))
@@ -140,6 +190,17 @@ class Settings:
     def __post_init__(self):
         if self.mode not in ("demo", "live"):
             raise ValueError(f"MODE must be 'demo' or 'live', not {self.mode!r}")
+        if self.snapshot_url and not self.managed_identity:
+            raise ValueError(
+                "SNAPSHOT_URL is read as the managed identity: set MANAGED_IDENTITY_CLIENT_ID"
+            )
+
+    def snapshot_reader(self) -> Callable[[str], bytes]:
+        """Reads the published snapshot's files from Blob Storage as the managed identity."""
+        from heavden_api.snapshot import blob_reader
+
+        token = managed_identity_token(self.managed_identity, STORAGE_SCOPE)
+        return blob_reader(self.snapshot_url, token)
 
     def llm_connection(self) -> LLMConnection | None:
         """Where the assistant's LLM calls go, or None when the chosen provider has no key (the
@@ -156,8 +217,13 @@ class Settings:
             host = self.databricks_host.rstrip("/")
             host = host if "://" in host else f"https://{host}"
             return LLMConnection(databricks_token, f"{host}/serving-endpoints")
-        if not self.azure_openai_key:
+        # the key when there is one (locally), otherwise the managed identity (Container Apps)
+        if self.azure_openai_key:
+            key = self.azure_openai_key
+        elif self.managed_identity:
+            key = managed_identity_token(self.managed_identity, AZURE_OPENAI_SCOPE)
+        else:
             return None
         if not self.azure_openai_endpoint:
-            raise ValueError("LLM_PROVIDER=azure needs AZURE_OPENAI_ENDPOINT as well as the key")
-        return LLMConnection(self.azure_openai_key, azure_base_url(self.azure_openai_endpoint))
+            raise ValueError("LLM_PROVIDER=azure needs AZURE_OPENAI_ENDPOINT as well")
+        return LLMConnection(key, azure_base_url(self.azure_openai_endpoint))
