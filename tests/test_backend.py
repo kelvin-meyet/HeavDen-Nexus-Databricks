@@ -6,7 +6,7 @@ import pytest
 
 from heavden.agent import retrieval
 from heavden_api.app import create_app
-from heavden_api.config import Settings
+from heavden_api.config import ORIGIN_HEADER, Settings
 from heavden_api.snapshot import Snapshot
 
 pytest.importorskip("faiss")
@@ -131,3 +131,24 @@ def test_summary_labels_alert_and_escalation_metrics(client):
         assert key in body and key in body["definitions"]
     assert "enters the High band" in body["definitions"]["alerts_24h"]
     assert body["alert_budget_per_nurse_shift"] == 2.0
+
+
+def test_with_an_origin_secret_only_the_website_is_answered(demo_snapshot):
+    settings = Settings(
+        snapshot_dir=demo_snapshot, llm_provider="openai", openai_api_key=None, origin_secret="s3"
+    )
+    app = create_app(settings, embedder=retrieval.HashingEmbedder())
+    with fastapi_testclient.TestClient(app) as c:
+        for headers in ({}, {ORIGIN_HEADER: "wrong"}, {ORIGIN_HEADER: "s3 "}):
+            refused = c.get("/health", headers=headers)
+            assert refused.status_code == 403, headers
+            assert "website" in refused.json()["detail"] and "s3" not in refused.text
+        assert c.post("/risk/score", json={"encounter_id": "x"}).status_code == 403
+        assert c.get("/health", headers={ORIGIN_HEADER: "s3"}).json()["status"] == "ok"
+    assert "s3" not in repr(settings)
+
+
+def test_the_proxy_and_the_smoke_test_send_the_header_the_api_checks():
+    proxy = (ROOT / "web" / "lib" / "backend.ts").read_text()
+    smoke = (ROOT / "backend" / "scripts" / "smoke_api.py").read_text()
+    assert f'"{ORIGIN_HEADER}"' in proxy and f'ORIGIN_HEADER = "{ORIGIN_HEADER}"' in smoke

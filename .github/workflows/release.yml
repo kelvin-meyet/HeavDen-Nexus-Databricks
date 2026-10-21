@@ -188,6 +188,15 @@ jobs:
           python-version: "3.12"
           enable-cache: true
 
+      # The API on Container Apps answers only requests carrying this secret (Terraform output
+      # origin_secret, also in Vercel): without it the deploy's smoke test can't reach the API
+      - name: Check the website's secret is available
+        if: vars.WEBSITE_APP_ID != ''
+        env:
+          ORIGIN_SECRET: ${{ secrets.ORIGIN_SECRET }}
+        run: |
+          [ -n "$ORIGIN_SECRET" ] || { echo "::error::the prod-deploy environment has no secret ORIGIN_SECRET: copy it from Terraform output origin_secret"; exit 1; }
+
       # Published but not served: the website keeps its current snapshot until the image passes
       - name: Export the website snapshot (not served yet)
         id: export
@@ -203,14 +212,16 @@ jobs:
         run: docker build -f backend/Dockerfile -t "$IMAGE:$GITHUB_REF_NAME" .
 
       # Downloaded through the checks the website makes, then served by the new image as on
-      # Container Apps (1 GiB), in snapshot mode: pages, board = what-if, document search
+      # Container Apps (1 GiB), in snapshot mode: pages, board = what-if, document search, and
+      # a request without the website's secret refused (a throwaway secret here)
       - name: Smoke-test the image on the snapshot
         env:
           SNAPSHOT: ${{ steps.export.outputs.snapshot }}
         run: |
           uv run --locked python backend/scripts/website_snapshot.py fetch "$VOLUME" "$RUNNER_TEMP/snapshots" --name "$SNAPSHOT"
-          docker run -d --name api --memory 1g -p 8000:8000 -v "$RUNNER_TEMP/snapshots:/app/snapshot:ro" -e SNAPSHOT_DIR="/app/snapshot/$SNAPSHOT" "$IMAGE:$GITHUB_REF_NAME"
-          python3 backend/scripts/smoke_api.py http://127.0.0.1:8000 --snapshot "$SNAPSHOT" --wait 120 || { docker logs api | tail -40; exit 1; }
+          lock=$(openssl rand -hex 24)
+          docker run -d --name api --memory 1g -p 8000:8000 -v "$RUNNER_TEMP/snapshots:/app/snapshot:ro" -e SNAPSHOT_DIR="/app/snapshot/$SNAPSHOT" -e ORIGIN_SECRET="$lock" "$IMAGE:$GITHUB_REF_NAME"
+          ORIGIN_SECRET="$lock" python3 backend/scripts/smoke_api.py http://127.0.0.1:8000 --snapshot "$SNAPSHOT" --wait 120 || { docker logs api | tail -40; exit 1; }
           echo "OOM killed: $(docker inspect -f '{{.State.OOMKilled}}' api)"
 
       - name: Push the image to GHCR
@@ -236,6 +247,7 @@ jobs:
           APP_ID: ${{ vars.WEBSITE_APP_ID }}
           DIGEST: ${{ steps.push.outputs.digest }}
           SNAPSHOT: ${{ steps.export.outputs.snapshot }}
+          ORIGIN_SECRET: ${{ secrets.ORIGIN_SECRET }}
         run: |
           if [ -z "$APP_ID" ]; then
             echo "No container app yet: create it with api_image = \"$DIGEST\" (Terraform part 2), then set WEBSITE_APP_ID." >> "$GITHUB_STEP_SUMMARY"
