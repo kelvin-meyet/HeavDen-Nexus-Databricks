@@ -6,12 +6,16 @@ website after deploying it. Standard library only, so it runs on any CI machine.
 Checks: /health (the snapshot named, the document index present), each page answers, the board
 has patients, an unchanged what-if gives the risk the board shows for patients its model scored
 (the website's two numbers for one patient), and a document search finds passages.
+
+With ORIGIN_SECRET in the environment, every request carries it as the website's proxy does, and
+a request without it must be refused (the API on Container Apps answers only the website).
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 import urllib.error
@@ -19,15 +23,30 @@ import urllib.request
 
 PAGES = ("/analytics/summary", "/analytics/census?hours=72", "/analytics/units")
 SAME = 1e-9
+ORIGIN_HEADER = "x-origin-secret"  # heavden_api.config.ORIGIN_HEADER
+SECRET = os.environ.get("ORIGIN_SECRET") or None
 
 
-def call(base: str, path: str, body: dict | None = None, timeout: float = 120) -> dict:
+def call(
+    base: str,
+    path: str,
+    body: dict | None = None,
+    timeout: float = 120,
+    secret: str | None = SECRET,
+) -> dict:
     data = None if body is None else json.dumps(body).encode()
-    request = urllib.request.Request(
-        base.rstrip("/") + path, data=data, headers={"Content-Type": "application/json"}
-    )
+    headers = {"Content-Type": "application/json"} | ({ORIGIN_HEADER: secret} if secret else {})
+    request = urllib.request.Request(base.rstrip("/") + path, data=data, headers=headers)
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read())
+
+
+def refused_without_the_secret(base: str) -> bool:
+    try:
+        call(base, "/health", timeout=30, secret=None)
+    except urllib.error.HTTPError as error:
+        return error.code == 403
+    return False
 
 
 def wait_for_health(base: str, seconds: float, snapshot: str | None) -> dict:
@@ -55,6 +74,8 @@ def smoke(base: str, snapshot: str | None, wait: float) -> list[str]:
         problems.append(f"/health status {health['status']!r}")
     if not health["documents"]:
         problems.append("no document index")
+    if SECRET and not refused_without_the_secret(base):
+        problems.append("it answers requests without the website's secret")
     for page in PAGES:
         call(base, page)
     patients = call(base, "/risk/board?limit=50")["patients"]

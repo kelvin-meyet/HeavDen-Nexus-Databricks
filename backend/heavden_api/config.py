@@ -45,6 +45,9 @@ DATABRICKS_SCOPE = "2ff814a6-3304-4ab8-85cb-cd0e6f879c1d/.default"
 AZURE_OPENAI_SCOPE = "https://ai.azure.com/.default"
 STORAGE_SCOPE = "https://storage.azure.com/.default"
 
+# The header that carries Settings.origin_secret (also in web/lib/backend.ts and smoke_api.py)
+ORIGIN_HEADER = "x-origin-secret"
+
 
 def managed_identity_token(client_id: str, scope: str) -> Callable[[], str]:
     """A function giving a current token for `scope` as the user-assigned managed identity
@@ -193,10 +196,17 @@ class Settings:
     chat_budget_table_url: str | None = field(
         default_factory=lambda: os.environ.get("CHAT_BUDGET_TABLE_URL") or None
     )
-    # proxies we control in front of the API: 0 local, 1 Render, 2 Vercel -> Render.
-    # The visitor's address is that many entries from the right of X-Forwarded-For.
+    # proxies we control in front of the API: 0 local, 1 Container Apps' ingress alone,
+    # 2 Vercel -> Container Apps. The visitor's address is that many entries from the right of
+    # X-Forwarded-For.
     trusted_proxy_hops: int = field(
         default_factory=lambda: int(os.environ.get("TRUSTED_PROXY_HOPS", "0"))
+    )
+    # Container Apps: the API's own URL is public, so it answers only requests that carry this
+    # in the ORIGIN_HEADER header: the website's proxy (web/lib/backend.ts) and CI's smoke test.
+    # Unset (locally, tests): every request is answered.
+    origin_secret: str | None = field(
+        default_factory=lambda: os.environ.get("ORIGIN_SECRET") or None, repr=False
     )
 
     def __post_init__(self):

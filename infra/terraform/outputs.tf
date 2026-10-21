@@ -58,3 +58,10 @@ output "api_url" {
 output "api_app_id" {
   value = one(azurerm_container_app.api[*].id)
 }
+
+# Vercel's ORIGIN_SECRET and the GitHub secret ORIGIN_SECRET: the API answers only requests
+# carrying it. Copy it without printing it: terraform output -raw origin_secret | clip
+output "origin_secret" {
+  value     = random_password.origin_secret.result
+  sensitive = true
+}

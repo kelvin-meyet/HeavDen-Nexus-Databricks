@@ -137,6 +137,24 @@ resource "azurerm_container_app_environment" "web" {
   logs_destination           = "log-analytics"
   log_analytics_workspace_id = azurerm_log_analytics_workspace.web.id
   tags                       = local.tags
+
+  # Azure creates every new environment with this built-in profile (seen 20 Oct). Left out, each
+  # plan would remove it, and an environment created with profiles must keep at least one.
+  # The counts don't apply to Consumption (azurerm 5.6.0 sends none) but read back as 0.
+  workload_profile {
+    name                  = "Consumption"
+    workload_profile_type = "Consumption"
+    minimum_count         = 0
+    maximum_count         = 0
+  }
+}
+
+# The API's own URL is public: it answers only requests carrying this secret, which the website's
+# proxy (Vercel's ORIGIN_SECRET) and CI's smoke test (GitHub secret ORIGIN_SECRET) send. Copy it
+# from the output `origin_secret` without printing it (see web/README.md).
+resource "random_password" "origin_secret" {
+  length  = 48
+  special = false
 }
 
 resource "azurerm_container_app" "api" {
@@ -150,6 +168,11 @@ resource "azurerm_container_app" "api" {
   identity {
     type         = "UserAssigned"
     identity_ids = [azurerm_user_assigned_identity.web.id]
+  }
+
+  secret {
+    name  = "origin-secret"
+    value = random_password.origin_secret.result
   }
 
   ingress {
@@ -231,9 +254,13 @@ resource "azurerm_container_app" "api" {
       }
       env {
         # Vercel's proxy, then Container Apps' ingress: the visitor is 2 entries from the right
-        # of X-Forwarded-For (to confirm on the first deploy)
+        # of X-Forwarded-For (Vercel replaces the header with the visitor; the ingress appends)
         name  = "TRUSTED_PROXY_HOPS"
         value = "2"
+      }
+      env {
+        name        = "ORIGIN_SECRET"
+        secret_name = "origin-secret"
       }
 
       # TCP, not GET /health: in live mode /health asks the SQL warehouse for "now", and a probe
