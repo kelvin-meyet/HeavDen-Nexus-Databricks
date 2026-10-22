@@ -120,148 +120,110 @@ There is **one website**: it reads `prod`. No staging website or staging API exi
 
 Every tool and service used up to the end of Phase 5, with what it is used for here. The steps below explain each one in context. Exact versions are pinned in `uv.lock`, `web/package-lock.json`, `infra/terraform/.terraform.lock.hcl` and `backend/Dockerfile`.
 
-### Cloud and infrastructure
+| Stack | Tool | Used for |
+|---|---|---|
+| **Cloud & infrastructure** | Microsoft Azure | The cloud everything runs on (Central US) |
+|  | Terraform | Infrastructure as code: Azure, Entra ID and Databricks |
+|  | Microsoft Entra ID | Identities: CI service principals, the website's managed identity |
+|  | Azure Key Vault | Secrets (the Azure SQL login) |
+|  | Azure Databricks | The data, ML and AI platform (serverless only) |
+|  | Azure SQL Database | The hospital's records system: the source data |
+|  | Azure Data Lake Storage Gen2 | Landing files, lakehouse tables, the website's snapshot |
+|  | Azure Table Storage | The website's daily caps (durable counters) |
+|  | Azure OpenAI (Microsoft Foundry) | The LLM: gpt-5-mini |
+|  | Azure Container Apps | Hosting the API, scaled to zero when idle |
+|  | Azure Monitor Log Analytics | The API's logs |
+|  | Azure Cost Management | Monthly budget and spend alerts |
+| **Data engineering** | Unity Catalog | Governance: catalogs per environment, permissions, volumes, functions, models |
+|  | Delta Lake | Table format: reliable writes, history, merges |
+|  | Lakeflow Spark Declarative Pipelines | The medallion pipeline: Bronze → Silver → Gold |
+|  | Auto Loader | Incremental file ingestion (each file once) |
+|  | Change Tracking + `remote_query` | Incremental reads from Azure SQL |
+|  | AUTO CDC | Change data capture into SCD type 1 and 2 tables |
+|  | Expectations | Data quality rules and quarantine |
+|  | Apache Spark (PySpark, Spark SQL) | Distributed data processing |
+|  | Lakeflow Jobs | Orchestrating the batch jobs (serverless) |
+|  | Databricks Asset Bundles | Jobs, pipelines and dashboards as code, per environment |
+|  | Databricks SQL warehouse | SQL for dashboards, Genie and the website |
+|  | AI/BI dashboards | Clinical Ops and Model & Drift dashboards |
+| **Machine learning & MLOps** | Logistic regression | Candidate model: a regularised linear model; prod's first champion (version 1) |
+|  | LightGBM | Candidate model: gradient-boosted trees with early stopping; prod's champion since version 3 |
+|  | scikit-learn | Logistic regression, imputation and scaling, isotonic calibration |
+|  | pandas, NumPy, PyArrow | Features, metrics, Spark ↔ pandas transfer |
+|  | MLflow | Experiment tracking, model registry (champion/challenger aliases), tracing, LLM evaluation |
+|  | Lakehouse Monitoring | Data profiling and drift history (cross-check) |
+|  | GitHub environments | Human approval of every retrain and promotion |
+| **AI & LLMs** | Genie | Text-to-SQL: questions about numbers, answered from Gold |
+|  | Unity Catalog SQL function | "Why is this patient flagged?" tool |
+|  | Mosaic AI Agent Framework | Packaging, deploying and reviewing the Databricks assistant |
+|  | Model Serving | Hosting the Databricks assistant (private, scale to zero) |
+|  | AI Gateway | Governed access to external LLMs (Azure OpenAI, OpenAI) |
+|  | Foundation Model APIs | Databricks-hosted comparison LLM (GPT-OSS 120B) |
+|  | gpt-5-mini | The assistants' language model |
+|  | OpenAI Python SDK | LLM calls, tool calling, streaming |
+|  | FAISS | Vector search over the documents |
+|  | fastembed + bge-small | Text embeddings on CPU (ONNX, no PyTorch) |
+|  | BM25 | Keyword search |
+|  | Reciprocal rank fusion | Hybrid search: merging vector and keyword results |
+|  | DuckDB | In-process SQL on the snapshot; sandbox for model-written SQL |
+| **Website** | Next.js | Web framework for the pages (React, server routes) |
+|  | React | UI components |
+|  | TypeScript | Typed front-end code |
+|  | Recharts | Charts |
+|  | react-markdown | Formatting the chat's answers |
+|  | Vercel | Front-end hosting, global CDN, caching |
+|  | FastAPI | The Python API: ward data, what-if, chat |
+|  | Uvicorn | Server that runs FastAPI |
+|  | Databricks SDK for Python | Live SQL and Genie calls from the API |
+|  | azure-identity | Managed-identity sign-in (no secrets) |
+| **Containers & CI/CD** | Docker | Multi-stage container build |
+|  | GitHub Container Registry | Storing the image |
+|  | uv | Python packaging, locked dependencies |
+|  | GitHub Actions | CI/CD: checks, staging on merge, prod on tag |
+|  | GitHub rulesets and environments | Required checks, production approvals |
+|  | Databricks CLI | Deploying and running bundles from CI |
+| **Security** | OpenID Connect | Secretless CI sign-in to Azure |
+|  | Managed identity | Secretless sign-in for the website's API |
+|  | Unity Catalog grants + Azure RBAC | Least-privilege access |
+|  | Origin secret | Only the website can call the API |
+|  | Guardrails (screen, system prompt, canary leak check) | Prompt-injection and leak protection |
+|  | SQL guard + sandbox | Safe model-written SQL |
+|  | Rate limits and daily caps | Protecting the LLM and warehouse budget |
+| **Developer tooling** | Python 3.12 | Main language |
+|  | hatchling | Building the package (the wheel Databricks jobs install) |
+|  | pytest | Tests (about 600) |
+|  | Ruff | Linting and formatting |
+|  | actionlint | Linting workflow files |
+|  | Jupyter + nbstripout | Notebooks, committed without outputs |
+|  | Synthea | Synthetic patients |
+|  | mssql-python | Loading Azure SQL |
+|  | Mermaid | Diagrams |
+| **Techniques** | Medallion architecture | Layered data: raw, validated, business-ready |
+|  | Incremental ingestion with watermarks | Moving only new data |
+|  | Point-in-time features | No future data leaking into training |
+|  | Time-based splits | Testing on later days, as in real use |
+|  | Isotonic calibration | Scores that mean real probabilities |
+|  | Early stopping | Choosing LightGBM's number of trees on validation average precision |
+|  | Alert-budget threshold | At most ~2 alerts per nurse per shift |
+|  | NEWS2 baseline | The clinical score to beat |
+|  | Paired bootstrap gates | Champion vs challenger at the same alert budget |
+|  | Exact SHAP (TreeSHAP, linear SHAP) | Explaining each score |
+|  | PSI and Jensen-Shannon divergence | Drift detection |
+|  | Human-in-the-loop MLOps | Approved retrain, promotion, rollback |
+|  | Tool-calling agent | One assistant, three tools |
+|  | RAG with hybrid search | Grounded, cited answers from documents |
+|  | LLM evaluation + red-teaming | Quality gate and attack testing in CI |
+|  | Snapshot rollout by pointer | Safe data releases, one-step rollback |
+|  | Scale to zero + CDN caching | Near-zero cost when idle |
 
-| Tool | Used for |
-|---|---|
-| Microsoft Azure | The cloud everything runs on (Central US) |
-| Terraform | Infrastructure as code: Azure, Entra ID and Databricks |
-| Microsoft Entra ID | Identities: CI service principals, the website's managed identity |
-| Azure Key Vault | Secrets (the Azure SQL login) |
-| Azure Databricks | The data, ML and AI platform (serverless only) |
-| Azure SQL Database | The hospital's records system: the source data |
-| Azure Data Lake Storage Gen2 | Landing files, lakehouse tables, the website's snapshot |
-| Azure Table Storage | The website's daily caps (durable counters) |
-| Azure OpenAI (Microsoft Foundry) | The LLM: gpt-5-mini |
-| Azure Container Apps | Hosting the API, scaled to zero when idle |
-| Azure Monitor Log Analytics | The API's logs |
-| Azure Cost Management | Monthly budget and spend alerts |
-
-### Data engineering
-
-| Tool | Used for |
-|---|---|
-| Unity Catalog | Governance: catalogs per environment, permissions, volumes, functions, models |
-| Delta Lake | Table format: reliable writes, history, merges |
-| Lakeflow Spark Declarative Pipelines | The medallion pipeline: Bronze → Silver → Gold |
-| Auto Loader | Incremental file ingestion (each file once) |
-| Change Tracking + `remote_query` | Incremental reads from Azure SQL |
-| AUTO CDC | Change data capture into SCD type 1 and 2 tables |
-| Expectations | Data quality rules and quarantine |
-| Apache Spark (PySpark, Spark SQL) | Distributed data processing |
-| Lakeflow Jobs | Orchestrating the batch jobs (serverless) |
-| Databricks Asset Bundles | Jobs, pipelines and dashboards as code, per environment |
-| Databricks SQL warehouse | SQL for dashboards, Genie and the website |
-| AI/BI dashboards | Clinical Ops and Model & Drift dashboards |
-
-### Machine learning and MLOps
-
-| Tool | Used for |
-|---|---|
-| scikit-learn | Logistic regression, isotonic calibration |
-| LightGBM | Gradient-boosted trees: the production model |
-| pandas, NumPy, PyArrow | Features, metrics, Spark ↔ pandas transfer |
-| MLflow | Experiment tracking, model registry (champion/challenger aliases), tracing, LLM evaluation |
-| Lakehouse Monitoring | Data profiling and drift history (cross-check) |
-| GitHub environments | Human approval of every retrain and promotion |
-
-### AI and LLMs
-
-| Tool | Used for |
-|---|---|
-| Genie | Text-to-SQL: questions about numbers, answered from Gold |
-| Unity Catalog SQL function | "Why is this patient flagged?" tool |
-| Mosaic AI Agent Framework | Packaging, deploying and reviewing the Databricks assistant |
-| Model Serving | Hosting the Databricks assistant (private, scale to zero) |
-| AI Gateway | Governed access to external LLMs (Azure OpenAI, OpenAI) |
-| Foundation Model APIs | Databricks-hosted comparison LLM (GPT-OSS 120B) |
-| gpt-5-mini | The assistants' language model |
-| OpenAI Python SDK | LLM calls, tool calling, streaming |
-| FAISS | Vector search over the documents |
-| fastembed + bge-small | Text embeddings on CPU (ONNX, no PyTorch) |
-| BM25 | Keyword search |
-| Reciprocal rank fusion | Hybrid search: merging vector and keyword results |
-| DuckDB | In-process SQL on the snapshot; sandbox for model-written SQL |
-
-### Website
-
-| Tool | Used for |
-|---|---|
-| Next.js | Web framework for the pages (React, server routes) |
-| React | UI components |
-| TypeScript | Typed front-end code |
-| Recharts | Charts |
-| react-markdown | Formatting the chat's answers |
-| Vercel | Front-end hosting, global CDN, caching |
-| FastAPI | The Python API: ward data, what-if, chat |
-| Uvicorn | Server that runs FastAPI |
-| Databricks SDK for Python | Live SQL and Genie calls from the API |
-| azure-identity | Managed-identity sign-in (no secrets) |
-
-### Containers and CI/CD
-
-| Tool | Used for |
-|---|---|
-| Docker | Multi-stage container build |
-| GitHub Container Registry | Storing the image |
-| uv | Python packaging, locked dependencies |
-| GitHub Actions | CI/CD: checks, staging on merge, prod on tag |
-| GitHub rulesets and environments | Required checks, production approvals |
-| Databricks CLI | Deploying and running bundles from CI |
-
-### Security
-
-| Tool | Used for |
-|---|---|
-| OpenID Connect | Secretless CI sign-in to Azure |
-| Managed identity | Secretless sign-in for the website's API |
-| Unity Catalog grants + Azure RBAC | Least-privilege access |
-| Origin secret | Only the website can call the API |
-| Guardrails (screen, system prompt, canary leak check) | Prompt-injection and leak protection |
-| SQL guard + sandbox | Safe model-written SQL |
-| Rate limits and daily caps | Protecting the LLM and warehouse budget |
-
-### Developer tooling
-
-| Tool | Used for |
-|---|---|
-| Python 3.12 | Main language |
-| hatchling | Building the package (the wheel Databricks jobs install) |
-| pytest | Tests (about 600) |
-| Ruff | Linting and formatting |
-| actionlint | Linting workflow files |
-| Jupyter + nbstripout | Notebooks, committed without outputs |
-| Synthea | Synthetic patients |
-| mssql-python | Loading Azure SQL |
-| Mermaid | Diagrams |
-
-### Techniques
-
-| Technique | Used for |
-|---|---|
-| Medallion architecture | Layered data: raw, validated, business-ready |
-| Incremental ingestion with watermarks | Moving only new data |
-| Point-in-time features | No future data leaking into training |
-| Time-based splits | Testing on later days, as in real use |
-| Isotonic calibration | Scores that mean real probabilities |
-| Alert-budget threshold | At most ~2 alerts per nurse per shift |
-| NEWS2 baseline | The clinical score to beat |
-| Paired bootstrap gates | Champion vs challenger at the same alert budget |
-| Exact SHAP (TreeSHAP, linear SHAP) | Explaining each score |
-| PSI and Jensen-Shannon divergence | Drift detection |
-| Human-in-the-loop MLOps | Approved retrain, promotion, rollback |
-| Tool-calling agent | One assistant, three tools |
-| RAG with hybrid search | Grounded, cited answers from documents |
-| LLM evaluation + red-teaming | Quality gate and attack testing in CI |
-| Snapshot rollout by pointer | Safe data releases, one-step rollback |
-| Scale to zero + CDN caching | Near-zero cost when idle |
-
-### Considered and not used
+**Considered and not used:**
 
 | Option | Why not |
 |---|---|
 | Lakeflow Connect | Not offered in this workspace; needs always-on compute |
 | Feature store | One batch model; features are a Gold view |
+| Extra weight on positive examples (class weights) | No gain at the alert budget, and LightGBM got worse as the weight rose (measured, Step 5) |
+| Resampling (SMOTE, undersampling) | Not tried: blended patient-hours don't respect time order, and undersampling discards scarce data |
 | Model Serving for the risk model | Hourly batch scoring is enough |
 | Vector Search | Bills every hour it exists; FAISS is free (a short trial is planned) |
 | Agent Bricks | The project's own assistant reuses the website's loop and guardrails |
@@ -360,6 +322,23 @@ Every tool and service used up to the end of Phase 5, with what it is used for h
 - **How:**
   - **The task:** the probability that a patient needs an ICU transfer or a rapid-response call within the next 6 hours.
   - Logistic regression and LightGBM compete. Both are **calibrated**, so a 10% score means about 10%.
+  - **No automated hyperparameter search.** The settings were fixed by hand in the Phase 0 experiments (logistic regression `C = 0.1`; LightGBM with 15 leaves, a learning rate of 0.02, no extra weight on positives). Only LightGBM's number of trees is chosen automatically, by early stopping on validation average precision. A search would reuse the validation days that already set the calibration, the alert threshold and the choice of model, so a trustworthy one needs rolling time-based validation: future work.
+  - **Class imbalance** (under 1% of patient-hours are followed by an escalation) is handled through the metric and the threshold, not by reweighting or resampling:
+    - early stopping and the choice of model use average precision, a measure built for rare events, instead of accuracy or log-loss;
+    - the alert threshold comes from the alert budget, not from a 50% cut-off;
+    - isotonic calibration keeps the probabilities honest, which reweighting would inflate;
+    - regularisation (`C = 0.1`; at least 100 hours per LightGBM leaf, subsampling) keeps the few hundred positives from being memorised.
+    - **Why no extra weight on positive examples:** the alerts come from a fixed budget, so what matters is the order of the patients, and weighting doesn't improve it. It inflates the probabilities, which calibration then has to undo, and with few positives each one counts many times over, so LightGBM overfits them.
+    - **Measured (22 Oct, on the Phase 0 rehearsal data, not prod's; production training code, only the weight changed; 372 positives in training, 28 escalations in test):**
+
+      | Weight on positives | 1 (used) | 3 | 10 | 30 | 153 (balanced) |
+      |---|---|---|---|---|---|
+      | Logistic regression: test AUPRC | 0.40 | 0.40 | 0.40 | 0.39 | 0.36 |
+      | LightGBM: test AUPRC (mean of 3 seeds) | 0.33 | 0.31 | 0.27 | 0.12 | 0.04 |
+      | LightGBM: trees before early stopping | 71 | 110 | 14 | 2 | 1 |
+      | Test escalations flagged at the alert budget | 25 of 28 | 25 | 25-26 | 25-26 | 25 (logistic); 16-24 (LightGBM) |
+
+      Up to a weight of 30 the alerts catch the same escalations; logistic regression's ranking barely moves (about 0.01 either way, on validation and test), and LightGBM's gets steadily worse as the weight rises: from a weight of 10 it stops after a handful of trees. So no weight is the better default here, not just the simpler one. Not tested: resampling (such as SMOTE), and weights combined with retuned LightGBM settings. The first Phase 0 try had also stopped on log-loss, so on its own it couldn't show which of the two caused its drop below NEWS2.
   - **Time-based splits:** train on the oldest days, choose on the next ones, and test once on the most recent.
   - **The bar:** the model must beat **NEWS2**, the clinical early-warning score, at the same **alert budget** (about 2 alerts per nurse per 12-hour shift).
   - A retrained model must also beat the current one at that budget, on paired resamples of patient stays.
