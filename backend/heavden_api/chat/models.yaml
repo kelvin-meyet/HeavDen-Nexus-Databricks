@@ -1,0 +1,40 @@
+# The models each assistant may run on, and how to call each one (the final lists, 17 Oct 2026).
+# Switching is one setting per assistant, to any model in its list:
+#   app         the app's own assistant (the model writes the SQL: the hard task):
+#               LLM_PROVIDER + LLM_MODEL (.env locally, Render's environment online)
+#   databricks  the Databricks assistant (Genie writes the SQL): its LLM_ENDPOINT setting
+# A model not in an assistant's list is refused there. The quality test runs each list at these
+# settings (quality.CONTESTANTS): add a model, run the test on it, before visitors get it.
+#
+#   provider          databricks: a serving endpoint in the workspace (hosted by Databricks,
+#                     or an AI Gateway endpoint in front of your own keys), called with a
+#                     Databricks identity, no keys. openai / azure: your own keys.
+#   reasoning_effort  sent with each request when given (left out: the model's own default).
+#   max_tokens        the answer's limit when 1,200 isn't enough: for gpt-5 models it covers the
+#                     hidden reasoning too (only the tokens used are billed).
+#
+# The name is the serving endpoint (databricks), the model (openai) or YOUR deployment (azure).
+# Results and how the lists were chosen: docs/quality/README.md.
+
+app:
+  gpt-5.5: {provider: openai, reasoning_effort: none}  # the main model; run 3: PASS as shipped
+  # The fallback, at its default reasoning: failed the app scorecard in runs 1-2 (SQL mistakes),
+  # and twice used the whole 1,200 tokens thinking (no answer), hence the higher limit
+  gpt-5-mini: {provider: azure, max_tokens: 4000}
+  # For comparison, not for visitors: failed the app scorecard as shipped (run 3); at its
+  # default, never low (at low it wrote protocol steps from memory)
+  databricks-gpt-oss-120b: {provider: databricks}
+
+databricks:
+  # Reached only through serving endpoints, as the deployed Databricks assistant's own identity.
+  # GPT-OSS, hosted by Databricks, at its default (passed run 2; at low it wrote protocol steps
+  # from memory, run 3): for comparison in dev, not for visitors (on the dev endpoint,
+  # 18 Oct, it answered "why only 6 conditions" without the documents and named conditions we
+  # don't have)
+  databricks-gpt-oss-120b: {provider: databricks}
+  # AI Gateway endpoints in front of your own keys (infra/terraform/llm_gateway.tf):
+  # gpt-5-mini on your Azure deployment, at its default: the model since 18 Oct
+  # (passed run 2, grounded 18/18; red-team of the dev endpoint 0/19, documents cited)
+  heavden-gpt-5-mini: {provider: databricks, max_tokens: 4000}
+  # gpt-5.5 on OpenAI, the app's main model: for comparison in dev
+  heavden-gpt-5-5: {provider: databricks, reasoning_effort: none}

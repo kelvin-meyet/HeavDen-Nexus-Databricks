@@ -1,0 +1,205 @@
+# One environment's data jobs, run on demand. It is never started by itself: prod-run.yml calls it
+# for prod (after Kelvin's approval) and staging-run.yml for staging, so a drift episode is
+# rehearsed in staging with exactly the steps prod will run.
+#
+# Each step is optional: copying Azure SQL wakes the free database, the pipeline is updated
+# twice (the second update links the readings the first one loaded), a full refresh rebuilds
+# every pipeline table from Bronze (needed after loading *different* data into the source),
+# training registers a new model version, scoring scores the new hours with the model in use and
+# rebuilds the alert, escalation and KPI tables, and the drift check compares the latest data
+# with that model's own.
+#
+# If the check reaches "act", the last job opens a retrain request (retrain.yml), which waits
+# for an approval; GitHub emails the reviewer. No stored token: it uses the run's own. While a
+# request for the same kind of drift is open (it may be held for days), a later "act" opens no
+# second one; a different kind of drift replaces the open request with a new one.
+#
+# Every run also copies the requests rejected on GitHub into ml.ops_audit: a rejected run never
+# gets the environment's credentials, so it can't record itself.
+
+name: data-run
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: "The bundle target: prod or staging"
+        type: string
+        required: true
+      environment:
+        description: "The GitHub environment that gives this run its identity (and, for prod, its approval)"
+        type: string
+        required: true
+      ingest_sql:
+        type: boolean
+        default: true
+      run_pipeline:
+        type: boolean
+        default: true
+      full_refresh:
+        type: boolean
+        default: false
+      train:
+        type: boolean
+        default: false
+      score:
+        type: boolean
+        default: false
+      drift_check:
+        type: boolean
+        default: false
+      website_snapshot:
+        type: boolean
+        default: false
+      episode:
+        type: string
+        default: ""
+
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100 # ~45 min of data jobs + the monitor's refresh (~15-25 min)
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+      actions: read # the reviews of retrain, promotion and rollback requests
+    env:
+      DATABRICKS_AUTH_TYPE: azure-cli
+      TARGET: ${{ inputs.target }}
+    defaults:
+      run:
+        working-directory: databricks
+    outputs:
+      drift_status: ${{ steps.drift.outputs.status }}
+      drift_result: ${{ steps.drift.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - uses: databricks/setup-cli@v1.17.0
+        with:
+          version: 1.17.0
+
+      # The audit copy must never block the data jobs (GitHub keeps the record either way), so
+      # a failure here only shows as a warning. The job skips rejections it already holds.
+      - name: Record rejected requests in ml.ops_audit
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rejections=$(bash ../.github/scripts/review.sh rejections "$TARGET")
+          if [ -n "$rejections" ]; then
+            bash ../.github/scripts/model_ops.sh record-rejections "" "$rejections"
+          else
+            echo "No rejected requests on GitHub."
+          fi
+
+      - name: Copy Azure SQL into Bronze
+        if: inputs.ingest_sql
+        run: databricks bundle run sql_ingest -t "$TARGET"
+
+      # Two updates, on purpose. New readings pass through two streaming tables (Bronze, then
+      # Silver) before they are linked to stays, and an update can refresh the linked table
+      # before the second one has written them: on 13 Oct 2026 an update loaded 150,456 readings,
+      # linked none, and succeeded. The second update finds them already in Silver, so its
+      # order can't matter. The jobs below refuse to run if Gold is still behind
+      # (heavden.pipelines.gold.require_current), so this can't pass unnoticed again.
+      - name: Run the pipeline
+        if: inputs.run_pipeline
+        env:
+          FULL_REFRESH: ${{ inputs.full_refresh }}
+        run: |
+          if [ "$FULL_REFRESH" = "true" ]; then
+            databricks bundle run medallion -t "$TARGET" --full-refresh-all
+          else
+            databricks bundle run medallion -t "$TARGET"
+          fi
+          echo "Second update: link the readings the first one loaded, then rebuild Gold."
+          databricks bundle run medallion -t "$TARGET"
+
+      - name: Train and register the model
+        if: inputs.train
+        run: databricks bundle run train -t "$TARGET"
+
+      - name: Score the new patient-hours with the model in use
+        if: inputs.score
+        shell: bash
+        run: |
+          databricks bundle run score -t "$TARGET" 2>&1 | tee "$RUNNER_TEMP/score.log"
+          scored=$(grep -o '[^ ]* v[0-9]* (.*new hours scored' "$RUNNER_TEMP/score.log" | tail -1 || true)
+          echo "**Scoring ($TARGET):** ${scored:-the job printed no summary line}" >> "$GITHUB_STEP_SUMMARY"
+
+      # The sign-in at the start gives tokens that last about an hour, and the run can be longer
+      # with the monitor's refresh: sign in again so the drift step can follow its job to the end.
+      - name: Sign in to Azure again before the drift check
+        if: inputs.drift_check
+        uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      # The job prints its result on one line (DRIFT_CHECK_RESULT {json}); a run without that
+      # line fails here, so a check that said nothing is never taken for "stable".
+      - name: Check for drift
+        id: drift
+        if: inputs.drift_check
+        shell: bash
+        env:
+          EPISODE: ${{ inputs.episode }}
+        run: |
+          databricks bundle run drift_check -t "$TARGET" --params episode="$EPISODE" 2>&1 | tee "$RUNNER_TEMP/drift.log"
+          result=$(grep -o 'DRIFT_CHECK_RESULT {.*}' "$RUNNER_TEMP/drift.log" | tail -1 | sed 's/^DRIFT_CHECK_RESULT //' || true)
+          jq -e .status <<<"$result" >/dev/null 2>&1 || { echo "::error::the drift check printed no result line"; exit 1; }
+          echo "status=$(jq -r .status <<<"$result")" >> "$GITHUB_OUTPUT"
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Drift check ($TARGET): $(jq -r '.status | ascii_upcase' <<<"$result") ($(jq -r .n_act <<<"$result") act, $(jq -r .n_warn <<<"$result") warn)"
+            jq -r '"Day judged: \(.window_start[0:16]) to \(.window_end[0:16]) UTC, model version \(.model_version)."' <<<"$result"
+            jq -r '"Monitor: \(.monitor // "not reported"). Agrees with the check: \(.monitor_agrees // "not reported")."' <<<"$result"
+            echo
+            jq -r '.breaches[] | "- \(.)"' <<<"$result"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The website's snapshot: the last 28 days of Gold and the model in use, checked, then
+      # published for the website's next start (prod); staging builds and checks it only. Like
+      # the drift check, a run without its result line fails.
+      - name: Export the website snapshot
+        if: inputs.website_snapshot
+        shell: bash
+        run: |
+          databricks bundle run website_snapshot -t "$TARGET" 2>&1 | tee "$RUNNER_TEMP/website.log"
+          result=$(grep -o 'WEBSITE_SNAPSHOT {.*}' "$RUNNER_TEMP/website.log" | tail -1 | sed 's/^WEBSITE_SNAPSHOT //' || true)
+          jq -e .snapshot <<<"$result" >/dev/null 2>&1 || { echo "::error::the export printed no result line"; exit 1; }
+          {
+            jq -r '"## Website snapshot (\(env.TARGET)): \(.snapshot), \(if .published then "published" else "built and checked, not published" end)"' <<<"$result"
+            jq -r '"Data \(.data_start[0:16]) to \(.as_of[0:16]) UTC, \(.rows.patient_hour_features) patient-hours; model v\(.model_version), threshold \(.threshold); \(.log_check)."' <<<"$result"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  request-retrain:
+    needs: run
+    if: needs.run.outputs.drift_status == 'act'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write # start retrain.yml, and cancel a request it replaces, with this run's own token
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      # One open request per kind of drift (.github/scripts/retrain_request.py): nothing new
+      # while a request for the same kind is held; a different kind replaces the open request,
+      # so the reviewer is emailed about it and a retrain is recorded against the right check.
+      - name: Open a retrain request, unless one for this kind of drift is open
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECK: ${{ needs.run.outputs.drift_result }}
+          TARGET: ${{ inputs.target }}
+        run: python3 .github/scripts/retrain_request.py

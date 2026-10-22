@@ -1,0 +1,259 @@
+# Deploys to prod when a release tag (v*) is pushed, after Kelvin approves the run in the
+# prod-deploy environment (Plan.md §16.2). It deploys code: prod's ingestion, pipeline and drift
+# episodes run on demand (prod-run.yml), never on every release.
+#
+# When the Databricks assistant changed since the previous release (the files that also deploy it
+# to staging: .github/scripts/assistant_changed.py), the release also publishes what it reads
+# (documents, patient explanation, Genie space) and, after a second approval, deploys it to
+# heavden-assistant-prod and red-teams it there. It stays private (Plan.md §11.2): only the Review
+# App, its traces and this red-team reach it.
+#
+# Every release also ships the website (job `website`): a snapshot exported with the released code
+# and the API's image built from the tag, smoke-tested together, then pushed to GHCR, served and
+# deployed to Container Apps.
+#
+#   git tag -a v0.6.0 -m "..." && git push origin v0.6.0
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prod
+  cancel-in-progress: false
+
+jobs:
+  deploy-prod:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40 # deploy ~5 min; the assistant's publish ~8 min, after a pipeline update the first time
+    environment: prod-deploy
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      assistant: ${{ steps.changed.outputs.assistant }}
+    env:
+      DATABRICKS_AUTH_TYPE: azure-cli
+    defaults:
+      run:
+        working-directory: databricks
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the tags, to compare with the previous release
+
+      - uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - uses: databricks/setup-cli@v1.17.0
+        with:
+          version: 1.17.0
+
+      - uses: astral-sh/setup-uv@v6 # bundle deploy builds the wheel with uv
+
+      - name: Validate
+        run: databricks bundle validate --strict -t prod
+
+      # The assistant answers from the model card, which ships in this release: it must describe
+      # the version prod scores with (promote.yml and rollback.yml open a reminder when it changes).
+      - name: Check the model card describes prod's model
+        run: |
+          champion=$(databricks registered-models get heavden_prod.ml.deterioration_risk --include-aliases -o json             | jq -r '[.aliases[]? | select(.alias_name == "champion") | .version_num | tostring][0] // ""')
+          python3 ../.github/scripts/model_card.py check "$champion"
+
+      - name: Deploy
+        run: databricks bundle deploy -t prod
+
+      # A prod without the assistant's endpoint (the first release with it) counts as a change.
+      - name: Did the Databricks assistant change since the last release?
+        id: changed
+        run: |
+          previous=$(git describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null || true)
+          if ! databricks serving-endpoints get heavden-assistant-prod >/dev/null 2>&1; then
+            echo "Prod has no Databricks assistant yet."
+            assistant=true
+          elif git diff --name-only "$previous" HEAD | python3 ../.github/scripts/assistant_changed.py; then
+            echo "The files above changed since $previous."
+            assistant=true
+          else
+            echo "No change to the Databricks assistant since $previous: nothing to publish or deploy." >> "$GITHUB_STEP_SUMMARY"
+            assistant=false
+          fi
+          echo "assistant=$assistant" >> "$GITHUB_OUTPUT"
+
+      # The patient explanation and the Genie space read gold.encounters, which the pipeline
+      # builds, and a release never runs the pipeline. So the first release with the assistant
+      # (v0.6.0) runs one update here. One is enough: a release brings no data (an episode's
+      # data comes with prod-run.yml, which updates twice).
+      - name: Build gold.encounters if prod has never had it
+        if: steps.changed.outputs.assistant == 'true'
+        run: |
+          exists=$(databricks tables exists heavden_prod.gold.encounters | jq -r .table_exists)
+          if [ "$exists" != "true" ]; then
+            databricks bundle run medallion -t prod
+          else
+            echo "gold.encounters exists: no pipeline update."
+          fi
+
+      # ml.corpus_chunks, ml.explain_patient_risk and the Genie space "HeavDen Ward Data (prod)"
+      - name: Publish what the assistant reads
+        if: steps.changed.outputs.assistant == 'true'
+        run: databricks bundle run assistant_publish -t prod
+
+  # The endpoint (~20 min: log, register, serve, ask one question) and its red-team (~4 min), as
+  # in staging (ci.yml), in a job of its own for a fresh sign-in (a sign-in lasts about an hour).
+  # GitHub asks for a second prod-deploy approval here.
+  assistant-prod:
+    needs: [deploy-prod]
+    if: needs.deploy-prod.outputs.assistant == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: prod-deploy
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DATABRICKS_AUTH_TYPE: azure-cli
+      DATABRICKS_HOST: https://adb-7405604448133690.10.azuredatabricks.net
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - uses: databricks/setup-cli@v1.17.0
+        with:
+          version: 1.17.0
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      # Prints ASSISTANT_DEPLOY_RESULT: the version, the model, minutes to serve, one answer
+      - name: Deploy the Databricks assistant
+        working-directory: databricks
+        run: databricks bundle run assistant_deploy -t prod
+
+      # The 19 prompts of heavden_api/chat/redteam.py, sent to the endpoint; fails on any problem
+      - name: Red-team the Databricks assistant
+        run: uv run --locked python backend/scripts/redteam_chat.py --endpoint heavden-assistant-prod
+
+  # The website (Container Apps): a snapshot written by this release's code, and the image built
+  # from this tag, smoke-tested on that snapshot. Only then does anything the website reads move:
+  # the image is pushed, the website is pointed at the snapshot, and the image is deployed. A
+  # failure before that leaves the running website as it was (an image reads only the pointer for
+  # its own snapshot format, so even a published snapshot in a new format never reaches it).
+  # GitHub asks for a prod-deploy approval here too.
+  website:
+    needs: [deploy-prod]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: prod-deploy
+    permissions:
+      contents: read
+      id-token: write
+      packages: write # push the image to GHCR with this run's own token
+    env:
+      DATABRICKS_AUTH_TYPE: azure-cli
+      DATABRICKS_HOST: https://adb-7405604448133690.10.azuredatabricks.net
+      IMAGE: ghcr.io/${{ github.repository_owner }}/heavden-api
+      VOLUME: /Volumes/heavden_prod/ml/website
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - uses: databricks/setup-cli@v1.17.0
+        with:
+          version: 1.17.0
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      # The API on Container Apps answers only requests carrying this secret (Terraform output
+      # origin_secret, also in Vercel): without it the deploy's smoke test can't reach the API
+      - name: Check the website's secret is available
+        if: vars.WEBSITE_APP_ID != ''
+        env:
+          ORIGIN_SECRET: ${{ secrets.ORIGIN_SECRET }}
+        run: |
+          [ -n "$ORIGIN_SECRET" ] || { echo "::error::the prod-deploy environment has no secret ORIGIN_SECRET: copy it from Terraform output origin_secret"; exit 1; }
+
+      # Published but not served: the website keeps its current snapshot until the image passes
+      - name: Export the website snapshot (not served yet)
+        id: export
+        working-directory: databricks
+        run: |
+          databricks bundle run website_snapshot -t prod --params move_pointer=false 2>&1 | tee "$RUNNER_TEMP/website.log"
+          result=$(grep -o 'WEBSITE_SNAPSHOT {.*}' "$RUNNER_TEMP/website.log" | tail -1 | sed 's/^WEBSITE_SNAPSHOT //' || true)
+          jq -e '.published and (.pointer_moved | not)' <<<"$result" >/dev/null 2>&1 || { echo "::error::the export printed no result line, or didn't publish"; exit 1; }
+          echo "snapshot=$(jq -r .snapshot <<<"$result")" >> "$GITHUB_OUTPUT"
+          jq -r '"## Website snapshot \(.snapshot)\nData \(.data_start[0:16]) to \(.as_of[0:16]) UTC, \(.rows.patient_hour_features) patient-hours; model v\(.model_version); \(.log_check)."' <<<"$result" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build the image
+        run: docker build -f backend/Dockerfile -t "$IMAGE:$GITHUB_REF_NAME" .
+
+      # Downloaded through the checks the website makes, then served by the new image as on
+      # Container Apps (1 GiB), in snapshot mode: pages, board = what-if, document search, and
+      # a request without the website's secret refused (a throwaway secret here)
+      - name: Smoke-test the image on the snapshot
+        env:
+          SNAPSHOT: ${{ steps.export.outputs.snapshot }}
+        run: |
+          uv run --locked python backend/scripts/website_snapshot.py fetch "$VOLUME" "$RUNNER_TEMP/snapshots" --name "$SNAPSHOT"
+          lock=$(openssl rand -hex 24)
+          docker run -d --name api --memory 1g -p 8000:8000 -v "$RUNNER_TEMP/snapshots:/app/snapshot:ro" -e SNAPSHOT_DIR="/app/snapshot/$SNAPSHOT" -e ORIGIN_SECRET="$lock" "$IMAGE:$GITHUB_REF_NAME"
+          ORIGIN_SECRET="$lock" python3 backend/scripts/smoke_api.py http://127.0.0.1:8000 --snapshot "$SNAPSHOT" --wait 120 || { docker logs api | tail -40; exit 1; }
+          echo "OOM killed: $(docker inspect -f '{{.State.OOMKilled}}' api)"
+
+      - name: Push the image to GHCR
+        id: push
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE:$GITHUB_REF_NAME"
+          digest=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$GITHUB_REF_NAME")
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "Image: \`$digest\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Point the website at the snapshot
+        env:
+          SNAPSHOT: ${{ steps.export.outputs.snapshot }}
+        run: uv run --locked python backend/scripts/website_snapshot.py point "$VOLUME" "$SNAPSHOT"
+
+      # WEBSITE_APP_ID (a repository variable: the container app's Azure ID, Terraform output
+      # api_app_id) is set once the app exists (Terraform part 2, created with this image)
+      - name: Deploy to Container Apps
+        env:
+          APP_ID: ${{ vars.WEBSITE_APP_ID }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          SNAPSHOT: ${{ steps.export.outputs.snapshot }}
+          ORIGIN_SECRET: ${{ secrets.ORIGIN_SECRET }}
+        run: |
+          if [ -z "$APP_ID" ]; then
+            echo "No container app yet: create it with api_image = \"$DIGEST\" (Terraform part 2), then set WEBSITE_APP_ID." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          az containerapp update --ids "$APP_ID" --container-name api --image "$DIGEST" --query properties.latestRevisionName -o tsv
+          fqdn=$(az containerapp show --ids "$APP_ID" --query properties.configuration.ingress.fqdn -o tsv)
+          python3 backend/scripts/smoke_api.py "https://$fqdn" --snapshot "$SNAPSHOT" --wait 300
+          echo "Deployed to https://$fqdn" >> "$GITHUB_STEP_SUMMARY"

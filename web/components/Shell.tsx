@@ -7,8 +7,10 @@ import { useEffect, useState } from "react";
 import { useApi } from "@/lib/api";
 import { BUILDER } from "@/lib/site";
 import { whenFull } from "@/lib/format";
+import { HealthContext } from "@/lib/health";
 import type { Health } from "@/lib/types";
 
+import { WakeNotice } from "./bits";
 import styles from "./Shell.module.css";
 
 const NAV = [
@@ -23,7 +25,8 @@ const CTA = { href: "/work-with-me", label: "Work with me" };
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
-  // Calling /health on every page load also wakes the backend if Render has put it to sleep.
+  // Calling /health on every page load also wakes the API if Container Apps has stopped it. The
+  // answer is shared with the pages, so a slow section can say what is waking up.
   const health = useApi<Health>("/health");
   // On narrow screens the links sit behind a Menu button.
   const [menuOpen, setMenuOpen] = useState(false);
@@ -106,13 +109,25 @@ export function Shell({ children }: { children: React.ReactNode }) {
                 <span className={styles.time}>{whenFull(health.data.as_of)}</span>
               </>
             ) : health.error ? (
-              <span className={styles.offline}>Data service waking up&hellip;</span>
+              <span className={styles.offline}>Data service may be waking up&hellip;</span>
             ) : (
-              <span className={styles.statusLabel}>Connecting&hellip;</span>
+              <span>Connecting&hellip;</span>
             )}
           </div>
         </div>
+        {/* After a few seconds without an answer, say what is waking up (first visit after a quiet spell). */}
+        {!health.data && !health.error && (
+          <div className={styles.wakeRow}>
+            <WakeNotice compact />
+          </div>
+        )}
       </header>
+
+      {health.data?.mode === "live" && health.data.live_data === false && (
+        <p className={styles.paused} role="status">
+          Live data is paused until midnight UTC: these pages show the latest snapshot.
+        </p>
+      )}
 
       <p className={styles.synthetic}>
         <strong>Synthetic data.</strong> Every patient and hospital here is invented. Not a medical device.
@@ -121,7 +136,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
       </p>
 
       <div className={styles.content}>
-        <main id="main">{children}</main>
+        <main id="main">
+          <HealthContext value={health.data}>{children}</HealthContext>
+        </main>
         <footer className={styles.footer}>
           HeavDen Nexus is a portfolio project. It is not a medical device and must not be used for real patient
           care. <Link href="/about-the-data">About the hospital and its data</Link>

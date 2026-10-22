@@ -120,7 +120,7 @@ def test_in_force_picks_versions_by_date():
     current = {
         c.version for c, ok in zip(protocol, retrieval.in_force(protocol), strict=True) if ok
     }
-    before = retrieval.in_force(protocol, as_of=date(2026, 11, 5))
+    before = retrieval.in_force(protocol, as_of=date(2026, 9, 25))  # v2.0 starts 6 Oct
     assert current == {"2.0"}
     assert {c.version for c, ok in zip(protocol, before, strict=True) if ok} == {"1.0"}
 
@@ -141,7 +141,7 @@ def test_search_finds_the_right_document(retriever, mode):
 
 
 def test_search_as_of_returns_the_old_protocol(retriever):
-    old = retriever.search("NEWS2 score escalation", k=5, as_of=date(2026, 11, 5))
+    old = retriever.search("NEWS2 score escalation", k=5, as_of=date(2026, 9, 25))
     assert {r.chunk.version for r in old if r.chunk.doc_id == "HD-CLIN-001"} == {"1.0"}
 
 

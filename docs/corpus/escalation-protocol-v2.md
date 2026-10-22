@@ -3,7 +3,7 @@ doc_id: HD-CLIN-001
 title: Deteriorating Patient Escalation Protocol
 version: "2.0"
 status: current
-effective_date: 2026-11-09
+effective_date: 2026-10-06
 supersedes: HD-CLIN-001 v1.0
 owner: HeavDen Network Clinical Governance Committee
 audience: ward nurses, ward doctors, rapid response team
@@ -15,7 +15,7 @@ audience: ward nurses, ward doctors, rapid response team
 
 ## 1. What changed from v1.0
 
-Version 2.0 takes effect on **2026-11-09** at all three sites. An audit of 2026 found that deteriorating patients were often escalated late, after several hours of worsening observations. Version 2.0 therefore asks staff to **escalate earlier**:
+Version 2.0 takes effect on **2026-10-06** at all three sites. An audit of 2026 found that deteriorating patients were often escalated late, after several hours of worsening observations. Version 2.0 therefore asks staff to **escalate earlier**:
 
 1. **Lower trigger for an urgent response.** A NEWS2 of **5 or more** (previously 7) now triggers a call to the rapid response team.
 2. **Earlier action on a single red score.** A score of 3 in any single parameter now triggers a review by the outreach nurse within 30 minutes (previously the ward doctor within 60 minutes).

@@ -83,6 +83,8 @@ def simulate_episode(
     scenarios: list[str] | tuple[str, ...] = (),
     seed: int = 42,
     config: dict[str, dict] | None = None,
+    first_encounter_no: int = 100000,
+    carried_baselines: pd.DataFrame | None = None,
 ) -> EpisodeResult:
     """One episode of hospital life with the chosen drift scenarios switched on.
 
@@ -116,7 +118,9 @@ def simulate_episode(
     if "spo2_sensor_bias" in scenarios:
         offsets = sensor_bias_offsets(config["spo2_sensor_bias"], starts("spo2_sensor_bias"))
 
-    plan = activity.schedule_activity(profiles, inpatients, start, hours, seed, activity_config)
+    plan = activity.schedule_activity(
+        profiles, inpatients, start, hours, seed, activity_config, first_encounter_no
+    )
     ward = truth.simulate_ward(
         inpatients,
         start,
@@ -126,6 +130,7 @@ def simulate_episode(
         truth_config=truth_config,
         measurement_offsets=offsets,
         activity=plan,
+        carried_baselines=carried_baselines,
     )
     if "firmware_schema_change" in scenarios:
         ward.readings = apply_firmware_change(

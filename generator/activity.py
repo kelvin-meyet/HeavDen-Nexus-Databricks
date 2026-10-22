@@ -77,11 +77,17 @@ def schedule_activity(
     hours: float,
     seed: int = 42,
     config: ActivityConfig | None = None,
+    first_encounter_no: int = 100000,
 ) -> HospitalActivity:
     """Plan admissions, discharges and transfers from `start` for `hours`.
 
     `inpatients` (from `hospital.admit_inpatients`) are the patients already in hospital at
     `start`; `profiles` is the population new admissions are drawn from.
+
+    To continue an earlier period (`generator.episode`), `inpatients` can also carry
+    `encounter_id`, `planned_discharge_ts` and `admission_reason`: those stays keep their id,
+    planned discharge and reason. New stays are numbered after every id in `inpatients` and
+    from `first_encounter_no` at least (pass one above every id used so far).
     """
     config = config or ActivityConfig()
     rng = np.random.default_rng(seed)
@@ -107,7 +113,8 @@ def schedule_activity(
     transfers: list[dict] = []
     events: list[tuple] = []  # (time, tiebreak, kind, payload)
     tiebreak = itertools.count()
-    encounter_no = itertools.count(100000)
+    given = inpatients["encounter_id"] if "encounter_id" in inpatients else []
+    encounter_no = itertools.count(max([first_encounter_no, *(int(e[2:]) + 1 for e in given)]))
 
     def los() -> pd.Timedelta:
         days = rng.lognormal(np.log(config.los_median_days), config.los_sigma)
@@ -117,8 +124,10 @@ def schedule_activity(
         if time < end:
             heapq.heappush(events, (time, next(tiebreak), kind, payload))
 
-    def open_stay(patient_id, bed_id, admit_ts, device_id, planned_discharge, reason=None):
-        encounter_id = f"E-{next(encounter_no)}"
+    def open_stay(
+        patient_id, bed_id, admit_ts, device_id, planned_discharge, reason=None, encounter_id=None
+    ):
+        encounter_id = encounter_id or f"E-{next(encounter_no)}"
         encounters[encounter_id] = {
             "encounter_id": encounter_id,
             "patient_id": patient_id,
@@ -151,11 +160,22 @@ def schedule_activity(
 
     # Patients already in hospital: keep their bed and device, plan their remaining stay.
     for row in inpatients.itertuples():
-        planned = row.admit_ts + los()
+        planned = getattr(row, "planned_discharge_ts", pd.NaT)
+        if pd.isna(planned):
+            planned = row.admit_ts + los()
         if planned <= start + pd.Timedelta(hours=2):
             planned = start + pd.Timedelta(hours=rng.uniform(2, 48))
         free_devices[row.site_id].remove(row.device_id)
-        open_stay(row.patient_id, row.bed_id, row.admit_ts, row.device_id, planned.floor("min"))
+        reason = getattr(row, "admission_reason", None)
+        open_stay(
+            row.patient_id,
+            row.bed_id,
+            row.admit_ts,
+            row.device_id,
+            planned.floor("min"),
+            reason if isinstance(reason, str) else None,
+            getattr(row, "encounter_id", None),
+        )
 
     # Beds empty at the start get an admission after a short delay.
     for bed_id, enc in occupant.items():

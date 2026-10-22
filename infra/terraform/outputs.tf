@@ -33,3 +33,35 @@ output "sql_connection" {
 output "sql_warehouse_id" {
   value = databricks_sql_endpoint.shared.id
 }
+
+output "tenant_id" {
+  value = data.azurerm_client_config.current.tenant_id
+}
+
+# GitHub variable AZURE_CLIENT_ID for each environment (not a secret: it only names the identity).
+output "ci_client_ids" {
+  value = { for env, app in azuread_application.ci : env => app.client_id }
+}
+
+# Bundle variable assistant_users for prod (databricks.yml): the website's identity, granted
+# EXECUTE on the explain function and CAN_RUN on prod's Genie space by assistant_publish.
+output "web_client_id" {
+  value = azurerm_user_assigned_identity.web.client_id
+}
+
+# Vercel's BACKEND_URL
+output "api_url" {
+  value = one([for app in azurerm_container_app.api : "https://${app.ingress[0].fqdn}"])
+}
+
+# The repository variable WEBSITE_APP_ID: where releases deploy new images (release.yml)
+output "api_app_id" {
+  value = one(azurerm_container_app.api[*].id)
+}
+
+# Vercel's ORIGIN_SECRET and the GitHub secret ORIGIN_SECRET: the API answers only requests
+# carrying it. Copy it without printing it: terraform output -raw origin_secret | clip
+output "origin_secret" {
+  value     = random_password.origin_secret.result
+  sensitive = true
+}

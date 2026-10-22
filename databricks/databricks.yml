@@ -15,6 +15,17 @@ bundle:
 include:
   - resources/*.yml
 
+# The project as a Python wheel (generator, heavden, heavden_api), built on every deploy and
+# installed by jobs that need more than PySpark (training, scoring): resources reference it as
+# ../../dist/*.whl. dynamic_version stamps each build with its time, so serverless never reuses a
+# cached copy of an older wheel with the same version number.
+artifacts:
+  heavden:
+    type: whl
+    path: ..
+    build: uv build --wheel
+    dynamic_version: true
+
 # Upload the Databricks-track learning notebooks too, so they sit next to the code they import.
 sync:
   paths:
@@ -38,6 +49,55 @@ variables:
   secret_scope:
     description: Key Vault-backed secret scope (terraform output secret_scope).
     default: heavden-kv
+  train_days:
+    description: Days of labelled patient-hours the model trains on (then validation, then test).
+    default: 9
+  valid_days:
+    description: Days of validation, where calibration, the alert threshold and the champion are chosen.
+    default: 2
+  retrain_valid_days:
+    description: In a retrain, the days of validation just before the test days.
+    default: 2
+  retrain_test_days:
+    description: In a retrain, the latest days, where the new model is compared with the champion.
+    default: 2
+  scoring_model:
+    description: Which registered version is in use (scored with, checked for drift, and to
+      beat in a retrain). An alias, "latest", or "champion_or_latest".
+    default: champion
+  warehouse_id:
+    description: Shared SQL warehouse the dashboards run on (terraform output sql_warehouse_id).
+    default: 0a14d0d391ce8af6
+  model_catalog:
+    description: Catalog whose drift checks, monitor and decisions the Model & Drift dashboard
+      shows. The target's own, except dev, which has no model and reads staging's.
+    default: ""
+  env_label:
+    description: Added to the dashboards' names so staging's and prod's copies, which share one
+      workspace, can be told apart (dev's carry the "[dev <user>]" prefix instead).
+    default: ""
+  assistant_llm_endpoint:
+    description: The Databricks assistant's model, an endpoint in the `databricks:` list of
+      backend/heavden_api/chat/models.yaml. Changing it and merging is the switch. gpt-5-mini
+      since 18 Oct (red-team of the dev endpoint, docs/quality/README.md).
+    default: heavden-gpt-5-mini
+  assistant_models:
+    description: What a deploy of the Databricks assistant puts on its endpoint - "default" (one
+      version on assistant_llm_endpoint) or "all" (one version per model in the `databricks:`
+      list, each labelled with its model; the default keeps the traffic; older versions removed).
+    default: default
+  genie_title:
+    description: The Genie space the Databricks assistant asks, the one over `model_catalog`.
+    default: HeavDen Ward Data (staging)
+  assistant_users:
+    description: Service principals (application ids, comma-separated) that may use the
+      assistant's function and Genie space besides the deploying identity - in prod, the
+      website's managed identity (Terraform output web_client_id). assistant_publish grants them.
+    default: ""
+  website_volume:
+    description: Where website_snapshot publishes the website's snapshot (a volume path); empty
+      builds and checks it without publishing. Only prod has one (Terraform, website.tf).
+    default: ""
 
 targets:
   # Personal development: resources are prefixed with "[dev <user>]" and schedules are paused.
@@ -46,24 +106,42 @@ targets:
     mode: development
     variables:
       catalog: heavden_dev
+      model_catalog: heavden_staging # dev has no model; preview the dashboard on staging's
       sql_schema: dev
+      # 2 days of data: 1 day train, half a day validation, the rest test (a smoke test)
+      train_days: 1
+      valid_days: 0.5
+      # 2-day models rarely pass the gates, so there is no champion until a retrain makes one
+      scoring_model: champion_or_latest
 
   # Production mode needs an explicit root_path: the deploying identity's home folder, which other
   # users can't write to. Once CI deploys as the target's service principal, this is its folder.
-  # Deployed by CI on every merge to main (from Phase 1's deploy workflow), on small seeded data.
+  # Deployed by CI (ci.yml, job staging) on every merge to main, then run on small seeded data.
   staging:
     mode: production
     workspace:
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
     variables:
       catalog: heavden_staging
+      model_catalog: heavden_staging
+      env_label: " (staging)"
       sql_schema: staging
+      # 2 days of data: 1 day train, half a day validation, the rest test (a smoke test)
+      train_days: 1
+      valid_days: 0.5
+      # 2-day models rarely pass the gates, so there is no champion until a retrain makes one
+      scoring_model: champion_or_latest
 
-  # Deployed by CI after approval in the prod-deploy GitHub environment.
+  # Deployed by CI (release.yml) for a v* tag, after approval in the prod-deploy GitHub environment.
   prod:
     mode: production
     workspace:
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
     variables:
       catalog: heavden_prod
+      model_catalog: heavden_prod
+      env_label: " (prod)"
+      genie_title: HeavDen Ward Data (prod)
+      assistant_users: e3c64e9c-df94-49d1-b14f-cbef9de5e7a0 # the website (Terraform output web_client_id)
+      website_volume: /Volumes/heavden_prod/ml/website
       sql_schema: prod

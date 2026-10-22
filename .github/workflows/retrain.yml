@@ -1,0 +1,160 @@
+# A retrain request (Plan.md §10.4). Started by a data run (prod-run; staging-run to rehearse)
+# when a drift check reaches "act"; it can also be started by hand with a check's result line.
+# It shows what the check found, then waits for Kelvin in the retrain-approval environment
+# (staging-approval for staging): GitHub emails the request, and approving or rejecting it is
+# the decision. Not every drift calls for a retrain (a sensor fault doesn't), so
+# rejecting is a normal outcome: see docs/corpus/drift-incident-runbook.md.
+#
+# An approval runs the target's training job in retrain mode: the latest days are validation and test,
+# all earlier history trains, and the new model becomes @challenger only if it beats NEWS2 and
+# the current @champion (at the same alert budget: more escalations flagged, better ranking).
+# The job can't know whether enough has happened since the drift began: approve only once there
+# are enough outcomes under the new conditions (the runbook says how long to wait). A request
+# can be held for days: a data run opens no second one for the same kind of drift, and replaces
+# it (this run is then cancelled) when a later check shows a different kind.
+#
+# Nothing is promoted here. A model that passes opens a promotion request (promote.yml), which
+# waits for its own approval. The retrain is recorded in ml.ops_audit with who approved it; a
+# rejection is copied there by the next data run (a rejected run never gets the credentials).
+
+# The name is the alert: GitHub's email says only "<this name>: <environment> is waiting for
+# your review", with a link to the run, whose Summary shows the check and the breaches.
+name: Drift alert - retrain request
+run-name: "Retrain request${{ inputs.target == 'staging' && ' (staging)' || '' }}: ${{ inputs.title || 'started by hand' }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      check:
+        description: "The drift check's result (the JSON after DRIFT_CHECK_RESULT in the job's output)"
+        type: string
+        required: true
+      title:
+        description: "What the request is about, for the run's name (a data run fills this in)"
+        type: string
+        default: ""
+      target:
+        description: "prod, or staging to rehearse the same steps there"
+        type: choice
+        options: [prod, staging]
+        default: prod
+
+permissions:
+  contents: read
+
+# A backstop for requests started by hand: a second one queues behind the first.
+concurrency:
+  group: retrain-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: What the drift check found
+        env:
+          CHECK: ${{ inputs.check }}
+        run: |
+          jq -e . <<<"$CHECK" >/dev/null || { echo "::error::the check input is not JSON"; exit 1; }
+          {
+            echo "## Drift check: $(jq -r '.status | ascii_upcase' <<<"$CHECK")"
+            echo
+            jq -r '"- **Catalog:** \(.catalog), model version \(.model_version)",
+                   "- **Episode:** \(.episode // "none")",
+                   "- **Data window:** \(.window_start) to \(.window_end)",
+                   "- **Outcomes known through:** \(.labels_through)",
+                   "- **Check:** `\(.check_id)` in `\(.catalog).monitoring.drift_checks`"' <<<"$CHECK"
+            echo
+            echo "### Breaches ($(jq -r .n_act <<<"$CHECK") act, $(jq -r .n_warn <<<"$CHECK") warn)"
+            echo
+            jq -r '.breaches[] | "- \(.)"' <<<"$CHECK"
+            echo
+            echo "### Before approving"
+            echo
+            echo "| What the breaches look like | Likely cause | Decision |"
+            echo "|---|---|---|"
+            echo "| Inputs at **one site** (e.g. \`feature_psi spo2_mean_1h at SITE_B\`), performance fine | a device fault | **Reject**: fix the sensors |"
+            echo "| \`missing_rate_change\` or \`quarantine_rate\` | a payload or pipeline change | **Reject**: fix the pipeline |"
+            echo "| Inputs at **every site**, performance fine | a new mix of patients | **Reject** for now, check again when outcomes arrive |"
+            echo "| \`auprc_drop\` or \`brier_rise\`, inputs stable | outcomes changed (e.g. a new protocol) | **Approve**, once about a week of outcomes under the new conditions exists |"
+            echo
+            echo "Give the reason in the review comment: it is recorded in \`ml.ops_audit\`. This request shows the check that opened it; later checks are in \`monitoring.drift_checks\`."
+            echo
+            echo "Details: notebook \`30_drift_check_and_psi\` and the Drift Incident Runbook (\`docs/corpus/drift-incident-runbook.md\`)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  retrain:
+    needs: report
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    # waits here for Kelvin; rejecting ends the request
+    environment: ${{ inputs.target == 'staging' && 'staging-approval' || 'retrain-approval' }}
+    permissions:
+      contents: read
+      id-token: write
+      actions: read # who approved, for the audit trail
+    env:
+      DATABRICKS_AUTH_TYPE: azure-cli
+      GH_TOKEN: ${{ github.token }}
+      TARGET: ${{ inputs.target }}
+      APPROVAL: ${{ inputs.target == 'staging' && 'staging-approval' || 'retrain-approval' }}
+    defaults:
+      run:
+        working-directory: databricks
+    outputs:
+      passed: ${{ steps.train.outputs.passed }}
+      champion: ${{ steps.train.outputs.champion }}
+      version: ${{ steps.train.outputs.version }}
+      result: ${{ steps.train.outputs.result }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - uses: databricks/setup-cli@v1.17.0
+        with:
+          version: 1.17.0
+
+      # The job prints its result on one line (TRAINING_RESULT {json}); without it this step
+      # fails, so a run that said nothing is never reported as a new challenger.
+      - name: Retrain on the latest data and compare with the champion
+        id: train
+        shell: bash
+        env:
+          CHECK: ${{ inputs.check }}
+        run: |
+          context=$(bash ../.github/scripts/review.sh context "$APPROVAL" "$(jq -c '{check_id, episode}' <<<"$CHECK")")
+          databricks bundle run train -t "$TARGET" --params "mode=retrain,context=$context" 2>&1 | tee "$RUNNER_TEMP/train.log"
+          result=$(grep -o 'TRAINING_RESULT {.*}' "$RUNNER_TEMP/train.log" | tail -1 | sed 's/^TRAINING_RESULT //' || true)
+          jq -e .version <<<"$result" >/dev/null 2>&1 || { echo "::error::the training job printed no result line"; exit 1; }
+          echo "passed=$(jq -r .passed_gates <<<"$result")" >> "$GITHUB_OUTPUT"
+          echo "champion=$(jq -r '.aliases | index("champion") != null' <<<"$result")" >> "$GITHUB_OUTPUT"
+          echo "version=$(jq -r .version <<<"$result")" >> "$GITHUB_OUTPUT"
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+          bash ../.github/scripts/training_summary.sh "$result" >> "$GITHUB_STEP_SUMMARY"
+
+  # A model that passed with no champion to replace is already @champion (the first model in
+  # use in an environment): there is nothing to promote.
+  request-promotion:
+    needs: retrain
+    if: needs.retrain.outputs.passed == 'true' && needs.retrain.outputs.champion != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write # start promote.yml with this run's own token
+      contents: read
+    steps:
+      - name: Open a promotion request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.retrain.outputs.version }}
+          RESULT: ${{ needs.retrain.outputs.result }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          gh workflow run promote.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f version="$VERSION" -f retrain="$RESULT" -f target="$TARGET"
+          echo "Promotion request opened for version $VERSION: Actions -> Promotion request. It waits for approval." >> "$GITHUB_STEP_SUMMARY"

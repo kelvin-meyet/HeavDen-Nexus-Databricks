@@ -1,0 +1,7 @@
+# MLflow experiment for the training job (train.job.yml): one run per candidate model, with its
+# parameters, validation metrics (and NEWS2's), test metrics for the chosen one, and the model.
+# It lives in the deploying identity's home, so dev, staging and prod each have their own.
+resources:
+  experiments:
+    training:
+      name: /Workspace/Users/${workspace.current_user.userName}/heavden-deterioration-risk

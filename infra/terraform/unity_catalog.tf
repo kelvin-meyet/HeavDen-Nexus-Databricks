@@ -4,7 +4,10 @@
 
 locals {
   lake_host = "${azurerm_storage_account.lake.name}.dfs.core.windows.net"
-  schemas   = ["bronze", "silver", "gold", "ml", "monitoring"]
+  # assistant: the quality tests' MLflow traces, in Unity Catalog tables that MLflow creates
+  # there (the serving endpoint's traces stay in its experiment: it can't write here without
+  # a secret)
+  schemas = ["bronze", "silver", "gold", "ml", "monitoring", "assistant"]
 
   catalog_schemas = {
     for pair in setproduct(var.environments, local.schemas) :

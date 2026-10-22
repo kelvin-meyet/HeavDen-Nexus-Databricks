@@ -56,7 +56,7 @@ A patient on supplemental oxygen scores **2 points** for the oxygen alone. Oxyge
 
 ## 6. Clinical response thresholds
 
-The response to each score is set by the local escalation protocol (HD-CLIN-001). In outline, a total of 5 or more, or 3 in any single parameter, needs urgent review, and 7 or more needs an emergency response. Check the **current** version of the protocol, because the thresholds changed on 2026-11-09.
+The response to each score is set by the local escalation protocol (HD-CLIN-001). In outline, a total of 5 or more, or 3 in any single parameter, needs urgent review, and 7 or more needs an emergency response. Check the **current** version of the protocol, because the thresholds changed on 2026-10-06.
 
 ## 7. How NEWS2 is calculated in the data platform
 

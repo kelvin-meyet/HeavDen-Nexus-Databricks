@@ -1,0 +1,38 @@
+# Publish what the assistant reads on Databricks (Plan.md §11.2): the documents of docs/corpus
+# (shipped in the wheel) chunked into ml.corpus_chunks (one MERGE; change data feed on, for a
+# Vector Search index), the SQL table function ml.explain_patient_risk over Gold, and the Genie
+# space "HeavDen Ward Data" over Gold (src/heavden/agent/genie_space.yaml; created or updated in
+# place, in the bundle's folder, managed by heavden-admins). Code in src/heavden/agent/publish.py.
+# Idempotent; staging runs it after every merge (CI), prod after a release. It needs
+# gold.encounters, so it runs after the pipeline.
+resources:
+  jobs:
+    assistant_publish:
+      name: heavden-assistant-publish
+      description: Publishes the assistant's documents (ml.corpus_chunks), its patient-explanation function (ml.explain_patient_risk) and its Genie space for ${var.catalog}.
+      max_concurrent_runs: 1
+      performance_target: STANDARD
+      timeout_seconds: 1200
+      tags:
+        project: heavden
+        component: assistant
+      tasks:
+        - task_key: publish
+          environment_key: assistant
+          spark_python_task:
+            python_file: ../src/jobs/publish_assistant.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --warehouse-id
+              - ${var.warehouse_id}
+              - --genie-folder
+              - ${workspace.root_path}/genie
+              - --env-label=${var.env_label}
+              - --assistant-users=${var.assistant_users}
+      environments:
+        - environment_key: assistant
+          spec:
+            environment_version: "6"
+            dependencies:
+              - ../../dist/*.whl

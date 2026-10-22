@@ -1,0 +1,14 @@
+# Libraries preinstalled in Databricks serverless environment version 6 (released 3 Sep 2026),
+# from https://learn.microsoft.com/azure/databricks/release-notes/serverless/environment-version/six
+# Only the ones our code and models use. LightGBM isn't in the standard environment: the jobs add
+# lightgbm==4.6.0 (the version in environment 6's ML base environment).
+# Used as constraints by CI's runtime-parity tests, so the code is tested on what Databricks runs.
+cloudpickle==3.1.1
+lightgbm==4.6.0
+mlflow-skinny==3.12.0
+numpy==2.3.4
+pandas==2.3.3
+pyarrow==21.0.0
+PyYAML==6.0.3
+scikit-learn==1.7.2
+scipy==1.16.3

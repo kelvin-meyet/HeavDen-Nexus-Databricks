@@ -4,8 +4,16 @@ from types import SimpleNamespace
 import pytest
 from test_chat import LLMReply, ScriptedLLM, _client, call
 
-from heavden_api.chat.agent import ToolCall, accumulate_stream, agent_events, system_prompt
-from heavden_api.chat.guardrails import REFUSALS, LeakDetector, screen_question
+from heavden_api.chat.agent import (
+    ToolCall,
+    accumulate_stream,
+    agent_events,
+    plain_citations,
+    system_prompt,
+    text_of,
+)
+from heavden_api.chat.guardrails import REFUSALS, LeakDetector, plain_names, screen_question
+from heavden_api.chat.redteam import INTERNAL_CODE
 
 pytest.importorskip("faiss")
 
@@ -62,6 +70,7 @@ def test_leak_detector_flags_prompt_quotes_secrets_and_the_canary():
     assert detector.leaks("Here they are. SQL rules: one SELECT...")
     assert detector.leaks("Use this timestamp instead of now()")
     assert detector.leaks("key: sk-proj-abcdefghijklmnopqrstuvwxyz123")
+    assert detector.leaks("it is in AZURE_OPENAI_API_KEY") and detector.leaks("AZURE_OPENAI_KEY")
     assert not detector.leaks("SITE_A has 8 patients in the High band [1].")
 
 
@@ -74,6 +83,35 @@ def test_every_marker_appears_in_the_real_prompt():
     flat = re.sub(r"\s+", " ", prompt.lower())
     assert [m for m in PROMPT_MARKERS if m not in flat] == []
     assert LeakDetector("x").leaks(prompt)  # a verbatim dump is always caught
+
+
+# --- Codes a model writes anyway become names --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "written,shown",
+    [
+        # GPT-OSS on the dev Databricks assistant, 17 Oct, with its non-breaking hyphen
+        (
+            "who is in **the general ward at General Hospital (SITE_A\u2011GENERAL)**.",
+            "who is in **the general ward at General Hospital**.",
+        ),
+        # ... and on the app, 17 Oct
+        (
+            "The **general ward at General Hospital** (unit `SITE_A\u2011GENERAL`) recorded",
+            "The **general ward at General Hospital** recorded",
+        ),
+        ("Valley (`SITE_C`) has 1.", "Valley has 1."),
+        ("Valley (site id: SITE_C) has 1.", "Valley has 1."),
+        ("Most alerts were at SITE_B.", "Most alerts were at Northshore."),
+        ("- SITE_B-STEP_DOWN: 3", "- The step-down unit at Northshore: 3"),
+        ("**SITE_C-RESPIRATORY** had 2", "**The respiratory ward at Valley** had 2"),
+        ("P-1876 is on SITE_ABC.", "P-1876 is on SITE_ABC."),  # not a code: left alone
+    ],
+)
+def test_codes_in_an_answer_become_names(written, shown):
+    assert plain_names(written) == shown
+    assert not INTERNAL_CODE.search(shown)  # what the red-team checks
 
 
 class StreamingLLM:
@@ -108,7 +146,7 @@ def state(demo_snapshot):
     from heavden_api.deps import build_state
 
     return build_state(
-        Settings(snapshot_dir=demo_snapshot, openai_api_key=None),
+        Settings(snapshot_dir=demo_snapshot, llm_provider="openai", openai_api_key=None),
         embedder=retrieval.HashingEmbedder(),
     )
 
@@ -175,6 +213,60 @@ def test_openai_stream_chunks_are_reassembled():
     ]
     *texts, reply = list(accumulate_stream([chunk("Hel"), chunk("lo")]))
     assert texts == ["Hel", "lo"] and reply.content == "Hello" and reply.tool_calls == []
+
+
+def test_reasoning_models_answer_text_is_kept_and_their_reasoning_dropped():
+    """GPT-OSS and Qwen on Databricks send content as parts: reasoning, then text (the shapes
+    captured from databricks-gpt-oss-120b on 16 Oct 2026)."""
+
+    def reasoning(text):
+        return [{"type": "reasoning", "summary": [{"type": "summary_text", "text": text}]}]
+
+    def chunk(content):
+        delta = SimpleNamespace(content=content, tool_calls=None)
+        return SimpleNamespace(choices=[SimpleNamespace(delta=delta)])
+
+    whole = reasoning("The user asks for a definition.") + [
+        {"type": "text", "text": "NEWS2 is an early warning score."}
+    ]
+    assert text_of(whole) == "NEWS2 is an early warning score."
+    assert text_of("plain") == "plain" and text_of(None) == ""
+    parts = SimpleNamespace(type="text", text="as objects")  # a client that parses the parts
+    assert text_of([SimpleNamespace(type="reasoning"), parts]) == "as objects"
+
+    stream = [chunk(""), chunk(""), chunk(reasoning("The")), chunk(reasoning(" user asks"))]
+    stream += [
+        chunk([{"type": "text", "text": "NEWS2 is"}]),
+        chunk([{"type": "text", "text": " a score."}]),
+    ]
+    *texts, reply = list(accumulate_stream(stream))
+    assert texts == ["NEWS2 is", " a score."] and reply.content == "NEWS2 is a score."
+    assert "user asks" not in reply.content  # the reasoning never reaches the reader
+
+
+@pytest.mark.parametrize(
+    "written, shown",
+    [  # forms GPT-OSS wrote in the quality test on 16 Oct 2026
+        ("Call at 5 or more【2†L1-L4】.", "Call at 5 or more [2]."),
+        ("1.5 % of messages**. 【4†L1-L4】", "1.5 % of messages**. [4]"),
+        ("88 % flagged【1†ref】, AUROC 0.79 【2】.", "88 % flagged [1], AUROC 0.79 [2]."),
+        ("See the runbook【ref:5】 and【3†ref 3】.", "See the runbook [5] and [3]."),
+        ("High risk now【query_gold result】.", "High risk now."),
+        ("Sources:\n【1†L1-L7】 protocol", "Sources:\n[1] protocol"),
+        ("Plain [2] stays; so does 【 a bracket never closed", None),
+    ],
+)
+def test_a_models_own_citation_marks_are_shown_as_ours(written, shown):
+    def chunk(content):
+        delta = SimpleNamespace(content=content, tool_calls=None)
+        return SimpleNamespace(choices=[SimpleNamespace(delta=delta)])
+
+    shown = written if shown is None else shown
+    assert plain_citations(written) == shown
+    for size in (1, 3, 7):  # the same text streamed in pieces, marks split across them
+        pieces = [written[i : i + size] for i in range(0, len(written), size)]
+        *texts, reply = list(accumulate_stream([chunk(p) for p in pieces]))
+        assert "".join(texts) == shown and reply.content == shown
 
 
 # --- The endpoints -----------------------------------------------------------------------------

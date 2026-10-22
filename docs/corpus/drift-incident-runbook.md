@@ -3,7 +3,7 @@ doc_id: HD-OPS-002
 title: Drift Incident Runbook
 version: "1.0"
 status: current
-effective_date: 2026-11-01
+effective_date: 2026-09-20
 owner: HeavDen ML Platform Team
 audience: ML platform on-call, data engineering, clinical safety officer
 ---
@@ -18,40 +18,44 @@ The deterioration risk model was trained on past data. When the data or the worl
 
 ## 2. How an alert is raised
 
-1. The `drift_check` task runs at the end of every scoring job in production.
-2. It compares recent data with the champion model's training data, and recent predictions with outcomes once their 6-hour label window has closed.
-3. If a threshold below is breached, Databricks sends an **email alert** with a summary and a link to the *Model and Drift* dashboard, and calls GitHub to start the `retrain.yml` workflow.
-4. `retrain.yml` **waits for a human approval** in the GitHub `retrain-approval` environment. Nothing is retrained automatically.
+1. The `drift_check` job runs in production after each new batch of data has been scored.
+2. It compares the latest day of data and predictions with the data the champion was trained and calibrated on, and the latest two days of predictions with their outcomes once known (about 12 hours later: the 6-hour window, then 6 hours until escalations are recorded). It checks all sites together and each site on its own.
+3. If any signal reaches the **act** level below, the workflow that ran the check opens a **retrain request** on GitHub (the `retrain.yml` workflow), which lists the breaches. A **warn** is only recorded in the monitoring tables. A request may be held for days. While it is open, later checks that show the same kind of drift open no second one; a check that shows a different kind (for example outcomes changing while a sensor-fault request is still undecided) replaces it with a new request carrying the newer evidence, and the older one is cancelled.
+4. `retrain.yml` **waits for a human approval** in the GitHub `retrain-approval` environment, and GitHub **emails** the approver. Nothing is retrained automatically, and rejecting the request is a normal outcome (see section 5).
 
 ## 3. Thresholds
 
 | Signal | Warn | Act |
 |---|---|---|
 | PSI on a key feature (any slice, at least 500 samples) | > 0.10 | > 0.25 |
-| Jensen-Shannon distance on predictions | > 0.05 | > 0.10 |
+| Jensen-Shannon distance on predictions | > 0.08 | > 0.12 |
 | AUPRC drop against the champion's validation AUPRC | > 10% relative | > 20% relative |
 | Brier score (calibration) worsening | > 10% | > 20% |
-| Quarantine or null rate in silver vitals | > 2% | > 5% |
+| Share of readings quarantined in silver | > 2% | > 5% |
+| Change in a reading field's missing share since training | > 2 points | > 5 points |
 | Alert load against the budget of 2 alerts per nurse per shift | > 2.5 | > 3 |
 
 **Why PSI and not a KS test?** With thousands of readings a KS test flags tiny, harmless differences as "significant". PSI measures *how much* a distribution moved, and the minimum of 500 samples stops small slices from raising false alarms.
 
-**Why the alert load?** It needs no outcomes, so it is known immediately, while AUPRC and escalations flagged must wait 6 hours for labels.
+**Why the alert load?** It needs no outcomes, so it is known immediately, while AUPRC and escalations flagged must wait about 12 hours for labels.
+
+**Why a margin for chance on AUPRC and Brier?** Two days hold only about 20 escalations, so on normal days the AUPRC of a two-day window swings by a third either way. The check therefore uses the change it can be 95% sure of (a bootstrap over patient stays), and needs at least 10 escalations in the window; with fewer it reports "not enough data". The prediction thresholds were set so that normal days stay below warn (they reached 0.063 at one site).
 
 ## 4. Triage checklist
 
-1. Open the *Model and Drift* dashboard. Which signal fired: features, predictions, performance, or data quality?
-2. Is it **one site** or **all sites**? One site points to devices or local practice. All sites points to patients or protocol.
-3. Which **features** moved? Only SpO2? All respiratory features? None (only outcomes)?
-4. Check the pipeline event log and `_rescued_data` for schema problems.
-5. Check the document library for recent **field safety notices** and **protocol changes**.
-6. Decide using section 5, record the decision in `ml.ops_audit`, and approve or reject the retrain request on GitHub with a comment.
+1. Check the request's **data window**: it should be the latest day that was loaded. If it is an older day, the pipeline had not finished linking the new readings to patient stays when the check ran. A data run updates the pipeline twice for this reason, and scoring, training and the drift check stop with "Gold is behind" when the linked readings end before the readings themselves. Run the pipeline again before deciding.
+2. Open the *Model and Drift* dashboard. Which signal fired: features, predictions, performance, or data quality?
+3. Is it **one site** or **all sites**? One site points to devices or local practice. All sites points to patients or protocol.
+4. Which **features** moved? Only SpO2? All respiratory features? None (only outcomes)?
+5. Check the pipeline event log and `_rescued_data` for schema problems.
+6. Check the document library for recent **field safety notices** and **protocol changes**.
+7. Decide using section 5, and approve or reject the retrain request on GitHub **with a comment giving the reason**. The decision, the reviewer and the comment are recorded in `ml.ops_audit`: an approved retrain, promotion or rollback at once, a rejection at the next production run (a rejected request is given no access to production, so it cannot record itself).
 
 ## 5. Scenarios and correct responses
 
 ### 5.1 SpO2 sensor bias (data drift, gradual)
-- **Symptoms:** PSI on `spo2_*` features rises at **one site** (Site B), growing day by day. Other vitals unchanged. Alert load at that site rises. Calibration worsens there.
-- **Cause:** a device fault (see device manual, FSN-2026-11): SpO2 reads up to 3 points low.
+- **Symptoms:** PSI on `spo2_*` features rises at **one site** (Site B), growing day by day. Other vitals unchanged. Prediction distribution and alert load at that site rise. Performance on outcomes changes little, because the patients haven't changed.
+- **Cause:** a device fault (see device manual, FSN-2026-10): SpO2 reads up to 3 points low.
 - **Correct response:** **do not retrain.** The patients haven't changed; the measurements are wrong. Retraining would teach the model to accept the faulty readings. Ask Clinical Engineering to fix the devices, add a temporary note on the ward board, and **reject** the retrain request with a reference to the notice. Consider excluding affected readings from future training data.
 
 ### 5.2 Respiratory outbreak (abrupt population drift)
@@ -60,9 +64,9 @@ The deterioration risk model was trained on past data. When the data or the worl
 - **Correct response:** wait for labelled outcomes (at least 6 hours, ideally a day). If AUPRC and calibration on the new patients hold up, **no retrain** is needed: the model is seeing sicker patients and correctly scoring them higher. If performance drops, **approve a retrain** that includes the new cohort, and check the slice gates.
 
 ### 5.3 Protocol change (concept drift)
-- **Symptoms:** feature distributions look **normal**, but more patients are escalated than predicted. AUPRC may hold while **calibration** gets worse (predicted risks too low). Starts on the same day at all sites.
-- **Cause:** the escalation protocol changed (HD-CLIN-001 v2.0, effective 2026-11-09). The same vital signs now lead to escalation more often.
-- **Correct response:** this is the one case where **retraining is required**: the meaning of the label has changed. Approve the retrain once enough post-change outcomes exist (at least 48 hours), and train only on data from after the change, or weight it heavily. Check the alert budget with the wards, because escalations will rise.
+- **Symptoms:** feature distributions look **normal**, but more patients are escalated than predicted. **AUPRC drops and calibration gets worse** (predicted risks too low), once the outcomes are known, about 12 hours after the change. Starts on the same day at all sites.
+- **Cause:** the escalation protocol changed (HD-CLIN-001 v2.0, effective 2026-10-06). The same vital signs now lead to escalation more often.
+- **Correct response:** this is the one case where **retraining is required**: the meaning of the label has changed. Approve the retrain only once enough post-change outcomes exist: **about a week**. With one or two days there is nothing to validate a new model on. Retraining uses the whole history, with the most recent days kept for calibration, the alert threshold and the comparison with the current champion; a model trained only on post-change data was usually worse than one trained on everything. If the new model does not pass the gates, the champion stays and the retrain is repeated when more outcomes exist. Check the alert budget with the wards, because escalations will rise.
 
 ### 5.4 Firmware schema change (schema drift)
 - **Symptoms:** a new column `etco2` appears in `_rescued_data`; `motion` becomes null; expectations on `motion` fail or rows are dropped; the quarantine rate rises.
@@ -71,7 +75,11 @@ The deterioration risk model was trained on past data. When the data or the worl
 
 ## 6. Promotion after a retrain
 
-A retrained model is registered as `@challenger`. It is promoted only if it beats the current `@champion` on a recent labelled window, its calibration is acceptable, no large slice gets more than 5% worse, and it still beats NEWS2. Promotion needs a second approval in the GitHub `production-approval` environment. Rollback is the `rollback.yml` workflow, which points `@champion` back at the previous version.
+A retrained model is registered as a new version. It becomes `@challenger` only if it beats NEWS2 on validation and beats the current `@champion` on the most recent days, with both models held to the same alert budget. A few days hold too few escalations to trust a single comparison, so both are scored on the same resamples of patient stays, and the new model must flag at least as many escalations in at least 75% of them, have the higher AUROC in at least 75%, not be clearly worse on AUPRC, and have a Brier score no more than 10% worse. AUPRC alone is not the gate: after a protocol change it barely moves, because it is set by the highest-ranked patients, while the retrained model's gain is in the escalations further down the ranking.
+
+**Promotion.** A model that passes opens a promotion request (the `promote.yml` workflow), which needs a second approval, in the GitHub `production-approval` environment. Approving points `@champion` at the new version. From the next scoring run, new patient-hours are scored by it, at its own alert threshold; hours already scored keep the version that scored them. The promotion is refused for a version that did not pass its gates, or that was compared with a champion other than the one in use.
+
+**Rollback.** The `rollback.yml` workflow, started by hand with a reason and approved in the same environment, points `@champion` back at the previous champion, which is kept as `@previous_champion`. Running it again undoes the rollback.
 
 ## 7. Communication
 

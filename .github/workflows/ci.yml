@@ -9,17 +9,30 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      ingest_sql:
+        description: "Staging: also copy the Azure SQL source into Bronze (wakes the database)"
+        type: boolean
+        default: false
+      assistant:
+        description: "Staging: deploy, red-team and test the Databricks assistant even if it didn't change"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+# A newer push cancels an older PR run, but never a deploy on main halfway through.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Every job in every workflow runs on a pinned image, ubuntu-24.04, not ubuntu-latest: on
+# 22 Oct 2026 ubuntu-latest became ubuntu-26.04 (default Java 25) without notice and broke the
+# Spark tests. Move to a new image on purpose, after a run on it, like any dependency.
 jobs:
   lint-and-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -44,11 +57,86 @@ jobs:
       - name: Check notebooks are committed without outputs
         run: uv run nbstripout --verify notebooks/**/*.ipynb
 
+      # Spark runs on Java 17, as on Databricks serverless, named rather than taken from the image's
+      # default: Java 25 (ubuntu-26.04's default) can't start Spark's Hadoop libraries
+      # ("getSubject is not supported"). Both images ship Java 17 under JAVA_HOME_17_X64.
       - name: Unit tests
-        run: uv run pytest -q
+        run: |
+          test -x "$JAVA_HOME_17_X64/bin/java" || { echo "::error::Java 17 is missing from the runner image"; exit 1; }
+          HEAVDEN_JAVA="$JAVA_HOME_17_X64/bin/java" uv run pytest -q
+
+  # The ML code against the library versions Databricks serverless environment 6 provides (the
+  # training and scoring jobs run there), not just the newer ones in uv.lock: a model trained on
+  # Databricks must also be built, scored and explained by the versions installed there.
+  ml-on-databricks-libraries:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install the package with serverless environment 6 versions
+        run: |
+          uv venv
+          # full MLflow at the runtime's version, for the local tracking store the training tests use
+          uv pip install -e . pytest mlflow==3.12.0 -c databricks/requirements-serverless-env6.txt
+
+      - name: ML tests
+        run: >
+          .venv/bin/python -m pytest -q -W error::DeprecationWarning
+          tests/test_features.py tests/test_train.py tests/test_evaluate_explain.py
+          tests/test_scoring_gold.py tests/test_drift_metrics.py tests/test_package.py
+          tests/test_training.py tests/test_batch_scoring.py tests/test_model_ops.py
+          tests/test_profiling.py tests/test_assistant_publish.py
+
+  # The website's API on its image's libraries, installed the way the image installs them: the
+  # `serving` group pins serverless environment 6's versions, so the model runs on the libraries
+  # it was trained with, and the API with an older pandas, scikit-learn and Starlette than uv.lock's.
+  api-on-serving-libraries:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: API tests
+        run: >
+          uv run --locked --no-dev --group backend --group rag --group serving
+          --with pytest==9.1.1 --with httpx==0.28.1
+          pytest -q tests/test_backend.py tests/test_live_mode.py tests/test_snapshot_store.py
+          tests/test_website_export.py tests/test_table_budget.py tests/test_chat.py
+          tests/test_guardrails.py tests/test_memory.py tests/test_llm_provider.py
+          tests/test_scoring_gold.py tests/test_rag.py tests/test_databricks_tools.py
+          tests/test_dockerfile.py tests/test_warehouse_allowance.py
+
+  # The website's image, built as a release builds it (release.yml pushes and deploys it, after a
+  # smoke test on prod's snapshot): a broken Dockerfile or lock shows here, not at the release.
+  api-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -f backend/Dockerfile -t heavden-api:ci .
+
+      - name: It runs the model on Databricks' libraries and has its document index
+        run: >
+          docker run --rm --entrypoint python heavden-api:ci -c
+          "import heavden_api.app, sklearn, lightgbm, os;
+          assert (sklearn.__version__, lightgbm.__version__) == ('1.7.2', '4.6.0');
+          assert os.path.exists('/app/rag/vectors.npy'); print('ok', sklearn.__version__)"
 
   web:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
       run:
@@ -70,3 +158,232 @@ jobs:
 
       - name: Production build
         run: npm run build
+
+  # Checks every target resolves (variables, paths, permissions) as the dev service principal,
+  # which can't read or write any data. Dev itself is deployed by hand.
+  bundle-validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DATABRICKS_AUTH_TYPE: azure-cli
+    defaults:
+      run:
+        working-directory: databricks
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - uses: databricks/setup-cli@v1.17.0
+        with:
+          version: 1.17.0
+
+      - name: Validate every target
+        run: |
+          for target in dev staging prod; do
+            databricks bundle validate --strict -t "$target"
+          done
+
+  # Every change merged to main is deployed to staging as the staging service principal, then the
+  # pipeline rebuilds Bronze -> Silver -> Gold on the fixed seeded data (about $0.10-0.35 a run).
+  # Azure SQL is read only on the first run or on request: each read can wake the free database.
+  staging:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [lint-and-test, ml-on-databricks-libraries, bundle-validate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90 # the drift check waits for the monitor's refresh (~15-25 min)
+    environment: staging
+    concurrency:
+      group: staging
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DATABRICKS_AUTH_TYPE: azure-cli
+    defaults:
+      run:
+        working-directory: databricks
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - uses: databricks/setup-cli@v1.17.0
+        with:
+          version: 1.17.0
+
+      - uses: astral-sh/setup-uv@v6 # bundle deploy builds the wheel with uv
+
+      - name: Deploy
+        run: databricks bundle deploy -t staging
+
+      - name: Copy Azure SQL into Bronze (first run, or on request)
+        env:
+          INGEST_SQL: ${{ inputs.ingest_sql }}
+        run: |
+          exists=$(databricks tables exists heavden_staging.bronze.sql_watermarks | jq -r .table_exists)
+          if [ "$exists" != "true" ] || [ "$INGEST_SQL" = "true" ]; then
+            databricks bundle run sql_ingest -t staging
+          else
+            echo "Bronze already holds the source tables; skipping (re-run with ingest_sql to refresh)."
+          fi
+
+      - name: Run the pipeline
+        run: databricks bundle run medallion -t staging
+
+      # The assistant's documents (ml.corpus_chunks) and its patient explanation
+      # (ml.explain_patient_risk, which reads gold.encounters, so after the pipeline)
+      - name: Publish what the assistant reads
+        run: databricks bundle run assistant_publish -t staging
+
+      # A smoke test: 2 days of data are too few for a good model, but every step runs
+      # (load Gold, train, calibrate, MLflow, Unity Catalog registry) on the Databricks runtime.
+      - name: Train and register the model
+        run: databricks bundle run train -t staging
+
+      - name: Score every patient-hour with the newest model
+        run: databricks bundle run score -t staging
+
+      # The sign-in at the start gives tokens that last about an hour, and the run can be longer
+      # with the monitor's refresh: sign in again so the drift step can follow its job to the end.
+      - name: Sign in to Azure again before the drift check
+        uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Check for drift against the newest model's data
+        run: databricks bundle run drift_check -t staging
+
+      # A promotion or a rollback is an alias moved in the registry. This sets, reads and removes
+      # a throwaway alias, so the first real one in prod is not also the first try.
+      - name: Check that model aliases can be moved
+        run: databricks bundle run model_ops -t staging --params action=selftest
+
+  # The Databricks assistant (Plan.md §11.2 steps 5-6), after the staging run has published what it
+  # reads: deployed to heavden-assistant-staging and red-teamed on its endpoint (whichever model
+  # its LLM_ENDPOINT names); then `assistant-quality`. Only when its code, documents or settings
+  # changed (or on request): a deploy takes ~20-30 min.
+  assistant-staging:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [staging]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    outputs:
+      assistant: ${{ steps.changed.outputs.assistant }}
+    environment: staging
+    concurrency:
+      group: staging-assistant
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DATABRICKS_AUTH_TYPE: azure-cli
+      DATABRICKS_HOST: https://adb-7405604448133690.10.azuredatabricks.net
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # the merge and the main it was merged into
+
+      # the same files as a release to prod (release.yml)
+      - name: Did the Databricks assistant change?
+        id: changed
+        env:
+          ON_REQUEST: ${{ inputs.assistant }}
+        run: |
+          if [ "$ON_REQUEST" = "true" ] || git diff --name-only HEAD^1 HEAD | python3 .github/scripts/assistant_changed.py; then
+            echo "assistant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "assistant=false" >> "$GITHUB_OUTPUT"
+            echo "No change to the Databricks assistant: nothing to deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: azure/login@v3.1.0
+        if: steps.changed.outputs.assistant == 'true'
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - uses: databricks/setup-cli@v1.17.0
+        if: steps.changed.outputs.assistant == 'true'
+        with:
+          version: 1.17.0
+
+      - uses: astral-sh/setup-uv@v6
+        if: steps.changed.outputs.assistant == 'true'
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      # Prints ASSISTANT_DEPLOY_RESULT: the version, the model, minutes to serve, one answer
+      - name: Deploy the Databricks assistant
+        if: steps.changed.outputs.assistant == 'true'
+        working-directory: databricks
+        run: databricks bundle run assistant_deploy -t staging
+
+      # The 19 prompts of heavden_api/chat/redteam.py, sent to the endpoint; fails on any problem
+      - name: Red-team the Databricks assistant
+        if: steps.changed.outputs.assistant == 'true'
+        run: uv run --locked python backend/scripts/redteam_chat.py --endpoint heavden-assistant-staging
+
+  # The quality test of every model in the `databricks:` list of chat/models.yaml, at the settings
+  # it ships with (tests/test_ci_workflow.py keeps this list in step), one job each: a fresh
+  # sign-in per model and ~18 min each, inside the hour a sign-in's tokens last. In one job the
+  # three took ~53 min and the third lost its sign-in (19 Oct). ~$1.50 of warehouse time in all.
+  # Only the model staging serves can fail the run; the others are scored and a failure there
+  # is a warning (a switch of model changes assistant_llm_endpoint, which gates the new one).
+  assistant-quality:
+    name: assistant-quality (${{ matrix.model }}${{ matrix.served && ', served' || '' }})
+    needs: [assistant-staging]
+    if: needs.assistant-staging.outputs.assistant == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: staging
+    strategy:
+      fail-fast: false # every model gets its scorecard, even when one fails
+      matrix:
+        model: [databricks-gpt-oss-120b, heavden-gpt-5-mini, heavden-gpt-5-5]
+        include:
+          - model: heavden-gpt-5-mini # = assistant_llm_endpoint in databricks/databricks.yml
+            served: true
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DATABRICKS_AUTH_TYPE: azure-cli
+      DATABRICKS_HOST: https://adb-7405604448133690.10.azuredatabricks.net
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Quality test of ${{ matrix.model }}
+        run: >
+          uv run --locked --group agent --group rag --group backend
+          python backend/scripts/assistant_quality.py --targets databricks
+          --models ${{ matrix.model }}@shipped ${{ matrix.served && '--gate' || '' }}

@@ -6,6 +6,8 @@ export type SiteId = "SITE_A" | "SITE_B" | "SITE_C";
 export interface Health {
   status: string;
   mode: "demo" | "live";
+  // live mode: false once the day's warehouse allowance is used up (pages show the snapshot)
+  live_data?: boolean;
   synthetic: boolean;
   as_of: string;
   data_start: string;

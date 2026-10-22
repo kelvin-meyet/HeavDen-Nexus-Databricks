@@ -1,0 +1,550 @@
+"""The drift check: compare the latest data with what the champion was trained on (Plan.md §10).
+
+Run after each load of new data (a drift episode), it measures five kinds of signal, all sites
+together and per site, each with a warn and an act level:
+
+* **inputs**: PSI of key features, latest day vs the champion's own data (its training and
+  validation blocks: what it was fitted and calibrated on);
+* **predictions**: Jensen-Shannon distance of the risk scores, same comparison (both scored
+  by the model being judged, not taken from the log, which may hold older versions' scores);
+* **alert load**: alerts per nurse per shift in the latest day (known at once, no labels);
+* **performance**: AUPRC and Brier score of the model on the latest labelled hours vs its own
+  validation scores. Labels arrive ~12 h late, so this window ends earlier;
+* **data quality**: share of readings quarantined, and how far each field's missing share has
+  moved since training (a firmware update that drops or adds a field).
+
+The champion's own data leaves out the known data faults in `training_exclusions.yaml`, even
+those diagnosed after it was trained: compared with a fault, a normal day would read as drift
+that no retrain can clear.
+
+It also refreshes the monitor (Lakehouse Monitoring, `heavden.monitoring.profiling`), which keeps
+the history, and records the monitor's numbers next to its own as shadow rows (level "shadow")
+that never count in the status. Where both measured the same thing, the two must agree
+(`cross_check`): a disagreement is a warning that the monitor's copy of the prediction log went
+wrong. A monitor that fails or lags is reported in the result (`monitor`) without stopping the
+check.
+
+The check measures and reports; it doesn't decide. A sensor fault (inputs drift at one site)
+needs the sensors fixed, not a new model; a change in outcomes (performance drops while the
+inputs stay put) is what retraining is for. A person reads the report and chooses (§10.4).
+
+Thresholds start from Plan.md §10.3 and were checked offline (12 Oct) on a rehearsal: prod's
+baseline followed by a sensor-bias and a protocol-change episode (`generator.episode`, seeds
+3001 and 3002; prod's live episodes use other seeds, so they test these thresholds rather than
+repeat the rehearsal), scored with the Phase 0 champion and checked every 12 hours: on normal
+days nothing reaches act (at most a warn, Site B's SpO2 PSI up to 0.15); the sensor bias
+reaches act on Site B's SpO2 PSI (1.2), prediction JS and alert load (3.3), with performance
+unchanged; the protocol change reaches act on AUPRC (-44%) and Brier (+36%) while the inputs
+stay stable. Two changes from §10.3: prediction JS
+0.08 / 0.12 (normal days reached 0.063 per site), and the performance signals use the
+bootstrap bound described in `performance`.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+
+import numpy as np
+import pandas as pd
+from sklearn.metrics import average_precision_score, brier_score_loss
+
+from heavden.ml import evaluate
+from heavden.ml.features import VITALS
+from heavden.monitoring import drift_metrics
+
+FEATURES = (*(f"{v}_mean_1h" for v in VITALS), "news2_total", "readings_1h")
+ALL_SITES = "all"
+WINDOW = pd.Timedelta(hours=24)  # a whole day, so the time of day doesn't look like drift
+LABEL_WINDOW = pd.Timedelta(hours=48)  # escalations are rare: ~10 a day in prod
+MIN_ESCALATIONS = 10  # in the labelled window, for AUPRC and Brier
+
+
+@dataclass(frozen=True)
+class Threshold:
+    warn: float
+    act: float
+
+    def level(self, value: float) -> str:
+        if np.isnan(value):
+            return "not enough data"
+        return "act" if value >= self.act else "warn" if value >= self.warn else "stable"
+
+
+THRESHOLDS = {
+    "feature_psi": Threshold(drift_metrics.PSI_WARN, drift_metrics.PSI_ACT),
+    "prediction_js": Threshold(0.08, 0.12),
+    "alerts_per_nurse_shift": Threshold(2.5, 3.0),  # the budget is 2
+    "auprc_drop": Threshold(0.10, 0.20),  # relative to validation
+    "brier_rise": Threshold(0.10, 0.20),  # relative to validation
+    "quarantine_rate": Threshold(0.02, 0.05),
+    "missing_rate_change": Threshold(0.02, 0.05),  # absolute change in a field's missing share
+    # relative; never act: a disagreement means the monitor's copy went wrong, not the ward
+    "monitor_difference": Threshold(0.01, np.inf),
+}
+
+
+def _row(signal, value, n, feature=None, site=ALL_SITES, reference=np.nan, observed=None):
+    """One signal. `value` is what the level is judged on; `observed` the measured quantity
+    when they differ (e.g. AUPRC itself, for an AUPRC drop)."""
+    return {
+        "signal": signal,
+        "feature": feature,
+        "site_id": site,
+        "value": float(value),
+        "observed": float(value if observed is None else observed),
+        "reference": float(reference),
+        "n": int(n),
+        "level": THRESHOLDS[signal].level(value),
+    }
+
+
+def _slices(df: pd.DataFrame):
+    yield ALL_SITES, df
+    yield from df.groupby("site_id")
+
+
+def _same_site(baseline: pd.DataFrame, site: str) -> pd.DataFrame:
+    return baseline if site == ALL_SITES else baseline[baseline["site_id"] == site]
+
+
+def input_drift(baseline: pd.DataFrame, current: pd.DataFrame) -> list[dict]:
+    """PSI per feature and site, current window vs the champion's data."""
+    rows = []
+    for site, now in _slices(current):
+        then = _same_site(baseline, site)
+        for f in FEATURES:
+            value = drift_metrics.psi(then[f].to_numpy(), now[f].to_numpy())
+            rows.append(_row("feature_psi", value, now[f].notna().sum(), f, site))
+    return rows
+
+
+def prediction_drift(baseline: pd.DataFrame, current: pd.DataFrame) -> list[dict]:
+    """JS distance of the risk scores per site; both frames need `site_id` and `risk`."""
+    rows = []
+    for site, now in _slices(current):
+        then = _same_site(baseline, site)
+        value = drift_metrics.js_distance(then["risk"].to_numpy(), now["risk"].to_numpy())
+        rows.append(_row("prediction_js", value, len(now), site=site))
+    return rows
+
+
+def alert_load(
+    log: pd.DataFrame, start: pd.Timestamp, budget: evaluate.AlertBudget | None = None
+) -> list[dict]:
+    """Alerts per nurse per shift from the prediction log, for hours from `start` on.
+
+    Counted as on the ward: a stay entering High (each hour's stored band, whichever model
+    scored it), 6 h re-alert suppression. Earlier hours are used too, so a stay already High
+    before the window doesn't count as entering it."""
+    budget = budget or evaluate.AlertBudget()
+    onset = evaluate.alert_onsets(log, log["risk_band"].eq("High").to_numpy())
+    window = log.assign(alert=onset)[log["prediction_ts"] >= start]
+    rows = []
+    for site, part in _slices(window):
+        value = np.nan
+        if len(part) >= drift_metrics.MIN_SAMPLES:
+            value = budget.per_nurse_shift(part["alert"].sum(), len(part))
+        rows.append(_row("alerts_per_nurse_shift", value, len(part), site=site))
+    return rows
+
+
+def bootstrap_scores(labelled: pd.DataFrame, n_boot: int, seed: int) -> pd.DataFrame:
+    """AUPRC and Brier on resamples of whole stays (a stay's hours move together)."""
+    y, risk = labelled["label"].to_numpy(), labelled["risk"].to_numpy()
+    codes, stays = pd.factorize(labelled["encounter_id"])
+    order = np.argsort(codes, kind="stable")
+    rows_of = np.split(order, np.flatnonzero(np.diff(codes[order])) + 1)
+    rng = np.random.default_rng(seed)
+    out = []
+    for _ in range(n_boot):
+        idx = np.concatenate([rows_of[i] for i in rng.integers(0, len(stays), len(stays))])
+        yb, rb = y[idx], risk[idx]
+        if yb.min() < yb.max():
+            out.append((average_precision_score(yb, rb), brier_score_loss(yb, rb)))
+    return pd.DataFrame(out, columns=["auprc", "brier"])
+
+
+def performance(
+    labelled: pd.DataFrame, reference: dict[str, float], n_boot: int = 200, seed: int = 0
+) -> list[dict]:
+    """AUPRC drop and Brier rise on labelled hours vs the champion's validation, both relative.
+
+    Two days hold only ~20 escalations, so a window's AUPRC swings by a third on normal days
+    (measured offline). The levels therefore use the change we can be 95% sure of: the drop
+    from the top of AUPRC's bootstrap interval, the rise from the bottom of Brier's (resampling
+    whole stays). `labelled` holds the logged `risk` and the final `label`; `reference` the
+    validation `auprc` and `brier`."""
+    y, risk = labelled["label"].to_numpy(), labelled["risk"].to_numpy()
+    escalations = len(evaluate.warning_times(labelled, risk, 1.0))  # runs of positive hours
+    auprc = brier = drop = rise = np.nan
+    if escalations >= MIN_ESCALATIONS:
+        auprc, brier = average_precision_score(y, risk), brier_score_loss(y, risk)
+        boot = bootstrap_scores(labelled, n_boot, seed)
+        drop = max(1 - boot["auprc"].quantile(0.95) / reference["auprc"], 0.0)
+        rise = max(boot["brier"].quantile(0.05) / reference["brier"] - 1, 0.0)
+    return [
+        _row("auprc_drop", drop, escalations, reference=reference["auprc"], observed=auprc),
+        _row("brier_rise", rise, escalations, reference=reference["brier"], observed=brier),
+    ]
+
+
+@dataclass(frozen=True)
+class ReadingQuality:
+    """Device readings in the window, and each field's missing share then and now."""
+
+    readings: int
+    quarantined: int
+    missing_now: pd.Series  # by field
+    missing_in_training: pd.Series  # by field, over the champion's training and validation
+
+
+def data_quality(q: ReadingQuality) -> list[dict]:
+    """Share of readings quarantined, and how far each field's missing share has moved (a
+    firmware update that drops a field, or starts sending a new one, moves it to ~100%)."""
+    total = q.readings + q.quarantined
+    enough = total >= drift_metrics.MIN_SAMPLES
+    rows = [_row("quarantine_rate", q.quarantined / total if enough else np.nan, total)]
+    for field, before in q.missing_in_training.items():
+        now = q.missing_now[field] if enough else np.nan
+        change = abs(now - before)
+        rows.append(
+            _row("missing_rate_change", change, q.readings, field, reference=before, observed=now)
+        )
+    return rows
+
+
+def run_check(
+    model,
+    features: pd.DataFrame,
+    log: pd.DataFrame,
+    training_set: pd.DataFrame,
+    baseline: pd.DataFrame,
+    reference: dict[str, float],
+    quality: ReadingQuality,
+    window: pd.Timedelta = WINDOW,
+    label_window: pd.Timedelta = LABEL_WINDOW,
+) -> pd.DataFrame:
+    """Every signal, one row each, for the latest `window` of patient-hours.
+
+    The check judges one model, `model` (its validation scores are `reference`: `auprc` and
+    `brier`), and scores everything it compares itself: its reference rows (`baseline`: the
+    model's training and validation rows), the latest window of `features`, and the latest
+    `label_window` of the labelled `training_set` that comes after `baseline`. The prediction
+    log can hold older versions' scores (each hour is scored once), which would compare one
+    model's predictions with another's validation. Only the alert load comes from the log
+    (`gold.risk_scores`): it's what the nurses received."""
+
+    def scored(df: pd.DataFrame) -> pd.DataFrame:
+        return df.assign(risk=model.predict_proba(df)[:, 1] if len(df) else [])
+
+    start = features["prediction_ts"].max() - window + pd.Timedelta(hours=1)
+    current = scored(features[features["prediction_ts"] >= start])
+    reference_rows = scored(baseline)
+    # Performance is judged only on hours after the model's own data: on the hours it was fitted
+    # and calibrated on, it would be marking its own homework.
+    hours = training_set["prediction_ts"]
+    unseen = hours > max(hours.max() - label_window, baseline["prediction_ts"].max())
+    labelled = scored(training_set[unseen])
+    rows = (
+        input_drift(reference_rows, current)
+        + prediction_drift(reference_rows, current)
+        + alert_load(log, start)
+        + performance(labelled, reference)
+        + data_quality(quality)
+    )
+    return pd.DataFrame(rows)
+
+
+def summary(metrics: pd.DataFrame) -> dict:
+    """The check's overall level (its worst signal) and the breaches, act first."""
+    breaches = metrics[metrics["level"].isin(["warn", "act"])]
+    breaches = breaches.assign(rank=breaches["level"].map({"act": 0, "warn": 1}))
+    breaches = breaches.sort_values(["rank", "value"], ascending=[True, False])
+    n_act = int((breaches["level"] == "act").sum())
+    return {
+        "status": "act" if n_act else "warn" if len(breaches) else "stable",
+        "n_warn": len(breaches) - n_act,
+        "n_act": n_act,
+        "breaches": [describe(r) for r in breaches.itertuples()],
+    }
+
+
+# What each signal says about the hospital, in the words of the runbook's triage.
+KIND = {
+    "feature_psi": "inputs",
+    "prediction_js": "predictions",
+    "alerts_per_nurse_shift": "alert-load",
+    "auprc_drop": "performance",
+    "brier_rise": "performance",
+    "quarantine_rate": "data-quality",
+    "missing_rate_change": "data-quality",
+    "monitor_difference": "monitor",  # never act (a warn): kept so every signal has a kind
+}
+
+
+def act_kinds(metrics: pd.DataFrame) -> list[str]:
+    """What kind of drift the act-level signals show, and where: e.g. `["inputs@SITE_B",
+    "performance"]` (no site: all sites together).
+
+    Two checks with the same kinds show the same picture. The workflow that opens retrain
+    requests uses this to tell a problem that is still there (no second request while one is
+    held) from a different one (the open request is replaced, with the newer evidence)."""
+    acts = metrics[metrics["level"] == "act"]
+    kinds = {
+        KIND[signal] + ("" if site == ALL_SITES else f"@{site}")
+        for signal, site in zip(acts["signal"], acts["site_id"], strict=True)
+    }
+    return sorted(kinds)
+
+
+def shadow_line(metrics: pd.DataFrame) -> str:
+    """The monitor's numbers for all sites, on one line (recorded, not judged)."""
+    shadow = (metrics["level"] == "shadow") & (metrics["signal"] != "lm_status")
+    rows = metrics[shadow & (metrics["site_id"] == ALL_SITES)]
+    parts = [
+        f"{r.signal.removeprefix('lm_')}"
+        + (f" ({r.feature})" if isinstance(r.feature, str) else "")
+        + f" {r.value:.3f}"
+        for r in rows.itertuples()
+    ]
+    return "Monitor's numbers (not judged): " + (", ".join(parts) if parts else "none")
+
+
+# The monitor's prediction JS uses natural logs, the check's base 2 (`drift_metrics.js_distance`):
+# the same distance is sqrt(ln 2) times smaller. Measured 15 Oct on staging's five episodes:
+# all-sites 0.8326 x the check's on every day, and its alert load equal to the check's.
+NATURAL_LOG = float(np.sqrt(np.log(2)))
+
+
+def cross_check(metrics: pd.DataFrame, version: str) -> list[dict]:
+    """Does the monitor agree with the check where both measured the same thing? One
+    `monitor_difference` row per comparison: how far the monitor's number is from what it should
+    be, relative (a warn above 1%, never act). Compared where both have a number: the alert load
+    at every site (both read the prediction log), and the all-sites prediction JS on a day
+    scored by the version the check judges (the monitor judges each hour under the model that
+    scored it; the check scores the day itself, with the model in use)."""
+
+    def number(signal: str, site: str, feature: str | None = None) -> tuple[float, int]:
+        rows = metrics[(metrics["signal"] == signal) & (metrics["site_id"] == site)]
+        if feature is not None:
+            rows = rows[rows["feature"] == feature]
+        return (float(rows["value"].iloc[0]), int(rows["n"].iloc[0])) if len(rows) else (np.nan, 0)
+
+    alert_sites = metrics.loc[metrics["signal"] == "alerts_per_nurse_shift", "site_id"]
+    pairs = [("alerts_per_nurse_shift", site, None, 1.0) for site in alert_sites]
+    pairs.append(("prediction_js", ALL_SITES, f"v{version}", NATURAL_LOG))
+    rows = []
+    for signal, site, monitor_feature, scale in pairs:
+        (ours, n), (monitor, _) = (
+            number(signal, site),
+            number(f"lm_{signal}", site, monitor_feature),
+        )
+        if np.isnan(ours) or np.isnan(monitor):
+            continue
+        expected = ours * scale
+        difference = abs(monitor - expected) / max(abs(expected), 1e-9)
+        rows.append(
+            _row("monitor_difference", difference, n, signal, site, expected, observed=monitor)
+        )
+    return rows
+
+
+def agreement_line(agreement: pd.DataFrame) -> str:
+    """What the cross-check found, e.g. "yes, 5 of 5 numbers" or
+    "NO: alerts_per_nurse_shift at SITE_A 2.300 instead of 2.100"."""
+    if agreement.empty:
+        return "nothing to compare (the monitor has no numbers for this window)"
+    off = agreement[agreement["level"] == "warn"]
+    if off.empty:
+        return f"yes, {len(agreement)} of {len(agreement)} numbers"
+    return "NO: " + "; ".join(
+        f"{r.feature}{'' if r.site_id == ALL_SITES else f' at {r.site_id}'}"
+        f" {r.observed:.3f} instead of {r.reference:.3f}"
+        for r in off.itertuples()
+    )
+
+
+RESULT_MARKER = "DRIFT_CHECK_RESULT"
+
+
+def result_line(check: dict, result: dict) -> str:
+    """The check on one line, as JSON after `RESULT_MARKER`: what the workflow that started the
+    job reads from its output to decide whether to open a retrain request (act)."""
+    payload = {k: v if isinstance(v, int | list | type(None)) else str(v) for k, v in check.items()}
+    return f"{RESULT_MARKER} {json.dumps(payload | result)}"
+
+
+def describe(r) -> str:
+    """e.g. "feature_psi spo2_mean_1h at SITE_B: 1.199 (act)"."""
+    what = f"{r.signal} {r.feature}" if isinstance(r.feature, str) else r.signal
+    where = "" if r.site_id == ALL_SITES else f" at {r.site_id}"
+    return f"{what}{where}: {r.value:.3f} ({r.level})"
+
+
+# --- The Databricks job ----------------------------------------------------------------------
+
+# Explicit, so a check with no breaches or no episode still writes typed columns.
+CHECKS_SCHEMA = (
+    "check_id string, checked_at timestamp, episode string, model_version string, "
+    "window_start timestamp, window_end timestamp, labels_through timestamp, status string, "
+    "n_warn int, n_act int, breaches array<string>"
+)
+
+
+def validation_metrics(model_name: str, version: str) -> dict[str, float]:
+    """The registered version's validation scores, from its MLflow run."""
+    import mlflow
+
+    client = mlflow.MlflowClient()
+    run = client.get_run(client.get_model_version(model_name, version).run_id)
+    return {k: run.data.metrics[f"valid_{k}"] for k in ("auprc", "brier")}
+
+
+def reading_quality(
+    spark, catalog: str, training: tuple, window: tuple, exclusions: list[dict]
+) -> ReadingQuality:
+    """Missing shares per field in Silver's readings, over the champion's data and the window
+    (each a [start, end) pair), and the quarantined readings in the window.
+
+    The champion's data leaves out the readings behind the hours of known faults (`exclusions`)
+    at every site, because the shares are judged over all sites: a fault at one site costs the
+    others a little reference, never lets faulty readings in."""
+    from pyspark.sql import functions as F
+
+    from heavden.pipelines.silver import READING_FIELDS
+
+    fields = [f for f in READING_FIELDS if f not in ("device_id", "ts")]
+    readings = spark.read.table(f"{catalog}.silver.device_readings")
+    hour = pd.Timedelta(hours=1)
+
+    def during(start, end):
+        ts = F.col("ts")
+        return (ts >= F.lit(start.to_pydatetime())) & (ts < F.lit(end.to_pydatetime()))
+
+    def between(df, start, end):
+        return df.where(during(start, end))
+
+    def missing(df):
+        shares = [F.avg(F.col(f).isNull().cast("double")).alias(f) for f in fields]
+        row = df.agg(F.count("*").alias("n"), *shares).toPandas()
+        return int(row["n"].iloc[0]), row[fields].iloc[0].astype(float).fillna(0.0)
+
+    reference = between(readings, *training)
+    for e in exclusions:  # prediction hours [from, to] are built from readings in [from - 1 h, to)
+        first, last = (pd.Timestamp(e[k]).tz_convert("UTC") for k in ("from", "to"))
+        reference = reference.where(~during(first - hour, last))
+    quarantine = spark.read.table(f"{catalog}.silver.vitals_quarantine")
+    n_now, now = missing(between(readings, *window))
+    return ReadingQuality(
+        readings=n_now,
+        quarantined=between(quarantine, *window).count(),
+        missing_now=now,
+        missing_in_training=missing(reference)[1],
+    )
+
+
+def main(argv: list[str] | None = None) -> None:
+    import argparse
+    import uuid
+
+    import mlflow
+    from pyspark.sql import SparkSession
+    from pyspark.sql import functions as F
+
+    from heavden.ml import batch_scoring, train
+    from heavden.ml.training import load_exclusions, to_utc
+    from heavden.monitoring import profiling
+    from heavden.pipelines.gold import require_current
+
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--catalog", required=True, help="e.g. heavden_prod")
+    parser.add_argument(
+        "--model-alias", default="champion", help='an alias, "latest" or "champion_or_latest"'
+    )
+    parser.add_argument("--train-days", type=float, default=train.Split.train_days)
+    parser.add_argument("--valid-days", type=float, default=train.Split.valid_days)
+    parser.add_argument(  # may arrive empty: the job parameter defaults to ""
+        "--episode", nargs="?", default="", const="", help="the drift episode just loaded"
+    )
+    parser.add_argument(
+        "--assets-dir", required=True, help="workspace folder for the monitor's assets"
+    )
+    args = parser.parse_args(argv)
+
+    spark = SparkSession.builder.getOrCreate()
+    spark.conf.set("spark.sql.session.timeZone", "UTC")
+    c = args.catalog
+    # A check on a Gold that is missing the latest readings would report on the day before.
+    require_current(
+        spark.read.table(f"{c}.silver.device_readings"), spark.read.table(f"{c}.silver.vitals")
+    )
+    monitor = profiling.MonitorSpec(c, args.assets_dir)
+
+    def read(table: str, times: tuple[str, ...]) -> pd.DataFrame:
+        return to_utc(spark.read.table(f"{c}.{table}").toPandas(), times)
+
+    features = read("gold.patient_hour_features", ("prediction_ts",))
+    training_set = read("gold.training_set", ("prediction_ts", "label_known_at"))
+    log = read("gold.risk_scores", ("prediction_ts",))
+
+    mlflow.set_registry_uri("databricks-uc")
+    name = f"{c}.ml.deterioration_risk"
+    model, _, version = batch_scoring.load_registered_model(name, args.model_alias)
+    # The model's own training and validation blocks. Training alone is 18 hours in staging,
+    # too short a reference: normal days then read as drift.
+    split = train.Split(args.train_days, args.valid_days)
+    exclusions = load_exclusions(c)
+    baseline = pd.concat(batch_scoring.model_blocks(training_set, name, version, split, exclusions))
+    print(
+        f"Reference: {len(baseline):,} hours of v{version}'s training and validation days; "
+        f"known data faults left out: {'; '.join(e['reason'] for e in exclusions) or 'none'}"
+    )
+
+    hour = pd.Timedelta(hours=1)
+    end = features["prediction_ts"].max() + hour
+    start = end - WINDOW
+    shadow, monitor_status = profiling.shadow_rows(spark, monitor, end)
+    print(f"Monitor: {monitor_status}")
+    quality = reading_quality(
+        spark,
+        c,
+        training=(baseline["prediction_ts"].min() - hour, baseline["prediction_ts"].max()),
+        window=(start - hour, end - hour),
+        exclusions=exclusions,
+    )
+    reference = validation_metrics(name, version)
+    metrics = run_check(model, features, log, training_set, baseline, reference, quality)
+    metrics = pd.concat([metrics, pd.DataFrame(shadow)], ignore_index=True)
+    agreement = pd.DataFrame(cross_check(metrics, version))
+    metrics = pd.concat([metrics, agreement], ignore_index=True)
+    result = summary(metrics)  # shadow rows are neither warn nor act; a disagreement warns
+    agrees = agreement_line(agreement)
+    print(f"Monitor agrees with the check: {agrees}")
+
+    check = {
+        "check_id": str(uuid.uuid4()),
+        "checked_at": pd.Timestamp.now(tz="UTC"),
+        "episode": args.episode or None,
+        "model_version": version,
+        "window_start": start,
+        "window_end": end,
+        "labels_through": training_set["prediction_ts"].max(),
+    }
+    rows = metrics.assign(**check)[[*check, *metrics.columns]]
+    rows = batch_scoring.to_spark(spark, rows)
+    rows = rows.withColumn("episode", F.col("episode").cast("string"))  # NULL without episode
+    rows.write.mode("append").saveAsTable(f"{c}.monitoring.drift_metrics")
+    summary_row = spark.createDataFrame(pd.DataFrame([check | result]), CHECKS_SCHEMA)
+    summary_row.write.mode("append").saveAsTable(f"{c}.monitoring.drift_checks")
+
+    print(
+        f"{name} v{version} ({args.model_alias}), window {start:%d %b %H:%M} to {end:%d %b %H:%M},"
+        f" labels through {check['labels_through']:%d %b %H:%M}: {result['status'].upper()}"
+        f" ({result['n_act']} act, {result['n_warn']} warn)"
+    )
+    for line in result["breaches"]:
+        print(" ", line)
+    print(shadow_line(metrics))
+    extra = {"act_kinds": act_kinds(metrics), "monitor": monitor_status, "monitor_agrees": agrees}
+    print(result_line(check | {"catalog": c}, result | extra))

@@ -6,7 +6,7 @@ import pytest
 
 from heavden.agent import retrieval
 from heavden_api.app import create_app
-from heavden_api.config import Settings
+from heavden_api.config import ORIGIN_HEADER, Settings
 from heavden_api.snapshot import Snapshot
 
 pytest.importorskip("faiss")
@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture(scope="module")
 def client(demo_snapshot):
-    settings = Settings(snapshot_dir=demo_snapshot, openai_api_key=None)
+    settings = Settings(snapshot_dir=demo_snapshot, llm_provider="openai", openai_api_key=None)
     app = create_app(settings, embedder=retrieval.HashingEmbedder())
     with fastapi_testclient.TestClient(app) as c:
         yield c
@@ -100,7 +100,7 @@ def test_document_search_cites_and_filters_versions(client):
     assert any(r["doc_id"] == "HD-OPS-001" for r in body["results"])
     old = client.get(
         "/documents/search",
-        params={"q": "NEWS2 escalation protocol", "k": 5, "as_of": "2026-11-05"},
+        params={"q": "NEWS2 escalation protocol", "k": 5, "as_of": "2026-09-25"},
     ).json()["results"]
     assert {r["version"] for r in old if r["doc_id"] == "HD-CLIN-001"} == {"1.0"}
     assert client.get("/documents/search", params={"q": "x"}).status_code == 422
@@ -114,13 +114,9 @@ def test_snapshot_round_trips(client, tmp_path_factory):
     assert np.isclose(reloaded.manifest.risk_bands.high, snapshot.manifest.bands["high"])
 
 
-def test_live_mode_is_not_available_yet(tmp_path):
+def test_mode_is_demo_or_live():
     with pytest.raises(ValueError, match="MODE"):
         Settings(mode="prod")
-    app = create_app(Settings(mode="live", snapshot_dir=tmp_path))
-    with pytest.raises(RuntimeError, match="Phase 5"):
-        with fastapi_testclient.TestClient(app):
-            pass
 
 
 def test_missing_snapshot_explains_how_to_build_one(tmp_path):
@@ -135,3 +131,24 @@ def test_summary_labels_alert_and_escalation_metrics(client):
         assert key in body and key in body["definitions"]
     assert "enters the High band" in body["definitions"]["alerts_24h"]
     assert body["alert_budget_per_nurse_shift"] == 2.0
+
+
+def test_with_an_origin_secret_only_the_website_is_answered(demo_snapshot):
+    settings = Settings(
+        snapshot_dir=demo_snapshot, llm_provider="openai", openai_api_key=None, origin_secret="s3"
+    )
+    app = create_app(settings, embedder=retrieval.HashingEmbedder())
+    with fastapi_testclient.TestClient(app) as c:
+        for headers in ({}, {ORIGIN_HEADER: "wrong"}, {ORIGIN_HEADER: "s3 "}):
+            refused = c.get("/health", headers=headers)
+            assert refused.status_code == 403, headers
+            assert "website" in refused.json()["detail"] and "s3" not in refused.text
+        assert c.post("/risk/score", json={"encounter_id": "x"}).status_code == 403
+        assert c.get("/health", headers={ORIGIN_HEADER: "s3"}).json()["status"] == "ok"
+    assert "s3" not in repr(settings)
+
+
+def test_the_proxy_and_the_smoke_test_send_the_header_the_api_checks():
+    proxy = (ROOT / "web" / "lib" / "backend.ts").read_text()
+    smoke = (ROOT / "backend" / "scripts" / "smoke_api.py").read_text()
+    assert f'"{ORIGIN_HEADER}"' in proxy and f'ORIGIN_HEADER = "{ORIGIN_HEADER}"' in smoke

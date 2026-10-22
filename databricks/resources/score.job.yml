@@ -1,0 +1,47 @@
+# Score the patient-hours not scored yet with the registered model and append them to the
+# prediction log gold.risk_scores; rebuild alerts_fact, escalations_fact and site_kpis_hourly from
+# the whole log (Plan.md §9; code in src/heavden/ml/batch_scoring.py, run through
+# src/jobs/score_model.py). Each hour keeps the model that scored it. Job parameter rescore=true
+# replaces the log with this model's scores for every hour. No schedule: staging
+# scores after every merge (CI), prod on demand (prod-run workflow, approved), and in Phase 3
+# after each drift episode. Prod uses @champion; dev and staging use their champion once a
+# retrain has made one, and the newest version until then (their 2-day models rarely pass
+# the gates).
+resources:
+  jobs:
+    score:
+      name: heavden-score
+      description: Scores new patient-hours in ${var.catalog}.gold.patient_hour_features with the registered model, appends them to gold.risk_scores and rebuilds the alert, escalation and KPI tables.
+      max_concurrent_runs: 1 # two runs would score the same new hours twice
+      parameters:
+        - name: rescore
+          default: "false"
+      performance_target: STANDARD
+      timeout_seconds: 1800
+      tags:
+        project: heavden
+        component: scoring
+      tasks:
+        - task_key: score
+          environment_key: ml
+          spark_python_task:
+            python_file: ../src/jobs/score_model.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --model-alias
+              - ${var.scoring_model}
+              - --train-days
+              - ${var.train_days}
+              - --valid-days
+              - ${var.valid_days}
+              - --rescore
+              - "{{job.parameters.rescore}}"
+      environments:
+        # Same environment as training, so the model loads with the libraries it was trained with.
+        - environment_key: ml
+          spec:
+            environment_version: "6"
+            dependencies:
+              - ../../dist/*.whl
+              - lightgbm==4.6.0

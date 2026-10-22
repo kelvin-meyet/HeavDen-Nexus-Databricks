@@ -151,14 +151,19 @@ def ddl_batches(schema: str) -> list[str]:
     return [f"CREATE SCHEMA {schema}", *batches]
 
 
-def ddl_columns(table: str) -> list[str]:
-    """Column names of a table, in DDL order (read from the schema file)."""
+def _table_body(table: str) -> str:
+    """The column and constraint lines of a CREATE TABLE in the schema file."""
     text = SCHEMA_SQL.read_text(encoding="utf-8")
     match = re.search(rf"CREATE TABLE dbo\.{table} \((.*?)\n\);", text, flags=re.DOTALL)
     if match is None:
         raise KeyError(table)
+    return match.group(1)
+
+
+def ddl_columns(table: str) -> list[str]:
+    """Column names of a table, in DDL order (read from the schema file)."""
     names = []
-    for line in match.group(1).splitlines():
+    for line in _table_body(table).splitlines():
         token = line.strip().split(" ")[0]
         if token and token.isidentifier() and token.upper() != "CONSTRAINT":
             names.append(token)
@@ -167,10 +172,8 @@ def ddl_columns(table: str) -> list[str]:
 
 def column_rules(table: str) -> dict[str, tuple[int | None, bool]]:
     """{column: (max text length or None, nullable)} for a table, read from the DDL."""
-    text = SCHEMA_SQL.read_text(encoding="utf-8")
-    body = re.search(rf"CREATE TABLE dbo\.{table} \((.*?)\n\);", text, flags=re.DOTALL).group(1)
     rules = {}
-    for line in body.splitlines():
+    for line in _table_body(table).splitlines():
         match = re.match(r"\s*(\w+)\s+(\w+)(?:\((\d+)(?:,\s*\d+)?\))?\s*(NOT NULL|NULL)?", line)
         if not match or match.group(1).upper() == "CONSTRAINT":
             continue
@@ -178,6 +181,43 @@ def column_rules(table: str) -> dict[str, tuple[int | None, bool]]:
         length = int(size) if size and sql_type.upper() in {"VARCHAR", "NVARCHAR", "CHAR"} else None
         rules[column] = (length, null != "NOT NULL")
     return rules
+
+
+def primary_key(table: str) -> list[str]:
+    """Primary-key columns of a table (read from the DDL)."""
+    body = _table_body(table)
+    composite = re.search(r"PRIMARY KEY \(([^)]*)\)", body)
+    if composite:
+        return [c.strip() for c in composite.group(1).split(",")]
+    return [line.split()[0] for line in body.splitlines() if "PRIMARY KEY" in line]
+
+
+def table_changes(
+    before: dict[str, pd.DataFrame], after: dict[str, pd.DataFrame]
+) -> dict[str, tuple[pd.DataFrame, pd.DataFrame]]:
+    """{table: (rows to insert, rows to update)} that turn `before` into `after`.
+
+    The source never deletes (a delete would fail the ingestion job), so a row that disappears
+    is an error. Updates are whole rows, matched on the primary key.
+    """
+    changes = {}
+    for table in TABLE_ORDER:
+        key, columns = primary_key(table), ddl_columns(table)
+        old = before[table][columns].set_index(key)
+        new = after[table][columns].set_index(key)
+        for name, df in (("before", old), ("after", new)):
+            if not df.index.is_unique:
+                raise ValueError(f"{table}: duplicate primary keys {name}")
+        gone = old.index.difference(new.index)
+        if len(gone):
+            raise ValueError(f"{table}: {len(gone)} rows would be deleted, e.g. {gone[0]}")
+        both = new.index.intersection(old.index)
+        a, b = old.loc[both], new.loc[both]
+        changed = ~((a == b) | (a.isna() & b.isna())).all(axis=1)
+        inserts = new.loc[new.index.difference(old.index)].reset_index()[columns]
+        updates = b[changed].reset_index()[columns]
+        changes[table] = (inserts, updates)
+    return changes
 
 
 def problems(tables: dict[str, pd.DataFrame]) -> list[str]:
@@ -229,6 +269,18 @@ def insert_batches(schema: str, table: str, df: pd.DataFrame) -> Iterator[tuple[
             [placeholder] * len(chunk)
         )
         yield sql, [_sql_value(v) for row in chunk for v in row]
+
+
+def update_statements(schema: str, table: str, df: pd.DataFrame) -> Iterator[tuple[str, list]]:
+    """One UPDATE per row (all non-key columns, matched on the primary key)."""
+    key = primary_key(table)
+    columns = [c for c in ddl_columns(table) if c not in key]
+    sql = (
+        f"UPDATE {schema}.{table} SET {', '.join(f'{c} = ?' for c in columns)} "
+        f"WHERE {' AND '.join(f'{k} = ?' for k in key)}"
+    )
+    for row in df[columns + key].astype(object).to_numpy():
+        yield sql, [_sql_value(v) for v in row]
 
 
 # --- Talking to Azure SQL ------------------------------------------------------------------
@@ -354,6 +406,27 @@ def load(connection, schema: str, tables: dict[str, pd.DataFrame], replace: bool
         print(f"  {schema}.{table}: {n:,} rows")
 
 
+def apply_changes(
+    connection, schema: str, changes: dict[str, tuple[pd.DataFrame, pd.DataFrame]]
+) -> None:
+    """Insert and update rows in an existing schema (one transaction per table).
+
+    Change Tracking records them as inserts and updates, which the next ingestion run reads.
+    """
+    cursor = connection.cursor()
+    for table in TABLE_ORDER:
+        inserts, updates = changes[table]
+        for sql, params in insert_batches(schema, table, inserts):
+            cursor.execute(sql, params)
+        for sql, params in update_statements(schema, table, updates):
+            cursor.execute(sql, params)
+            if cursor.rowcount != 1:
+                connection.rollback()
+                raise RuntimeError(f"{schema}.{table}: an update matched {cursor.rowcount} rows")
+        connection.commit()
+        print(f"  {schema}.{table}: {len(inserts):,} inserted, {len(updates):,} updated")
+
+
 def row_counts(connection, schema: str) -> dict[str, int]:
     cursor = connection.cursor()
     counts = {}
@@ -368,21 +441,32 @@ def row_counts(connection, schema: str) -> dict[str, int]:
 DEFAULT_DAYS = {"dev": 2, "staging": 2, "prod": 14}
 
 
-def simulate(days: int, seed: int = 42):
-    """The same simulation as the demo snapshot (Synthea seed 42, ward seed 42)."""
-    from generator import synthea, truth
+def population():
+    """Synthea tables, reference date, patient profiles and the first inpatients (seed 42)."""
+    from generator import synthea
 
     run = synthea.SyntheaRun()
     csv_dir = synthea.run_synthea(run, ROOT / "data" / "synthea" / f"p{run.population}_s{run.seed}")
     tables = synthea.load_tables(csv_dir)
     reference = pd.Timestamp(run.reference_date, tz="UTC")
     profiles = synthea.build_profiles(tables, reference)
-    inpatients = hospital.admit_inpatients(profiles)
+    return tables, reference, profiles, hospital.admit_inpatients(profiles)
+
+
+def baseline_ward(profiles: pd.DataFrame, inpatients: pd.DataFrame, days: int, seed: int = 42):
+    """The first `days` of the hospital from `hospital.SIM_START`, with activity and outcomes."""
+    from generator import truth
+
     plan = hospital_activity.schedule_activity(
         profiles, inpatients, hospital.SIM_START, hours=24 * days, seed=seed
     )
-    ward = truth.simulate_ward(inpatients, hospital.SIM_START, 24 * days, seed=seed, activity=plan)
-    return tables, reference, ward
+    return truth.simulate_ward(inpatients, hospital.SIM_START, 24 * days, seed=seed, activity=plan)
+
+
+def simulate(days: int, seed: int = 42):
+    """The same simulation as the demo snapshot (Synthea seed 42, ward seed 42)."""
+    tables, reference, profiles, inpatients = population()
+    return tables, reference, baseline_ward(profiles, inpatients, days, seed)
 
 
 def main() -> None:
@@ -410,6 +494,9 @@ def main() -> None:
     if args.dry_run:
         return
 
+    from generator import clock
+
+    clock.require_past(ward.activity.end)
     out = terraform_outputs()
     target = f"{out['sql_server_fqdn']} / {out['sql_database']} / schema {args.env}"
     if not args.yes and input(f"Load into {target}? [y/N] ").strip().lower() != "y":

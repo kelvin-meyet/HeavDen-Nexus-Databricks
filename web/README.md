@@ -18,7 +18,16 @@ npm run dev            # http://localhost:3000
 
 Open **http://localhost:3000** (not 127.0.0.1: Next's dev server blocks its own scripts for other origins, so the page wouldn't load its data).
 
-The browser only calls `/api/*`; `next.config.ts` forwards it to the API at `BACKEND_URL` (default `http://127.0.0.1:8000`). On Vercel, `BACKEND_URL` points at the Render service, so its address and any secrets never reach the browser.
+The browser only calls `/api/*`; the routes in `app/api/` forward it to the API at `BACKEND_URL` (default `http://127.0.0.1:8000`, see `lib/backend.ts`), so its address and its secret never reach the browser.
+
+## On Vercel
+
+Project root `web`, Node.js 22.x. Environment variables (Production and Preview):
+
+- `BACKEND_URL`: the API on Azure Container Apps (Terraform output `api_url`).
+- `ORIGIN_SECRET` (mark it Sensitive): the API's URL is public, so it answers only requests carrying this secret, sent by `lib/backend.ts`. Copy it from Terraform without printing it: `terraform output -raw origin_secret | clip`, then paste. The release's smoke test needs the same value as the secret `ORIGIN_SECRET` of the GitHub environment `prod-deploy`.
+
+GET answers through `/api/*` are kept by Vercel's CDN for 5 minutes and then refreshed in the background (`app/api/[...path]/route.ts`): repeat visits never wake the API or the SQL warehouse. A new deployment starts with an empty cache.
 
 ## Checks
 

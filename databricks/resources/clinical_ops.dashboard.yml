@@ -1,0 +1,15 @@
+# Clinical Ops AI/BI dashboard (Plan.md §11): the ward now, alerts and escalations, devices and
+# data quality, over this target's Gold tables and the pipeline's event log. Defined in
+# src/dashboards/clinical_ops.lvdash.json (queries name tables without a catalog; the catalog
+# comes from dataset_catalog, so each target shows its own data). Published with the deploying
+# identity's credentials, so viewers need no access to the tables. It runs on the shared SQL
+# warehouse, which bills only while queries run and stops after 5 idle minutes.
+resources:
+  dashboards:
+    clinical_ops:
+      display_name: HeavDen Clinical Ops${var.env_label}
+      file_path: ../src/dashboards/clinical_ops.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+      dataset_catalog: ${var.catalog}
+      dataset_schema: gold
+      embed_credentials: true

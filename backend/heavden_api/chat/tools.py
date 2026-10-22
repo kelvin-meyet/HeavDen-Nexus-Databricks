@@ -18,10 +18,9 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 from heavden.agent.sql_guard import SqlRejected
-from heavden_api.chat.sandbox import SqlSandbox
-from heavden_api.snapshot import to_records
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # the demo's snapshot and sandbox: the Databricks assistant never loads them
+    from heavden_api.chat.sandbox import SqlSandbox
     from heavden_api.deps import AppState
 
 ROWS_TO_LLM = 50
@@ -61,8 +60,9 @@ TOOL_SPECS = [
                     "query": {"type": "string", "description": "What to look for."},
                     "as_of": {
                         "type": ["string", "null"],
-                        "description": "YYYY-MM-DD to use the document versions in force that "
-                        "day (e.g. a past protocol), or null for the current versions.",
+                        "description": "null for the current versions (the default, also for "
+                        "'the model in use' or 'the protocol now'). YYYY-MM-DD only when the "
+                        "question names a past date, to use the versions in force that day.",
                     },
                 },
                 "required": ["query", "as_of"],
@@ -106,22 +106,33 @@ ORDER BY r.prediction_ts DESC
 LIMIT 1
 """
 
+# the 48 hours up to the patient's own last scored hour: for someone who has left, the hours
+# before they left (not the ward's last 48 hours, when they were no longer there)
 PATIENT_ALERTS_SQL = """
 SELECT alert_ts, round(risk, 4) AS risk, escalated_within_6h
 FROM gold.alerts_fact
-WHERE encounter_id = :encounter_id AND alert_ts > :as_of - INTERVAL 48 HOURS
-  AND alert_ts <= :as_of
+WHERE encounter_id = :encounter_id AND alert_ts > :last_hour - INTERVAL 48 HOURS
+  AND alert_ts <= :last_hour
 ORDER BY alert_ts
 """
 
 
 class Toolbox:
-    """Runs tool calls for one chat turn and numbers document passages across the turn."""
+    """Runs tool calls for one chat turn and numbers document passages across the turn.
+    `specs` are the tools offered to the LLM; `chat/databricks_tools.py` serves the same three
+    tools from Databricks."""
+
+    specs = TOOL_SPECS
 
     def __init__(self, state: AppState, sandbox: SqlSandbox):
         self.state = state
         self.sandbox = sandbox
         self.citations: list[dict] = []
+
+    def documents(self):
+        """The document search: a `heavden.agent.retrieval.Retriever`, or anything with the same
+        `search(query, k, as_of=...)`."""
+        return self.state.retriever()
 
     def call(self, name: str, arguments: dict) -> tuple[str, dict]:
         handler = {
@@ -159,7 +170,7 @@ class Toolbox:
         return json.dumps(payload, default=str), step
 
     def search_documents(self, query: str, as_of: str | None = None) -> tuple[str, dict]:
-        retriever = self.state.retriever()
+        retriever = self.documents()
         if retriever is None:
             return json.dumps({"error": "no document index"}), {"tool": "search_documents"}
         day = date.fromisoformat(as_of) if as_of else None
@@ -191,6 +202,10 @@ class Toolbox:
         return json.dumps({"passages": passages}), step
 
     def explain_patient(self, patient: str) -> tuple[str, dict]:
+        import pandas as pd
+
+        from heavden_api.snapshot import to_records
+
         patient = patient.strip().upper()
         if re.fullmatch(r"P-?\d+", patient):
             patient = "P-" + patient.removeprefix("P").removeprefix("-")
@@ -206,7 +221,10 @@ class Toolbox:
         row["recent_alerts_48h"] = to_records(
             self.state.source.query(
                 PATIENT_ALERTS_SQL,
-                {"encounter_id": row["encounter_id"], "as_of": self.state.as_of},
+                {
+                    "encounter_id": row["encounter_id"],
+                    "last_hour": pd.Timestamp(row["prediction_ts"]),
+                },
             )
         )
         row["risk_bands"] = self.state.snapshot.manifest.bands

@@ -1,0 +1,76 @@
+# Runs staging's data jobs on demand: the rehearsal of a drift episode (Plan.md §17, Phase 3).
+# Same steps as prod-run (both call data-run.yml), against staging, with no approval to start.
+# After loading an episode from a laptop:
+#
+#   uv run --group azure python -m generator.episode --env staging --episode 1
+#   gh workflow run staging-run.yml -f episode=sensor-bias
+#
+# By default it copies the new Azure SQL rows into Bronze (do it within the hour, while the
+# database is awake), runs the pipeline, scores the new hours and checks for drift. A check that
+# reaches "act" opens a retrain request for staging, which waits in the staging-approval
+# environment exactly as prod's waits in retrain-approval; the promotion and rollback that may
+# follow are rehearsed the same way. Staging's merges keep deploying and smoke-testing through
+# ci.yml; the two never run at once (one concurrency group).
+
+name: staging-run
+
+on:
+  workflow_dispatch:
+    inputs:
+      episode:
+        description: "The drift episode just loaded, if any (recorded with the check)"
+        type: string
+        default: ""
+      ingest_sql:
+        description: "Copy Azure SQL into Bronze first (wakes the database)"
+        type: boolean
+        default: true
+      run_pipeline:
+        description: "Run the pipeline (Bronze -> Silver -> Gold)"
+        type: boolean
+        default: true
+      full_refresh:
+        description: "Rebuild every pipeline table from Bronze (after reloading different data)"
+        type: boolean
+        default: false
+      train:
+        description: "Train and register the model on gold.training_set (the merge smoke test does this already)"
+        type: boolean
+        default: false
+      score:
+        description: "Score the new patient-hours with the model in use"
+        type: boolean
+        default: true
+      drift_check:
+        description: "Check for drift (after scoring)"
+        type: boolean
+        default: true
+      website_snapshot:
+        description: "Build and check the website's snapshot (staging doesn't publish it)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  staging:
+    uses: ./.github/workflows/data-run.yml
+    concurrency:
+      group: staging # shared with ci.yml's staging job
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+      actions: write # the request job starts retrain.yml; the run job reads reviews
+    with:
+      target: staging
+      environment: staging
+      ingest_sql: ${{ inputs.ingest_sql }}
+      run_pipeline: ${{ inputs.run_pipeline }}
+      full_refresh: ${{ inputs.full_refresh }}
+      train: ${{ inputs.train }}
+      score: ${{ inputs.score }}
+      drift_check: ${{ inputs.drift_check }}
+      website_snapshot: ${{ inputs.website_snapshot }}
+      episode: ${{ inputs.episode }}

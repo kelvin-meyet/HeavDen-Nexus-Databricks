@@ -1,0 +1,72 @@
+# Runs prod's data jobs on demand, after Kelvin approves the run in the prod-run environment
+# (Plan.md §16.2). It runs what release.yml deployed; it never deploys. Started by hand:
+#
+#   Actions -> prod-run -> Run workflow   (or: gh workflow run prod-run.yml -f ingest_sql=true)
+#
+# The steps live in data-run.yml, shared with staging-run.yml, so what runs here has been
+# rehearsed in staging first: copy Azure SQL into Bronze, run the pipeline, train, score with
+# @champion, check for drift, and open a retrain request when the check reaches "act".
+
+name: prod-run
+
+on:
+  workflow_dispatch:
+    inputs:
+      ingest_sql:
+        description: "Copy Azure SQL into Bronze first (wakes the database)"
+        type: boolean
+        default: true
+      run_pipeline:
+        description: "Run the pipeline (Bronze -> Silver -> Gold)"
+        type: boolean
+        default: true
+      full_refresh:
+        description: "Rebuild every pipeline table from Bronze (after reloading different data)"
+        type: boolean
+        default: false
+      train:
+        description: "Train and register the model on gold.training_set"
+        type: boolean
+        default: false
+      score:
+        description: "Score the new patient-hours with @champion (risk, alerts, escalations, KPIs)"
+        type: boolean
+        default: false
+      drift_check:
+        description: "Check for drift (after scoring)"
+        type: boolean
+        default: false
+      website_snapshot:
+        description: "Export and publish the website's snapshot (after scoring)"
+        type: boolean
+        default: false
+      episode:
+        description: "The drift episode just loaded, if any (recorded with the check)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prod
+  cancel-in-progress: false
+
+jobs:
+  prod:
+    uses: ./.github/workflows/data-run.yml
+    permissions:
+      contents: read
+      id-token: write
+      actions: write # the request job starts retrain.yml; the run job reads reviews
+    with:
+      target: prod
+      environment: prod-run # waits here for Kelvin
+      ingest_sql: ${{ inputs.ingest_sql }}
+      run_pipeline: ${{ inputs.run_pipeline }}
+      full_refresh: ${{ inputs.full_refresh }}
+      train: ${{ inputs.train }}
+      score: ${{ inputs.score }}
+      drift_check: ${{ inputs.drift_check }}
+      website_snapshot: ${{ inputs.website_snapshot }}
+      episode: ${{ inputs.episode }}

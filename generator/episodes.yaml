@@ -1,0 +1,48 @@
+# Drift episodes per environment, in the order they are loaded after the baseline (Plan.md §6).
+# Each episode continues the hospital from where the previous one stopped, and the history is
+# replayed from this file, so ONLY APPEND: never edit, reorder or remove a loaded episode.
+#
+# hours:      simulated hours (scenario timings are in generator/drift_config.yaml). The
+#             hospital starts on hospital.SIM_START and never runs ahead of the real
+#             calendar: an episode can be loaded once its last hour has passed.
+# scenarios:  drift scenarios switched on during this episode only (none = a normal stretch)
+# seed:       the episode's random seed (unique per environment)
+# settings:   optional overrides of drift_config.yaml, e.g. {protocol_change: {start_after_hours: 0}}
+#             to keep a lasting change on from the start of a later episode
+
+dev: []
+
+staging:  # dry runs: each scenario must be caught by the expected check (Plan.md §17, Phase 3)
+  - {name: sensor-bias, hours: 48, scenarios: [spo2_sensor_bias], seed: 2001}
+  - {name: respiratory-outbreak, hours: 48, scenarios: [respiratory_outbreak], seed: 2002}
+  - {name: schema-change, hours: 48, scenarios: [firmware_schema_change], seed: 2003}
+  - {name: protocol-change, hours: 48, scenarios: [protocol_change], seed: 2004}
+  - name: protocol-settled  # the new protocol stays: data for the retrain dry run
+    hours: 144
+    scenarios: [protocol_change]
+    seed: 2005
+    settings: {protocol_change: {start_after_hours: 0}}
+
+# Prod's seeds were used by no offline rehearsal. The drift thresholds were designed on a
+# rehearsal with seeds 3001 and 3002 for the first two episodes, the champion gates on one with
+# 3003-3005 for the third; with those seeds prod's live checks would only repeat what was
+# already seen. Don't replay a prod episode offline before it has run.
+prod:  # live episodes (Plan.md §6.4)
+  - {name: sensor-bias, hours: 48, scenarios: [spo2_sensor_bias], seed: 3115}
+  - {name: protocol-change, hours: 48, scenarios: [protocol_change], seed: 3116}
+  # The new protocol stays. A day and a half after the change there is nothing to validate a new
+  # model on; these 6 days make 7.5, where a retrain passed the champion gates for 3 of 3 seeds
+  # in the offline rehearsal (heavden.ml.training.compare_with_champion).
+  - name: protocol-settled
+    hours: 144
+    scenarios: [protocol_change]
+    seed: 3117
+    settings: {protocol_change: {start_after_hours: 0}}
+  # v3 became champion on 16 Oct, after prod's last data, so every hour in the prediction log is
+  # v1's. A normal week under the protocol (to 20 Oct), scored by v3: the website's board, its
+  # what-if and its High threshold all come from the model in use.
+  - name: settled-week
+    hours: 144
+    scenarios: [protocol_change]
+    seed: 3118
+    settings: {protocol_change: {start_after_hours: 0}}

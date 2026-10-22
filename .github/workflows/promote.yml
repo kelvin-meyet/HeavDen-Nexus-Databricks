@@ -1,0 +1,124 @@
+# A promotion request (Plan.md §10.4). Opened by retrain.yml when a retrained model passes its
+# gates; it can also be started by hand for a version. It shows the gate results, then waits for
+# Kelvin in the production-approval environment (staging-approval for staging): GitHub emails
+# the request.
+#
+# An approval points @champion at the version (job model_ops, action promote). That is the
+# release: from the next scoring run, new patient-hours are scored by it at its own alert
+# threshold, and the drift check judges it against its own data. Hours already scored keep the
+# version that scored them. The job refuses a version that did not pass its gates, or that was
+# compared with a champion other than the one in use now.
+#
+# The model it replaces stays as @previous_champion; rollback.yml puts it back. The promotion is
+# recorded in ml.ops_audit with who approved it; a rejection is copied there by the next data run.
+
+name: Promotion request
+run-name: "Promotion request${{ inputs.target == 'staging' && ' (staging)' || '' }}: version ${{ inputs.version || 'the current challenger' }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to promote (empty: the current @challenger)"
+        type: string
+        default: ""
+      retrain:
+        description: "The retrain's result (the JSON after TRAINING_RESULT), shown to the approver"
+        type: string
+        default: ""
+      target:
+        description: "prod, or staging to rehearse the same steps there"
+        type: choice
+        options: [prod, staging]
+        default: prod
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: What is being promoted
+        env:
+          VERSION: ${{ inputs.version }}
+          RESULT: ${{ inputs.retrain }}
+        run: |
+          {
+            echo "## Promotion request: version ${VERSION:-the current @challenger}"
+            echo
+            echo "Approving points \`@champion\` at this version. From the next scoring run, new patient-hours are scored by it, at its own alert threshold. Hours already scored keep the version that scored them."
+            echo
+            echo "The job refuses a version that did not pass its gates, or that was compared with a champion other than the one in use now. The model it replaces stays as \`@previous_champion\`, and the rollback workflow puts it back."
+            echo
+            echo "Give the reason in the review comment: it is recorded in \`ml.ops_audit\`."
+            echo
+            if [ -n "$RESULT" ]; then
+              bash .github/scripts/training_summary.sh "$RESULT" || echo "The retrain result passed along could not be read."
+            else
+              echo "No retrain result was passed along: see the retrain run that produced this version."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  promote:
+    needs: report
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # waits here for Kelvin; rejecting leaves @champion as it is
+    environment: ${{ inputs.target == 'staging' && 'staging-approval' || 'production-approval' }}
+    permissions:
+      contents: read
+      id-token: write
+      actions: read # who approved, for the audit trail
+      issues: write # the model-card reminder
+    env:
+      DATABRICKS_AUTH_TYPE: azure-cli
+      GH_TOKEN: ${{ github.token }}
+      TARGET: ${{ inputs.target }}
+      APPROVAL: ${{ inputs.target == 'staging' && 'staging-approval' || 'production-approval' }}
+    defaults:
+      run:
+        working-directory: databricks
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - uses: databricks/setup-cli@v1.17.0
+        with:
+          version: 1.17.0
+
+      - name: Point @champion at the version
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          context=$(bash ../.github/scripts/review.sh context "$APPROVAL")
+          result=$(bash ../.github/scripts/model_ops.sh promote "$VERSION" "$context")
+          echo "$result" > "$RUNNER_TEMP/model_ops.json"
+          {
+            echo "## Promoted: version $(jq -r .version <<<"$result") is now \`@champion\`"
+            echo
+            jq -r '"- Approved by **\(.actor // "unknown")**",
+                   "- It replaces version \(.from_version // "none"), kept as `@previous_champion`",
+                   "- Recorded in `\(.model | split(".")[0]).ml.ops_audit`"' <<<"$result"
+            echo
+            echo "New patient-hours are scored by this version from the next scoring run. To undo: Actions -> Rollback request."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The assistant answers from the model card, which must describe prod's model: open a
+      # reminder to reissue it (release.yml refuses to deploy until it does).
+      - name: Remind to reissue the model card
+        if: inputs.target == 'prod'
+        run: python3 ../.github/scripts/model_card.py remind "$RUNNER_TEMP/model_ops.json" "promoted"

@@ -10,6 +10,7 @@ Rules learned in Phase 0 (Plan.md §8, NEWS2 fairness check):
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field
 
 import lightgbm as lgb
@@ -50,6 +51,42 @@ def time_split(table: pd.DataFrame, split: Split | None = None):
     valid = labelled[(ts >= t1) & (ts < t2 - split.gap)]
     test = labelled[ts >= t2]
     return train, valid, test
+
+
+@dataclass(frozen=True)
+class RecentSplit:
+    """A retrain's split, anchored at the newest labelled hour: the latest days are test, the
+    days before them validation, and all earlier history trains.
+
+    Validation and test must be recent, because calibration, the alert threshold and the
+    comparison with the champion all have to hold for the hospital as it is now. Training keeps
+    the whole history: measured offline after the protocol change (3 seeds, 5 to 11 days of
+    post-change data), a model trained on everything had the higher test AUPRC than one trained
+    only on post-change data in 11 of 12 comparisons. A week holds too few escalations."""
+
+    valid_days: float = 2
+    test_days: float = 2
+    gap: pd.Timedelta = GAP
+
+
+def recent_split(table: pd.DataFrame, split: RecentSplit | None = None):
+    """Labelled rows as train / validation / test blocks counted back from the newest hour."""
+    split = split or RecentSplit()
+    labelled = table[table["label"].notna()]
+    ts = labelled["prediction_ts"]
+    t2 = ts.max() - pd.Timedelta(days=split.test_days)
+    t1 = t2 - pd.Timedelta(days=split.valid_days)
+    train = labelled[ts <= t1 - split.gap]
+    valid = labelled[(ts > t1) & (ts <= t2 - split.gap)]
+    test = labelled[ts > t2]
+    return train, valid, test
+
+
+def split_blocks(table: pd.DataFrame, split: Split | RecentSplit | None = None):
+    """Train / validation / test for either kind of split."""
+    if isinstance(split, RecentSplit):
+        return recent_split(table, split)
+    return time_split(table, split)
 
 
 def model_columns(table: pd.DataFrame) -> list[str]:
@@ -126,11 +163,16 @@ def fit_lightgbm(
         random_state=seed,
         verbose=-1,
     )
+    valid_x, valid_y = to_matrix(valid, columns), valid["label"].astype(int)
+    # LightGBM 4.7 renamed eval_set to eval_X/eval_y; Databricks serverless runs 4.6
+    if "eval_X" in inspect.signature(lgb.LGBMClassifier.fit).parameters:
+        evaluation = {"eval_X": valid_x, "eval_y": valid_y}
+    else:
+        evaluation = {"eval_set": [(valid_x, valid_y)]}
     return model.fit(
         to_matrix(train, columns),
         train["label"].astype(int),
-        eval_X=to_matrix(valid, columns),
-        eval_y=valid["label"].astype(int),
+        **evaluation,
         eval_metric="average_precision",
         callbacks=[lgb.early_stopping(100, verbose=False)],
     )

@@ -77,9 +77,12 @@ def to_ndjson(df: pd.DataFrame, fields: tuple[str, ...]) -> str:
     return "\n".join(lines) + "\n" if lines else ""
 
 
-def file_name(env: str, kind: str, batch_start: pd.Timestamp) -> str:
+def file_name(env: str, kind: str, batch_start: pd.Timestamp, tag: str = "") -> str:
+    """`tag` (a drift episode's name) keeps an episode's files apart from earlier files of the
+    same hour, which Auto Loader would otherwise skip as already seen."""
     stamp = batch_start.tz_convert("UTC").strftime("%Y%m%d_%H%M%S")
-    return f"{kind}_{stamp}_{uuid.uuid5(_NAMESPACE, f'{env}/{kind}/{stamp}')}.json"
+    seed = f"{env}/{kind}/{stamp}" + (f"/{tag}" if tag else "")
+    return f"{kind}_{stamp}_{uuid.uuid5(_NAMESPACE, seed)}.json"
 
 
 def recorded_outcomes(outcomes: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFrame:
@@ -89,7 +92,7 @@ def recorded_outcomes(outcomes: pd.DataFrame, as_of: pd.Timestamp) -> pd.DataFra
 
 
 def landing_files(
-    env: str, readings: pd.DataFrame, outcomes: pd.DataFrame, as_of: pd.Timestamp
+    env: str, readings: pd.DataFrame, outcomes: pd.DataFrame, as_of: pd.Timestamp, tag: str = ""
 ) -> dict[str, str]:
     """{relative path under the landing container: file content} for one simulation."""
     files = {}
@@ -99,7 +102,8 @@ def landing_files(
     ]
     for kind, df, time_column, fields in batches:
         for batch_start, batch in df.groupby(df[time_column].dt.floor(BATCH)):
-            files[f"{env}/{kind}/{file_name(env, kind, batch_start)}"] = to_ndjson(batch, fields)
+            name = file_name(env, kind, batch_start, tag)
+            files[f"{env}/{kind}/{name}"] = to_ndjson(batch, fields)
     return files
 
 

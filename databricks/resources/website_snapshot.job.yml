@@ -1,0 +1,48 @@
+# The website's snapshot (Plan.md §13-14; code in backend/heavden_api/export.py, run through
+# src/jobs/export_website_snapshot.py): the last 28 days of Gold, the model in use with its alert
+# threshold and background rows, and check hours the website re-scores when it loads it. In prod
+# it is published to the volume ${var.website_volume} (Azure Blob Storage), which the website
+# reads at its next start; staging has no website volume, so there it is built and checked only.
+# No schedule: data-run.yml runs it after scoring (input website_snapshot).
+resources:
+  jobs:
+    website_snapshot:
+      name: heavden-website-snapshot
+      description: Exports the website's snapshot from ${var.catalog}'s Gold and the model in use, checks it, and publishes it to the website's volume.
+      max_concurrent_runs: 1
+      parameters:
+        # false: published but not served yet; release.yml points the website at it once the new
+        # image has passed its smoke test on it (data runs keep the default)
+        - name: move_pointer
+          default: "true"
+      performance_target: STANDARD
+      timeout_seconds: 1800
+      tags:
+        project: heavden
+        component: website
+      tasks:
+        - task_key: export
+          environment_key: ml
+          spark_python_task:
+            python_file: ../src/jobs/export_website_snapshot.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --volume=${var.website_volume}
+              - --model-alias
+              - ${var.scoring_model} # the model the score job uses
+              - --train-days
+              - ${var.train_days}
+              - --valid-days
+              - ${var.valid_days}
+              - --move-pointer
+              - "{{job.parameters.move_pointer}}"
+      environments:
+        # Same environment as training and scoring, so the model loads with the libraries it was
+        # trained with; the website's image installs the same versions (the `serving` group).
+        - environment_key: ml
+          spec:
+            environment_version: "6"
+            dependencies:
+              - ../../dist/*.whl
+              - lightgbm==4.6.0

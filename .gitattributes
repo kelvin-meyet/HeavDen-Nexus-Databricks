@@ -1,3 +1,8 @@
 *.ipynb filter=nbstripout
 *.zpln filter=nbstripout
 *.ipynb diff=ipynb
+# Shell scripts keep LF endings on Windows checkouts too (bash fails on CRLF).
+*.sh text eol=lf
+# The API image's files too: RUN lines continued with a backslash break on CRLF.
+backend/Dockerfile text eol=lf
+backend/Dockerfile.dockerignore text eol=lf

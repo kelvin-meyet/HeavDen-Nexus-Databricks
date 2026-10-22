@@ -1,0 +1,341 @@
+"""Gold on local Spark, checked against the pandas references.
+
+The same simulated ward goes through `features.build_patient_hours` and
+`gold.device_health_daily` (pandas) and through the Spark Gold functions; the results must match
+row for row, except where Gold differs by design (labels from recorded outcomes, age at
+admission; see `heavden.pipelines.gold`).
+"""
+
+import datetime as dt
+
+import numpy as np
+import pandas as pd
+import pytest
+from test_source_db import HOURS, START, _population
+
+from generator import activity, clock, hospital, landing, truth
+from heavden.agent.genie import load_spec
+from heavden.analytics import gold as gold_pandas
+from heavden.ml import features
+
+pytest.importorskip("pyspark")
+from pyspark.sql import functions as F  # noqa: E402
+
+from heavden.pipelines import gold  # noqa: E402  (needs pyspark)
+
+KEYS = ["encounter_id", "prediction_ts"]
+# One active source description per flag, as Synthea words them.
+DESCRIPTIONS = {
+    "copd": "Chronic obstructive bronchitis (disorder)",
+    "heart_failure": "Chronic congestive heart failure (disorder)",
+    "diabetes": "Diabetes mellitus type 2 (disorder)",
+    "ckd": "Chronic kidney disease stage 1 (disorder)",
+    "hypertension": "Essential hypertension (disorder)",
+    "atrial_fibrillation": "Atrial fibrillation (disorder)",
+}
+
+
+@pytest.fixture(scope="module")
+def ward():
+    pop = _population()
+    inpatients = hospital.admit_inpatients(pop, n=120)
+    plan = activity.schedule_activity(pop, inpatients, START, HOURS, seed=1)
+    return truth.simulate_ward(inpatients, START, HOURS, seed=2, activity=plan)
+
+
+def _source_history(patients: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Conditions and medications that give each patient exactly their profile flags, plus
+    decoys that must not count: prediabetes, a cured condition, a future diagnosis."""
+    conditions, meds = [], []
+    for p in patients.itertuples():
+        for flag, text in DESCRIPTIONS.items():
+            if getattr(p, flag):
+                conditions.append((p.patient_id, flag, text, dt.date(2015, 1, 1), None))
+        if not p.diabetes:
+            conditions.append(
+                (p.patient_id, "pre", "Prediabetes (finding)", dt.date(2016, 1, 1), None)
+            )
+        if not p.heart_failure:
+            cured = ("Heart failure (disorder)", dt.date(2010, 1, 1), dt.date(2011, 1, 1))
+            future = ("Atrial fibrillation (disorder)", dt.date(2027, 1, 1), None)
+            conditions.append((p.patient_id, "cured", *cured))
+            if not p.atrial_fibrillation:
+                conditions.append((p.patient_id, "future", *future))
+        if p.on_beta_blocker:
+            drug = "24 HR Metoprolol succinate 100 MG Extended Release Oral Tablet"
+            meds.append(
+                (p.patient_id, "866427", drug, pd.Timestamp("2020-01-01", tz="UTC"), pd.NaT)
+            )
+    conditions = pd.DataFrame(
+        conditions, columns=["patient_id", "code", "description", "start_date", "stop_date"]
+    )
+    meds = pd.DataFrame(meds, columns=["patient_id", "code", "description", "start_ts", "stop_ts"])
+    return conditions, meds
+
+
+def _spark(spark, df: pd.DataFrame):
+    """pandas -> Spark through Arrow. Without Arrow, Spark converts times through the local
+    time zone (DST shifts them), so Arrow-backed string columns become plain objects first."""
+    strings = [c for c in df.columns if pd.api.types.is_string_dtype(df[c])]
+    out = spark.createDataFrame(df.astype(dict.fromkeys(strings, object)))
+    return out
+
+
+def _silver_frames(ward) -> dict[str, pd.DataFrame]:
+    """Silver-shaped pandas tables for the ward."""
+    act = ward.activity
+    linked = features.link_readings(ward.readings, act.device_assignments)
+    enc = act.encounters[["encounter_id", "patient_id", "site_id", "admit_ts", "discharge_ts"]]
+    units = pd.concat(
+        [
+            act.encounters[["encounter_id", "admit_unit_id", "admit_ts"]].set_axis(
+                ["encounter_id", "unit_id", "changed_ts"], axis=1
+            ),
+            act.transfers[["encounter_id", "to_unit_id", "transfer_ts"]].set_axis(
+                ["encounter_id", "unit_id", "changed_ts"], axis=1
+            ),
+        ]
+    )
+    conditions, meds = _source_history(act.patients)
+    outcomes = landing.recorded_outcomes(ward.truth.outcomes, act.end)
+    obs = ward.nurse_observations[["encounter_id", "obs_ts", "acvpu", "on_oxygen", "o2_flow_lpm"]]
+    frames = {
+        "vitals": linked,
+        "readings": ward.readings,
+        "encounters": enc,
+        "units": units,
+        "patients": act.patients[["patient_id", "birth_date", "sex"]],
+        "conditions": conditions,
+        "medications": meds,
+        "observations": obs,
+        "outcomes": outcomes[["encounter_id", "event_type", "event_ts", "recorded_ts"]],
+        "assignments": act.device_assignments,
+    }
+    return frames
+
+
+@pytest.fixture(scope="module")
+def silver(spark, ward):
+    """Silver-shaped Spark tables for the ward."""
+    return {name: _spark(spark, df) for name, df in _silver_frames(ward).items()}
+
+
+@pytest.fixture(scope="module")
+def built(silver):
+    s = silver
+    flags = gold.profile_flags(s["encounters"], s["conditions"], s["medications"])
+    feats = gold.patient_hour_features(
+        s["vitals"], s["encounters"], s["units"], s["patients"], flags, s["observations"]
+    ).cache()
+    window = gold.data_window(s["vitals"])
+    return {"features": feats, "window": window, "flags": flags}
+
+
+@pytest.fixture(scope="module")
+def reference(ward):
+    return features.build_patient_hours(
+        ward.readings,
+        ward.activity,
+        ward.truth.outcomes,
+        nurse_observations=ward.nurse_observations,
+    )
+
+
+def _pandas(df) -> pd.DataFrame:
+    out = df.toPandas()
+    for column in out.columns:
+        if pd.api.types.is_datetime64_any_dtype(out[column]):
+            out[column] = pd.to_datetime(out[column], utc=True)
+    return out
+
+
+def test_data_window_is_the_simulation_window(ward, built):
+    w = _pandas(built["window"]).iloc[0]  # collect() would give local times; toPandas gives UTC
+    assert w["data_start"] == ward.activity.start
+    assert w["as_of"] == ward.activity.end
+
+
+def test_features_are_the_same_on_another_calendar(spark, ward, built):
+    """Loaded data is dated on the environment's calendar: every date moved by whole days
+    (`generator.clock`). The model must see exactly the same hospital."""
+    by = pd.Timedelta(days=-42)
+    s = {name: _spark(spark, clock.move(df, by)) for name, df in _silver_frames(ward).items()}
+    flags = gold.profile_flags(s["encounters"], s["conditions"], s["medications"])
+    moved = _pandas(
+        gold.patient_hour_features(
+            s["vitals"], s["encounters"], s["units"], s["patients"], flags, s["observations"]
+        )
+    )
+    moved["prediction_ts"] -= by
+    expected = _pandas(built["features"])
+    pd.testing.assert_frame_equal(
+        moved.sort_values(KEYS, ignore_index=True)[expected.columns],
+        expected.sort_values(KEYS, ignore_index=True),
+    )
+    window = _pandas(gold.data_window(s["vitals"])).iloc[0]
+    assert window["as_of"] == ward.activity.end + by
+
+
+def test_jobs_refuse_a_gold_that_is_behind_the_readings(spark, silver):
+    """13 Oct 2026: an update linked none of 150,456 new readings and still succeeded."""
+    readings, linked = silver["readings"], silver["vitals"]
+    gold.require_current(readings, linked)  # the same data, linked: nothing to say
+    # The linked table missed the last hour (compared inside Spark: first() gives local times).
+    last_hour = readings.agg(F.date_trunc("hour", F.max("ts")).alias("last_hour"))
+    stale = linked.crossJoin(last_hour).where(F.col("ts") < F.col("last_hour")).drop("last_hour")
+    with pytest.raises(gold.GoldBehind, match="Run the pipeline again"):
+        gold.require_current(readings, stale)
+    with pytest.raises(gold.GoldBehind, match="stop at nothing"):
+        gold.require_current(readings, linked.limit(0))
+    gold.require_current(readings.limit(0), linked.limit(0))  # an empty environment is not behind
+    gold.require_current(stale, linked)  # linked readings never run past the readings; not an error
+
+
+def test_flags_follow_the_inclusion_rule(ward, built):
+    """Exactly the profile flags: prediabetes, cured and future conditions don't count."""
+    got = _pandas(built["flags"]).set_index("encounter_id")
+    enc = ward.activity.encounters.set_index("encounter_id")
+    profile = ward.activity.patients.set_index("patient_id")
+    for flag in [*gold.CONDITION_FLAGS, "on_beta_blocker", "n_conditions"]:
+        want = enc["patient_id"].map(profile[flag]).astype(int)
+        assert (got[flag].astype(int).reindex(want.index) == want).all(), flag
+
+
+def test_features_match_the_pandas_reference(ward, built, reference):
+    got = _pandas(built["features"]).sort_values(KEYS, ignore_index=True)
+    want = reference.drop(columns=["label", "label_known_at"]).sort_values(KEYS, ignore_index=True)
+    assert list(got.columns) == list(want.columns)
+    assert len(got) == len(want) > 1000
+
+    # Age is taken at admission from the birth date (pandas: a profile column).
+    birth = pd.to_datetime(
+        got["patient_id"].map(ward.activity.patients.set_index("patient_id")["birth_date"])
+    )
+    admit = got["encounter_id"].map(ward.activity.encounters.set_index("encounter_id")["admit_ts"])
+    days = (admit.dt.tz_localize(None).dt.normalize() - birth).dt.days
+    assert (got["age"] == np.floor(days / 365.25)).all()
+
+    columns = [c for c in want.columns if c != "age"]
+    pd.testing.assert_frame_equal(got[columns], want[columns], check_dtype=False)
+
+
+def test_labels_use_only_recorded_outcomes(ward, built, silver, reference):
+    """Where Gold has a label it equals the pandas label; it has one exactly when the
+    outcome is recorded or t + 12 h has passed the data's end."""
+    labelled = gold.training_set(built["features"], silver["outcomes"], built["window"])
+    got = _pandas(labelled.select(*KEYS, "label", "label_known_at"))
+    ref = reference[[*KEYS, "label"]]
+    end = ward.activity.end
+    recorded = landing.recorded_outcomes(ward.truth.outcomes, end).set_index("encounter_id")
+    event = ref["encounter_id"].map(recorded["event_ts"])
+    t = ref["prediction_ts"]
+    positive = (event > t) & (event <= t + pd.Timedelta(hours=6))
+    settled = t + pd.Timedelta(hours=12) <= end
+    want = ref[settled | positive]
+
+    merged = want.merge(got, on=KEYS, how="outer", indicator=True, suffixes=("_want", "_got"))
+    assert (merged["_merge"] == "both").all()
+    assert (merged["label_want"] == merged["label_got"]).all()
+    assert merged["label_got"].sum() > 0  # the test ward has escalations to find
+    assert (got["label_known_at"] <= end).all()
+
+
+def test_unit_comes_from_history_before_the_hour(spark):
+    t = pd.Timestamp("2026-11-01 10:00", tz="UTC")
+    grid = spark.createDataFrame(
+        pd.DataFrame(
+            {"encounter_id": ["E1", "E1", "E2"], "prediction_ts": [t, t + pd.Timedelta(hours=2), t]}
+        )
+    )
+    units = spark.createDataFrame(
+        pd.DataFrame(
+            {
+                "encounter_id": ["E1", "E1", "E2"],
+                "unit_id": ["A-GENERAL", "A-STEP_DOWN", "B-RESPIRATORY"],
+                # E1 moved at 11:00; E2 has only a version recorded later (one bulk load)
+                "changed_ts": [
+                    t - pd.Timedelta(hours=5),
+                    t + pd.Timedelta(hours=1),
+                    t + pd.Timedelta(hours=9),
+                ],
+            }
+        )
+    )
+    got = _pandas(gold.unit_at(grid, units)).sort_values(KEYS)
+    assert list(got["unit_id"]) == ["A-GENERAL", "A-STEP_DOWN", "B-RESPIRATORY"]
+
+
+def test_unit_history_reads_the_scd2_start(spark):
+    scd2 = spark.sql(
+        "SELECT 'E1' AS encounter_id, 'A-GENERAL' AS unit_id, "
+        "named_struct('last_updated', TIMESTAMP'2026-11-01 08:00:00', '_change_version', 1L, "
+        "'_ingest_ts', TIMESTAMP'2026-11-02 00:00:00') AS __START_AT"
+    )
+    row = _pandas(gold.unit_history(scd2)).iloc[0]
+    assert row["changed_ts"] == pd.Timestamp("2026-11-01 08:00", tz="UTC")
+
+
+def test_condition_reference_lists_what_each_flag_matched(silver):
+    ref = _pandas(gold.condition_flag_reference(silver["conditions"], silver["medications"]))
+    diabetes = ref[ref["flag"] == "diabetes"]["description"]
+    assert "Prediabetes (finding)" not in set(diabetes)
+    assert set(ref["flag"]) <= {*gold.CONDITION_FLAGS, "on_beta_blocker"}
+    assert (ref["patients"] > 0).all()
+
+
+def test_encounters_mask_patients_and_describe_them_as_the_features_do(spark, ward, built):
+    act = ward.activity
+    columns = ["encounter_id", "patient_id", "site_id", "unit_id", "bed_id", "admit_ts"]
+    stays = _spark(spark, act.encounters[[*columns, "discharge_ts"]])
+    people = act.patients[["patient_id", "first_name", "last_name", "birth_date", "sex"]]
+    out = _pandas(gold.encounters(stays, _spark(spark, people), built["flags"]))
+    out = out.set_index("encounter_id")
+
+    assert len(out) == len(act.encounters) and out.index.is_unique
+    assert not {"first_name", "last_name", "birth_date"} & set(out.columns)  # masked
+    described = set(load_spec()["tables"]["encounters"]["columns"])  # the Genie space's columns
+    assert described <= {"encounter_id", *out.columns}
+    # P-1001, P-1002, ... in order of first admission
+    first = act.encounters.groupby("patient_id")["admit_ts"].min().reset_index()
+    order = first.sort_values(["admit_ts", "patient_id"])["patient_id"]
+    labels = {p: f"P-{1001 + i}" for i, p in enumerate(order)}
+    assert (out["patient_label"] == out["patient_id"].map(labels)).all()
+    # the hospital runs on: patients admitted later take new numbers, nobody is renumbered
+    cut = act.encounters["admit_ts"].quantile(0.5)
+    early = act.encounters["admit_ts"] < cut
+    before = _pandas(
+        gold.encounters(
+            _spark(spark, act.encounters.loc[early, [*columns, "discharge_ts"]]),
+            _spark(
+                spark, people[people["patient_id"].isin(act.encounters.loc[early, "patient_id"])]
+            ),
+            built["flags"],
+        )
+    ).set_index("encounter_id")
+    assert len(before) > 0
+    assert (out.loc[before.index, "patient_label"] == before["patient_label"]).all()
+    # age and conditions at admission, as the model's features have them
+    feats = _pandas(built["features"]).groupby("encounter_id").first()
+    both = out.index.intersection(feats.index)
+    assert len(both) > 0 and (out.loc[both, "age"] == feats.loc[both, "age"].astype(int)).all()
+    flags = list(gold.CONDITION_FLAGS)
+    named = feats.loc[both, flags].apply(
+        lambda row: ", ".join(f.replace("_", " ") for f in flags if row[f]) or "none", axis=1
+    )
+    assert (out.loc[both, "conditions"] == named).all()
+    assert (out["conditions"] != "none").any() and (out["conditions"] == "none").any()
+
+
+def test_device_health_matches_the_pandas_reference(ward, silver, built):
+    act = ward.activity
+    want = gold_pandas.device_health_daily(
+        ward.readings, act.device_assignments, act.start, act.end
+    )
+    got = _pandas(
+        gold.device_health_daily(silver["readings"], silver["assignments"], built["window"])
+    )
+    key = ["device_id", "date"]
+    got = got.sort_values(key, ignore_index=True)
+    want = want.sort_values(key, ignore_index=True)
+    assert list(got.columns) == list(want.columns)
+    pd.testing.assert_frame_equal(got, want, check_dtype=False)
