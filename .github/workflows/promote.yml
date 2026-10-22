@@ -41,7 +41,7 @@ concurrency:
 
 jobs:
   report:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -69,7 +69,7 @@ jobs:
 
   promote:
     needs: report
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     # waits here for Kelvin; rejecting leaves @champion as it is
     environment: ${{ inputs.target == 'staging' && 'staging-approval' || 'production-approval' }}

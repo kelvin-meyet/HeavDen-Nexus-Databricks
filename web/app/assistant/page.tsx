@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { ErrorBox, SlowNote } from "@/components/bits";
+import { ErrorBox, SlowNote, WakeNotice } from "@/components/bits";
 import { useApi } from "@/lib/api";
 import { readsWarehouse, useHealth } from "@/lib/health";
 import { type ChatEvent, streamChat } from "@/lib/stream";
@@ -249,10 +249,8 @@ function Answer({ reply, onAsk }: { reply: LiveReply; onAsk: (q: string) => void
         reply.streaming && (
           <>
             <p className="muted">Thinking&hellip;</p>
-            <SlowNote after={8000}>
-              Taking a while? The data service may be waking up: to keep costs near zero it sleeps when nobody is
-              visiting, and starting it can take up to about 40 seconds.
-            </SlowNote>
+            {/* no first event yet means the API hasn't answered: it is waking up */}
+            {!reply.model && <WakeNotice />}
           </>
         )
       )}

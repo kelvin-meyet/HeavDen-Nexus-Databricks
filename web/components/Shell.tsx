@@ -8,7 +8,7 @@ import { whenFull } from "@/lib/format";
 import { HealthContext } from "@/lib/health";
 import type { Health } from "@/lib/types";
 
-import { SlowNote } from "./bits";
+import { WakeNotice } from "./bits";
 import styles from "./Shell.module.css";
 
 const NAV = [
@@ -89,9 +89,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           ) : (
             <>
               <p className={styles.statusNote}>Connecting to the data service&hellip;</p>
-              <SlowNote className={styles.statusNote}>
-                It sleeps when nobody is visiting; waking it can take up to about 40 seconds.
-              </SlowNote>
+              <WakeNotice compact className={styles.statusNote} />
             </>
           )}
         </div>

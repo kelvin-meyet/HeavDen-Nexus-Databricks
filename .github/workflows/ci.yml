@@ -27,9 +27,12 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Every job in every workflow runs on a pinned image, ubuntu-24.04, not ubuntu-latest: on
+# 22 Oct 2026 ubuntu-latest became ubuntu-26.04 (default Java 25) without notice and broke the
+# Spark tests. Move to a new image on purpose, after a run on it, like any dependency.
 jobs:
   lint-and-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -54,14 +57,19 @@ jobs:
       - name: Check notebooks are committed without outputs
         run: uv run nbstripout --verify notebooks/**/*.ipynb
 
+      # Spark runs on Java 17, as on Databricks serverless, named rather than taken from the image's
+      # default: Java 25 (ubuntu-26.04's default) can't start Spark's Hadoop libraries
+      # ("getSubject is not supported"). Both images ship Java 17 under JAVA_HOME_17_X64.
       - name: Unit tests
-        run: uv run pytest -q
+        run: |
+          test -x "$JAVA_HOME_17_X64/bin/java" || { echo "::error::Java 17 is missing from the runner image"; exit 1; }
+          HEAVDEN_JAVA="$JAVA_HOME_17_X64/bin/java" uv run pytest -q
 
   # The ML code against the library versions Databricks serverless environment 6 provides (the
   # training and scoring jobs run there), not just the newer ones in uv.lock: a model trained on
   # Databricks must also be built, scored and explained by the versions installed there.
   ml-on-databricks-libraries:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -89,7 +97,7 @@ jobs:
   # `serving` group pins serverless environment 6's versions, so the model runs on the libraries
   # it was trained with, and the API with an older pandas, scikit-learn and Starlette than uv.lock's.
   api-on-serving-libraries:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -112,7 +120,7 @@ jobs:
   # The website's image, built as a release builds it (release.yml pushes and deploys it, after a
   # smoke test on prod's snapshot): a broken Dockerfile or lock shows here, not at the release.
   api-image:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -128,7 +136,7 @@ jobs:
           assert os.path.exists('/app/rag/vectors.npy'); print('ok', sklearn.__version__)"
 
   web:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
       run:
@@ -154,7 +162,7 @@ jobs:
   # Checks every target resolves (variables, paths, permissions) as the dev service principal,
   # which can't read or write any data. Dev itself is deployed by hand.
   bundle-validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: dev
     permissions:
@@ -190,7 +198,7 @@ jobs:
   staging:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: [lint-and-test, ml-on-databricks-libraries, bundle-validate]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90 # the drift check waits for the monitor's refresh (~15-25 min)
     environment: staging
     concurrency:
@@ -273,7 +281,7 @@ jobs:
   assistant-staging:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: [staging]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     outputs:
       assistant: ${{ steps.changed.outputs.assistant }}
@@ -344,7 +352,7 @@ jobs:
     name: assistant-quality (${{ matrix.model }}${{ matrix.served && ', served' || '' }})
     needs: [assistant-staging]
     if: needs.assistant-staging.outputs.assistant == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment: staging
     strategy:

@@ -408,7 +408,7 @@ There is **one website**: it reads `prod`. No staging website or staging API exi
     - `app/api/chat/stream/route.ts` for the streamed chat, passed through as it is written.
   - `lib/backend.ts`, which runs only on Vercel's servers, adds the visitor's address and the origin secret. So the website's server-side code holds a secret ([Known limitations](#known-limitations-and-why-they-are-accepted-for-now), item 1).
   - **CDN cache:** a successful GET answer is stored at Vercel's edge for 5 minutes, then served while a fresh copy is fetched in the background (for up to a day). Errors, what-ifs and chat are never stored.
-  - **Waking-up notes.** A warm load takes a second or two, so any data section, the what-if or a chat answer still waiting after about 4 seconds says what is waking up. In live mode: "Waking up the API and Databricks' SQL warehouse: they sleep when nobody is visiting, to keep costs near zero (up to about 40 seconds)." Otherwise it names only the data service. A chat question that runs on the warehouse adds that Genie or the patient lookup may be waiting for the warehouse to start. Checked in a browser against a stand-in API that answers slowly (22 Oct).
+  - **Waking-up notice.** A warm load takes a second or two, so any data section, the what-if or a chat question still waiting for the API after about 4 seconds shows a notice in a pale blue panel. It draws the request's path, Website → API → SQL warehouse, as a small heartbeat trace (the site's logo), with a pulse running along it and each stop lighting as the pulse arrives. Beside it: "Waking up the API and Databricks' SQL warehouse. Cold starts take 30–40 seconds, saving compute cost." and the seconds waited so far. Without live data the trace stops at the API. The sidebar shows a compact version; visitors who turn motion off see the whole trace drawn and still; screen readers get the words only. A chat question that runs on the warehouse adds that Genie or the patient lookup may be waiting for it. Checked in a browser, on desktop and phone widths, against a stand-in API that answers slowly (22 Oct).
   - **The header's status** comes from `/health`. When the day's warehouse allowance is used up (`live_data` false in live mode), it adds a one-line note that the pages show the latest snapshot.
   - **`robots.txt`** (`app/robots.ts`) keeps search-engine crawlers off each patient's page and the API, which query the SQL warehouse until 31 Oct. The other pages stay indexable.
   - Design: a NEWS2 observation chart made lively. Red means only "High band / alert". Times are shown in UTC for now.
@@ -457,6 +457,7 @@ sequenceDiagram
     | `bundle-validate` | the Databricks bundle for dev, staging and prod, as a read-only identity |
 
   - **All six jobs are required checks:** a red one blocks the merge. Until 22 Oct only `lint-and-test` was, an oversight: the ruleset was written on 8 Oct, before the other jobs existed.
+  - **Every job runs on a pinned image, `ubuntu-24.04`,** not `ubuntu-latest`. On 22 Oct `ubuntu-latest` became Ubuntu 26.04 without notice; its default Java 25 can't start Spark's Hadoop libraries, and 28 Spark tests failed. The test step also names Java 17 itself (the version Databricks serverless runs), so a future image can't swap it. A new image is adopted on purpose, after a run on it, like any other dependency.
   - **On every merge to `main`,** CI deploys **staging** and runs it end to end on fixed rehearsal data: pipeline, training smoke test, scoring and drift check.
   - **If the Databricks assistant changed,** CI also deploys it to staging, red-teams it and runs the quality test (one job per model; only the served model can fail the run).
   - **Outside GitHub Actions,** the same merge makes Vercel build and publish the website's pages (Step 12).
@@ -557,7 +558,7 @@ flowchart TB
 | 20-21 Oct | v0.6.2: first image in GHCR; Terraform part 2 (the container app); Vercel project live |
 | 21 Oct | v0.6.3: origin lock + CDN cache, deployed and smoke-tested on the live URL |
 | 21 Oct | Live-site red-team 0 of 19; per-visitor limit confirmed with two networks |
-| 22 Oct | All six CI checks required to merge; v0.6.4: a shared warehouse allowance of 2 hours a day for pages and chat |
+| 22 Oct | All six CI checks required to merge; CI pinned to `ubuntu-24.04` and Java 17 after `ubuntu-latest` moved to 26.04; v0.6.4: a shared warehouse allowance of 2 hours a day for pages and chat, waking-up notes |
 
 ## How Phase 5 changed the original plan
 

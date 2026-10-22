@@ -49,7 +49,7 @@ concurrency:
 
 jobs:
   report:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: What the drift check found
@@ -86,7 +86,7 @@ jobs:
 
   retrain:
     needs: report
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 75
     # waits here for Kelvin; rejecting ends the request
     environment: ${{ inputs.target == 'staging' && 'staging-approval' || 'retrain-approval' }}
@@ -143,7 +143,7 @@ jobs:
   request-promotion:
     needs: retrain
     if: needs.retrain.outputs.passed == 'true' && needs.retrain.outputs.champion != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: write # start promote.yml with this run's own token
