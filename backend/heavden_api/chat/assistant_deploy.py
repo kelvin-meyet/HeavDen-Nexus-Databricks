@@ -158,6 +158,42 @@ def stale_versions(served_entities, model_name: str) -> list[int]:
     return sorted(version for version, llm in served if version < newest[llm])
 
 
+def idle_versions(config, model_name: str, llm_endpoint: str) -> list[int]:
+    """Versions of `model_name` answering with `llm_endpoint` that take no traffic: the ones a
+    new version of that model replaces. The version with the traffic stays until the new one
+    serves, then waits at 0% as the rollback until the next deploy; other models' versions (dev's
+    comparison set) stay."""
+    routes = (config.traffic_config.routes or []) if config.traffic_config else []
+    traffic = {r.served_entity_name or r.served_model_name: r.traffic_percentage for r in routes}
+    return sorted(
+        int(e.entity_version)
+        for e in config.served_entities or []
+        if e.entity_name == model_name
+        and (e.environment_vars or {}).get("LLM_ENDPOINT") == llm_endpoint
+        and not traffic.get(e.name)
+    )
+
+
+def retire(workspace, name: str, endpoint: str, llm_endpoint: str) -> list[int]:
+    """Take a new version's idle predecessors off the endpoint before deploying it, one update at
+    a time (they stay in the registry). Every update rebuilds each version the endpoint serves,
+    and on 22 Oct 2026 the workspace's serving quota ("limit for provisioned concurrency")
+    refused an update that rebuilt six: staging had kept every version since the first."""
+    from databricks.sdk.errors import NotFound
+
+    from databricks import agents
+
+    try:
+        config = workspace.serving_endpoints.get(endpoint).config
+    except NotFound:
+        return []  # the first deploy creates the endpoint
+    idle = idle_versions(config, name, llm_endpoint)
+    for version in idle:
+        agents.delete_deployment(name, version)
+        wait_until_serving(workspace, endpoint)
+    return idle
+
+
 def wait_until_serving(workspace, endpoint: str, timeout: float = 2700.0) -> float:
     """Seconds until the endpoint serves its new configuration (ready, no update in progress)."""
     start = time.monotonic()
@@ -242,6 +278,9 @@ def deploy_model(
     from databricks import agents
 
     llm = settings.llm_endpoint
+    # first, so a failure here leaves no registered version behind
+    retired = retire(workspace, name, endpoint, llm)
+    print(f"Off {endpoint} before the deploy (still registered): versions {retired or 'none'}")
     env = environment(settings)
     os.environ.update(env)  # the example answered while logging goes through the real assistant
     with mlflow.start_run(run_name=f"assistant · {llm}"):
