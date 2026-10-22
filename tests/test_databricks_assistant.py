@@ -295,6 +295,82 @@ def test_a_comparison_set_replaces_every_older_version_of_its_models():
     assert deploy.stale_versions(on_endpoint[5:8], "heavden_dev.ml.assistant") == []
 
 
+def _endpoint(versions, traffic, model="heavden_staging.ml.assistant"):
+    """An endpoint config shaped as Model Serving returns it: `versions` = {version: LLM}."""
+    prefix = model.replace(".", "-")
+    entities = [
+        SimpleNamespace(
+            name=f"{prefix}_{v}",
+            entity_name=model,
+            entity_version=str(v),
+            environment_vars={"LLM_ENDPOINT": llm},
+        )
+        for v, llm in versions.items()
+    ]
+    routes = [
+        SimpleNamespace(
+            served_entity_name=f"{prefix}_{v}", served_model_name=None, traffic_percentage=t
+        )
+        for v, t in traffic.items()
+    ]
+    return SimpleNamespace(served_entities=entities, traffic_config=SimpleNamespace(routes=routes))
+
+
+def test_a_new_version_replaces_its_models_idle_versions_and_keeps_the_one_serving():
+    mini, gpt55, oss = "heavden-gpt-5-mini", "heavden-gpt-5-5", "databricks-gpt-oss-120b"
+    # staging on 22 Oct 2026: five versions of one model, the newest with all the traffic
+    staging = _endpoint({v: mini for v in range(1, 6)}, {5: 100, 4: 0, 3: 0, 2: 0, 1: 0})
+    assert deploy.idle_versions(staging, "heavden_staging.ml.assistant", mini) == [1, 2, 3, 4]
+    # dev's comparison set: other models' versions stay; the serving one stays
+    dev = _endpoint(
+        {9: oss, 10: gpt55, 11: mini}, {11: 100, 9: 0, 10: 0}, "heavden_dev.ml.assistant"
+    )
+    assert deploy.idle_versions(dev, "heavden_dev.ml.assistant", mini) == []
+    # after the next deploy the previous version waits at 0% (the rollback) until the one after
+    dev = _endpoint({9: oss, 10: gpt55, 11: mini, 12: mini}, {12: 100}, "heavden_dev.ml.assistant")
+    assert deploy.idle_versions(dev, "heavden_dev.ml.assistant", mini) == [11]
+    assert deploy.idle_versions(dev, "heavden_staging.ml.assistant", mini) == []  # another model
+
+
+def test_retiring_removes_one_version_per_update_and_skips_a_new_endpoint(monkeypatch):
+    import sys
+
+    from databricks.sdk.errors import NotFound
+
+    removed, waits = [], []
+    agents = SimpleNamespace(
+        delete_deployment=lambda name, version: removed.append((name, version))
+    )
+    monkeypatch.setitem(sys.modules, "databricks.agents", agents)
+    monkeypatch.setattr("databricks.agents", agents, raising=False)
+    monkeypatch.setattr(
+        deploy, "wait_until_serving", lambda workspace, endpoint: waits.append(endpoint)
+    )
+    config = _endpoint({1: "heavden-gpt-5-mini", 2: "heavden-gpt-5-mini"}, {2: 100})
+    workspace = SimpleNamespace(
+        serving_endpoints=SimpleNamespace(get=lambda endpoint: SimpleNamespace(config=config))
+    )
+    name = "heavden_staging.ml.assistant"
+    assert deploy.retire(workspace, name, "heavden-assistant-staging", "heavden-gpt-5-mini") == [1]
+    assert removed == [(name, 1)] and waits == ["heavden-assistant-staging"]
+
+    def missing(endpoint):
+        raise NotFound("no such endpoint")
+
+    new = SimpleNamespace(serving_endpoints=SimpleNamespace(get=missing))
+    assert deploy.retire(new, name, "heavden-assistant-prod", "heavden-gpt-5-mini") == []
+
+
+def test_the_deploy_task_runs_at_most_once():
+    import yaml
+    from test_ci_workflow import ROOT
+
+    job = yaml.safe_load((ROOT / "databricks/resources/assistant_deploy.job.yml").read_text())
+    (task,) = job["resources"]["jobs"]["assistant_deploy"]["tasks"]
+    assert task["disable_auto_optimization"] is True  # no serverless retries: each one registers
+    assert "max_retries" not in task
+
+
 def test_an_endpoint_reply_is_read_back_into_answer_and_outputs():
     response = {
         "output": [

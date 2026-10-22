@@ -23,6 +23,9 @@ resources:
       tasks:
         - task_key: deploy
           environment_key: assistant
+          # at most once: serverless retries failed tasks by itself, and each attempt registers
+          # and deploys another version (22 Oct 2026: four attempts, versions 6-9, all refused)
+          disable_auto_optimization: true
           spark_python_task:
             python_file: ../src/jobs/deploy_assistant.py
             parameters:
