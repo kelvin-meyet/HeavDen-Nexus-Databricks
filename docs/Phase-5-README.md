@@ -285,7 +285,7 @@ Every tool and service used up to the end of Phase 5, with what it is used for h
   - **JSON files → `bronze.vitals_raw` and `bronze.outcomes_raw`:** **Auto Loader** picks up each new file exactly once (streaming tables). Lineage columns record which file each row came from.
 - **Why:**
   - **Incremental, not full copies:** each run moves only the new data, which is cheaper and how real pipelines run.
-  - A plain JDBC job instead of Lakeflow Connect: Lakeflow Connect's query-based connector isn't offered in this workspace, and its database gateway needs always-on compute.
+  - A small serverless job instead of Lakeflow Connect: Lakeflow Connect's query-based connector isn't offered in this workspace, and its database gateway needs always-on compute. The job sends its Change Tracking queries to Azure SQL with `remote_query` through the Unity Catalog connection `heavden_sql` (Lakehouse Federation), so the SQL login stays in Unity Catalog and never appears in code or job settings.
   - Bronze keeps the raw data untouched, so anything downstream can be rebuilt from it.
 
 **Next:** raw data has to be checked, linked and shaped.
@@ -329,7 +329,7 @@ Every tool and service used up to the end of Phase 5, with what it is used for h
     - isotonic calibration keeps the probabilities honest, which reweighting would inflate;
     - regularisation (`C = 0.1`; at least 100 hours per LightGBM leaf, subsampling) keeps the few hundred positives from being memorised.
     - **Why no extra weight on positive examples:** the alerts come from a fixed budget, so what matters is the order of the patients, and weighting doesn't improve it. It inflates the probabilities, which calibration then has to undo, and with few positives each one counts many times over, so LightGBM overfits them.
-    - **Measured (22 Oct, on the Phase 0 rehearsal data, not prod's; production training code, only the weight changed; 372 positives in training, 28 escalations in test):**
+    - **Measured (22 Oct, on the Phase 0 rehearsal data, not prod's; production training code, only the weight changed; 372 positive hours (62 escalations) in training; 28 escalations in the 70-hour test block, 1-3 Oct):** prod's version 3 also met 28 escalations in its own test block (48 hours, 11-13 Oct). That's a coincidence, checked on 22 Oct: one count comes straight from the rehearsal table, the other from version 3's MLflow run (`test_escalations`).
 
       | Weight on positives | 1 (used) | 3 | 10 | 30 | 153 (balanced) |
       |---|---|---|---|---|---|
@@ -469,9 +469,8 @@ Every tool and service used up to the end of Phase 5, with what it is used for h
   - **Every chat question passes, in order:**
     1. a per-visitor limit (30 an hour);
     2. a guardrail screen (obvious extraction attempts get a fixed refusal, with no model call);
-    3. the day's warehouse allowance (below);
-    4. a daily cap (100 live answers a day across all visitors, kept in Azure Table Storage);
-    5. the live answer, which is checked for leaks while it streams.
+    3. a daily cap (100 live answers a day across all visitors, kept in Azure Table Storage);
+    4. the live answer, which is checked for leaks while it streams. Its number and patient tools reserve warehouse time first (the allowance, below); document questions don't use the warehouse.
   - **A shared warehouse allowance (since v0.6.4):** the website may keep the SQL warehouse on for at most **2 hours a day** (about $5.60), pages and chat together, all visitors combined.
     - Before each query or Genie question, the API reserves the time it keeps the warehouse on: the query itself plus the 5 minutes until the warehouse stops. Time already reserved isn't counted twice, so a page's burst of queries costs one reservation. The total is kept in the same Azure Table as the chat cap.
     - The health call that every page makes never wakes the warehouse, and made-up patient ids are refused without a query.
@@ -587,7 +586,7 @@ sequenceDiagram
 
     | Job | Checks |
     |---|---|
-    | `lint-and-test` | ruff, formatting, notebooks without outputs, ~580 unit tests |
+    | `lint-and-test` | ruff, formatting, notebooks without outputs, about 600 unit tests |
     | `ml-on-databricks-libraries` | the ML code on Databricks' exact library versions |
     | `api-on-serving-libraries` | the API on the image's library versions |
     | `api-image` | builds the image and checks it runs the model and has its document index |
@@ -639,7 +638,7 @@ flowchart TB
 | Who or what | Signs in with | May do |
 |---|---|---|
 | GitHub Actions (CI/CD) | **OIDC**: a short-lived token per run, trusted only for this repo + environment. No stored cloud credential | deploy and run in its own environment's catalog; prod's identity also writes the website's snapshot volume and deploys the website's container app |
-| The website's API | **Managed identity** `heavden-web-prod`. **No secret** | read prod's Gold; run Genie and the explain function; read the `website` blob container; write one table (the chat cap); call the Azure OpenAI resource's deployments |
+| The website's API | **Managed identity** `heavden-web-prod`. **No secret** | read prod's Gold; run Genie and the explain function; read the `website` blob container; write one table (the daily chat cap and the warehouse allowance); call the Azure OpenAI resource's deployments |
 | Vercel → API | the **origin secret**, generated by Terraform (48 characters), never printed or committed | the API answers nothing without it (403), so callers can't skip the website, its cache or its visitor address |
 | Visitors | nothing | read pages; 30 chat questions an hour each; 100 live answers a day in total; 2 hours of warehouse time a day in total |
 
@@ -753,7 +752,7 @@ Where an item is an oversight, it says so.
 | # | Limitation | Why it is accepted for now | What would close it |
 |---|---|---|---|
 | 12 | **Synthetic data:** results show that the method works, not how it would do in a real hospital. | Real patient data can't be published. | Out of scope for a public project. |
-| 13 | **A small test:** version 3's lead over version 1 is 2 escalations out of 28, within noise. | It is a 3-day test block in a 360-bed simulated hospital. So the claim is narrower: not worse at catching escalations (at least as many in 89% of resamples, ties counted) and better at ranking patients (AUROC higher in 97%), against limits fixed before the run (Step 5). | Longer test periods: the weekly job keeps adding data. Also record how often a new model flags strictly more, not only "at least as many". |
+| 13 | **A small test:** version 3's lead over version 1 is 2 escalations out of 28, within noise. | It is a 2-day (48-hour) test block in a 360-bed simulated hospital. So the claim is narrower: not worse at catching escalations (at least as many in 89% of resamples, ties counted) and better at ranking patients (AUROC higher in 97%), against limits fixed before the run (Step 5). | Longer test periods: the weekly job keeps adding data. Also record how often a new model flags strictly more, not only "at least as many". |
 | 14 | **Tests are evidence, not proof.** The red-team covers 19 known attacks and the quality test 23 questions. Genie's text-to-SQL can still misread a question it hasn't seen. | Fixed test sets plus defences that don't rely on the model (the screen, the leak check, the caps) are the standard approach. | Grow both sets. No visitor questions are stored, so new ones are written by hand. |
 | 15 | **No per-minute token limit on the model.** The gpt-5-mini deployment is shared with the Databricks assistant and CI's quality test. | The daily cap of 100 answers keeps the model's own cost well under a dollar a day (the warehouse time behind number answers counts against the 2-hour allowance, item 10). | A separate website deployment with its own limit (planned). |
 | 16 | **gpt-5-mini is weaker at writing SQL itself,** which snapshot mode will need from 1 Nov. Its retirement is scheduled for February 2027. | In live mode Genie writes the SQL, and gpt-5-mini passed the quality test that way. | Phase 6: a stronger model (gpt-6.1-sol) through a Responses API connector, with a quality test and a red-team before the switch. |

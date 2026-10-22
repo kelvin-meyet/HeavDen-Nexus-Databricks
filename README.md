@@ -70,7 +70,7 @@ Within the same alert budget, version 3 warns about **2 more of the 28** deterio
 
 ## Rehearsal results (Phase 0, offline)
 
-Before Databricks, the same code ran on a laptop. On a held-out 2-day test period with 28 escalations, with both scores limited to **at most 2 alerts per nurse per 12-hour shift**:
+Before Databricks, the same code ran on a laptop. On a held-out test period of about 3 days (70 hours) with 28 escalations, with both scores limited to **at most 2 alerts per nurse per 12-hour shift**:
 
 | | Model | NEWS2 |
 |---|---|---|
