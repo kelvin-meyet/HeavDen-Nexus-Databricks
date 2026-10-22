@@ -5,8 +5,10 @@ import { usePathname } from "next/navigation";
 
 import { useApi } from "@/lib/api";
 import { whenFull } from "@/lib/format";
+import { HealthContext } from "@/lib/health";
 import type { Health } from "@/lib/types";
 
+import { WakeNotice } from "./bits";
 import styles from "./Shell.module.css";
 
 const NAV = [
@@ -19,7 +21,8 @@ const NAV = [
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
-  // Calling /health on every page load also wakes the backend if Render has put it to sleep.
+  // Calling /health on every page load also wakes the API if Container Apps has stopped it. The
+  // answer is shared with the pages, so a slow section can say what is waking up.
   const health = useApi<Health>("/health");
 
   return (
@@ -75,11 +78,19 @@ export function Shell({ children }: { children: React.ReactNode }) {
                   ? "The wards are a 14-day simulation, paused at this hour. Every date here is simulated."
                   : "The wards run on a simulated clock, moved forward by each simulation run."}
               </p>
+              {health.data.mode === "live" && health.data.live_data === false && (
+                <p className={styles.statusNote}>
+                  Live data is paused until midnight UTC: these pages show the latest snapshot.
+                </p>
+              )}
             </>
           ) : health.error ? (
             <p className={styles.offline}>The data service isn&rsquo;t answering yet; it may be waking up.</p>
           ) : (
-            <p className={styles.statusNote}>Connecting to the data service&hellip;</p>
+            <>
+              <p className={styles.statusNote}>Connecting to the data service&hellip;</p>
+              <WakeNotice compact className={styles.statusNote} />
+            </>
           )}
         </div>
 
@@ -92,7 +103,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className={styles.content}>
-        <main id="main">{children}</main>
+        <main id="main">
+          <HealthContext value={health.data}>{children}</HealthContext>
+        </main>
         <footer className={styles.footer}>
           HeavDen Nexus is a portfolio project. It is not a medical device and must not be used for real patient
           care. <Link href="/about-the-data">About the hospital and its data</Link>

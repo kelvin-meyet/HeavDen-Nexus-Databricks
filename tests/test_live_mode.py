@@ -136,7 +136,7 @@ def test_live_pages_match_demo_pages_on_the_same_data(clients, path, params):
     assert live.get(path, params=params).json() == demo.get(path, params=params).json()
 
 
-def test_live_health_takes_now_from_the_warehouse(clients):
+def test_live_health_reports_prods_hour_once_a_page_has_asked(clients):
     demo, live, api = clients
     body, demo_body = live.get("/health").json(), demo.get("/health").json()
     assert body["mode"] == "live" and body["as_of"] == demo_body["as_of"]

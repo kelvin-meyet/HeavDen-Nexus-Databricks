@@ -237,6 +237,159 @@ textarea {
   min-height: 1.2em;
 }
 
+/* said when a load takes long enough that the data service is waking up (bits.tsx SlowNote) */
+.wakingNote {
+  margin: 0;
+  max-width: var(--measure);
+  padding-left: 10px;
+  border-left: 3px solid var(--ink-soft);
+  color: var(--graphite-soft);
+  font-size: var(--step--1);
+}
+
+/* The waking notice (bits.tsx WakeNotice): a pulse runs along a heartbeat trace from the website
+   to what is waking up, and each stop lights as it arrives. */
+.wake {
+  --wake-on: var(--ink);
+  --wake-off: #c3cdf5;
+  --wake-line: #c9d3f7;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 22px;
+  max-width: var(--measure);
+  padding: 14px 18px;
+  border-radius: var(--radius);
+  background: var(--ink-wash);
+  animation: wake-in 0.3s ease-out;
+}
+
+.wakeText {
+  flex: 1 1 16rem;
+}
+
+.wakeTitle {
+  margin: 0;
+  font-family: var(--font-display), var(--font-body), sans-serif;
+  font-size: var(--step-0);
+  font-weight: 700;
+  color: var(--ink-strong);
+}
+
+.wakeDetail {
+  margin: 2px 0 0;
+  font-size: var(--step--1);
+  color: var(--graphite-soft);
+}
+
+.wakeTime {
+  margin-left: 8px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.wakeTrace {
+  flex: none;
+  overflow: visible;
+}
+
+.wakeLine,
+.wakePulse {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.wakeLine {
+  stroke: var(--wake-line);
+  stroke-width: 2;
+}
+
+.wakePulse {
+  stroke: var(--wake-on);
+  stroke-width: 2.5;
+  stroke-dasharray: 12 112;
+  animation: wake-pulse var(--cycle) linear infinite;
+}
+
+.wakeStop {
+  fill: var(--wake-off);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: wake-stop var(--cycle) ease-out var(--at) infinite;
+}
+
+.wakeTrace text {
+  font-size: 11px;
+  fill: var(--graphite-soft);
+}
+
+/* on the dark sidebar: the trace and one line, in the sidebar's colours */
+.wake.wakeCompact {
+  --wake-on: #ffffff;
+  --wake-off: rgba(255, 255, 255, 0.3);
+  --wake-line: rgba(255, 255, 255, 0.22);
+  gap: 4px;
+  padding: 0;
+  background: none;
+}
+
+.wakeCompact .wakeDetail,
+.wakeCompact .wakeTime {
+  margin: 0;
+  color: inherit;
+}
+
+.wakeCompact .wakeTime {
+  display: block;
+}
+
+@keyframes wake-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes wake-pulse {
+  0% {
+    stroke-dashoffset: 12;
+  }
+  80%,
+  100% {
+    stroke-dashoffset: -100;
+  }
+}
+
+@keyframes wake-stop {
+  0% {
+    fill: var(--wake-on);
+    transform: scale(1.5);
+  }
+  25% {
+    fill: var(--wake-on);
+    transform: scale(1);
+  }
+  55%,
+  100% {
+    fill: var(--wake-off);
+    transform: scale(1);
+  }
+}
+
+/* without motion: the whole trace drawn, every stop lit */
+@media (prefers-reduced-motion: reduce) {
+  .wakePulse {
+    animation: none;
+    stroke-dasharray: none;
+  }
+
+  .wakeStop {
+    animation: none;
+    fill: var(--wake-on);
+  }
+}
+
 @keyframes shimmer {
   to {
     background-position: -200% 0;

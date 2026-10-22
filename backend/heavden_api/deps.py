@@ -13,9 +13,9 @@ from fastapi import Request
 from heavden.agent.genie import find_space
 from heavden.agent.retrieval import Embedder, FastEmbedder, Retriever
 from heavden_api.chat.agent import LLM, OpenAILLM, system_prompt
-from heavden_api.chat.databricks_tools import DatabricksToolbox, Genie, Warehouse
+from heavden_api.chat.databricks_tools import STATEMENT_WORK, DatabricksToolbox, Genie, Warehouse
 from heavden_api.chat.guardrails import LeakDetector
-from heavden_api.chat.limits import DailyBudget, RateLimiter, TableBudget
+from heavden_api.chat.limits import DailyBudget, RateLimiter, TableBudget, WarehouseAllowance
 from heavden_api.chat.memory import ConversationStore
 from heavden_api.chat.models import profile
 from heavden_api.chat.recorded import Recordings
@@ -49,6 +49,8 @@ class AppState:
     llm: LLM | None = None  # None: /chat replays recordings
     embedder: Embedder | None = None  # loaded on the first document search
     live: LiveTools | None = None  # live mode only
+    # live mode: the day's SQL warehouse time for pages and chat together
+    warehouse_allowance: WarehouseAllowance | None = None
     _retriever: Retriever | None = field(default=None, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -60,6 +62,17 @@ class AppState:
     @property
     def data_start(self) -> pd.Timestamp:
         return self.source.now()[1]
+
+    def live_data(self) -> bool:
+        """Whether the pages read prod live right now: live mode, and today's warehouse
+        allowance can still cover a query (past it they come from the snapshot)."""
+        allowance = self.warehouse_allowance
+        return allowance is not None and allowance.can_reserve(STATEMENT_WORK)
+
+    def known_now(self) -> tuple[pd.Timestamp, pd.Timestamp]:
+        """("now", first hour) for the health call every page makes: never wakes the warehouse
+        when the hour is already known (in live mode: prod's last answer, else the snapshot's)."""
+        return self.source.known_now() or self.source.now()
 
     def toolbox(self) -> Toolbox:
         """The chat's tools for one turn: in live mode numbers come from Genie and patients from
@@ -96,15 +109,22 @@ class AppState:
         return self._retriever
 
 
-def connect_live(settings: Settings, api) -> tuple[LiveSource, LiveTools]:
-    """Prod's Gold on the SQL warehouse, and the chat's Databricks tools, through `api`."""
+def connect_live(
+    settings: Settings, api, snapshot: Snapshot, allowance: WarehouseAllowance
+) -> tuple[LiveSource, LiveTools]:
+    """Prod's Gold on the SQL warehouse, and the chat's Databricks tools, through `api`. Every
+    statement and Genie question reserves warehouse time from `allowance`; once it is used up,
+    pages come from `snapshot`."""
     space = find_space(api, settings.genie_title)
     if space is None:
         raise RuntimeError(f"MODE=live: no Genie space titled {settings.genie_title!r}")
-    warehouse = Warehouse(api, settings.warehouse_id, catalog=settings.live_catalog)
+    warehouse = Warehouse(
+        api, settings.warehouse_id, catalog=settings.live_catalog, allowance=allowance
+    )
     # 180 s: a cold Genie question has taken ~120 s
-    tools = LiveTools(settings.live_catalog, warehouse, Genie(api, space, timeout=180.0))
-    return LiveSource(warehouse), tools
+    genie = Genie(api, space, timeout=180.0, allowance=allowance)
+    tools = LiveTools(settings.live_catalog, warehouse, genie)
+    return LiveSource(warehouse, fallback=DemoSource(snapshot)), tools
 
 
 def build_state(
@@ -123,8 +143,11 @@ def build_state(
         folder = fetch_snapshot(read, settings.snapshot_dir)
         print(f"snapshot {folder.name} from {settings.snapshot_url}", flush=True)
     snapshot = Snapshot.load(folder)
+    allowance = None
     if settings.mode == "live":
-        source, live = connect_live(settings, api or databricks_api(settings.managed_identity))
+        allowance = settings.warehouse_allowance()
+        api = api or databricks_api(settings.managed_identity)
+        source, live = connect_live(settings, api, snapshot, allowance)
         sandbox = None
     else:
         source, live, sandbox = DemoSource(snapshot), None, SqlSandbox(snapshot)
@@ -153,6 +176,7 @@ def build_state(
         llm=llm,
         embedder=embedder,
         live=live,
+        warehouse_allowance=allowance,
     )
 
 

@@ -24,10 +24,20 @@ import numpy as np
 
 from heavden.agent.corpus import Chunk
 from heavden.agent.retrieval import SearchResult, in_force
+from heavden_api.chat.limits import AllowanceUsed, WarehouseAllowance
 from heavden_api.chat.tools import ROWS_TO_LLM, TOOL_SPECS, Toolbox
 
 EMBEDDING_ENDPOINT = "databricks-gte-large-en"
 GENIE_DONE = {"COMPLETED", "FAILED", "CANCELLED", "QUERY_RESULT_EXPIRED"}
+# seconds a statement keeps the warehouse busy at most (warm: 1-3 s; a cold start adds ~10)
+STATEMENT_WORK = 30.0
+ALLOWANCE_USED = "today's allowance of live data is used up; it comes back at midnight UTC"
+# to the LLM with that error: answer what the documents cover instead of asking again
+ALLOWANCE_HINT = (
+    "Don't call query_gold or explain_patient again for this question. Tell the user that live "
+    "numbers and patient details are paused until midnight UTC, and answer whatever the "
+    "documents cover."
+)
 
 # query_gold takes a question instead of SQL: Genie writes the SQL
 GENIE_TOOL_SPECS = copy.deepcopy(TOOL_SPECS)
@@ -79,15 +89,26 @@ def _table(statement_response: dict) -> tuple[list[str], list[list]]:
 
 class Warehouse:
     """SQL on a SQL warehouse through the Statement Execution API. With `catalog`, unqualified
-    names resolve in it (`gold.risk_scores` is `<catalog>.gold.risk_scores`)."""
+    names resolve in it (`gold.risk_scores` is `<catalog>.gold.risk_scores`). With `allowance`
+    (the website), each statement first reserves the warehouse time it costs."""
 
-    def __init__(self, api, warehouse_id: str, timeout: float = 120.0, catalog: str | None = None):
+    def __init__(
+        self,
+        api,
+        warehouse_id: str,
+        timeout: float = 120.0,
+        catalog: str | None = None,
+        allowance: WarehouseAllowance | None = None,
+    ):
         self.api, self.warehouse_id, self.timeout = api, warehouse_id, timeout
-        self.catalog = catalog
+        self.catalog, self.allowance = catalog, allowance
 
     def execute(self, statement: str, parameters: list[dict] | None = None) -> dict:
         """The finished statement, all result chunks in `result.data_array`. `parameters` are
-        the API's own ({"name", "value", "type"}; no value is NULL)."""
+        the API's own ({"name", "value", "type"}; no value is NULL). Raises `AllowanceUsed`
+        when the allowance can't cover it."""
+        if self.allowance is not None and not self.allowance.reserve(STATEMENT_WORK):
+            raise AllowanceUsed(ALLOWANCE_USED)
         body = {
             "warehouse_id": self.warehouse_id,
             "statement": statement,
@@ -132,12 +153,23 @@ class GenieAnswer:
 
 class Genie:
     """One question to a Genie space (Conversation API): start a conversation, wait for the
-    message, read its query attachment's SQL and result."""
+    message, read its query attachment's SQL and result. With `allowance` (the website), each
+    question first reserves warehouse time: Genie may run its query until we stop waiting."""
 
-    def __init__(self, api, space_id: str, timeout: float = 120.0, poll: float = 1.5):
+    def __init__(
+        self,
+        api,
+        space_id: str,
+        timeout: float = 120.0,
+        poll: float = 1.5,
+        allowance: WarehouseAllowance | None = None,
+    ):
         self.api, self.space_id, self.timeout, self.poll = api, space_id, timeout, poll
+        self.allowance = allowance
 
     def ask(self, question: str) -> GenieAnswer:
+        if self.allowance is not None and not self.allowance.reserve(self.timeout):
+            raise AllowanceUsed(ALLOWANCE_USED)
         base = f"/api/2.0/genie/spaces/{self.space_id}"
         started = self.api.do("POST", f"{base}/start-conversation", body={"content": question})
         path = f"{base}/conversations/{started['conversation_id']}/messages/{started['message_id']}"
@@ -250,6 +282,9 @@ class DatabricksToolbox(Toolbox):
     def call(self, name: str, arguments: dict) -> tuple[str, dict]:
         try:
             return super().call(name, arguments)
+        except AllowanceUsed as exc:
+            step = {"tool": name, **arguments, "error": str(exc)}
+            return json.dumps({"error": str(exc), "next": ALLOWANCE_HINT}), step
         except ToolError as exc:
             step = {"tool": name, **arguments, "error": str(exc)}
             return json.dumps({"error": str(exc)}), step

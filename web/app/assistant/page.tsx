@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { ErrorBox } from "@/components/bits";
+import { ErrorBox, SlowNote, WakeNotice } from "@/components/bits";
 import { useApi } from "@/lib/api";
+import { readsWarehouse, useHealth } from "@/lib/health";
 import { type ChatEvent, streamChat } from "@/lib/stream";
 import type { ChatReply, ChatStep } from "@/lib/types";
 
@@ -28,6 +29,14 @@ const PENDING: Record<string, string> = {
   query_gold: "Querying the data",
   search_documents: "Searching the documents",
   explain_patient: "Looking up the patient",
+};
+
+// live mode: the tools that run on Databricks' SQL warehouse, said when one takes a while
+const WAREHOUSE_WAIT: Record<string, string> = {
+  query_gold:
+    "Genie is writing the SQL and running it on Databricks’ SQL warehouse. If the warehouse was asleep (it sleeps when nobody is visiting, to keep costs near zero), it starts first: this can take up to a minute.",
+  explain_patient:
+    "The patient lookup runs on Databricks’ SQL warehouse. If the warehouse was asleep (it sleeps when nobody is visiting, to keep costs near zero), it starts first.",
 };
 
 function applyEvent(reply: LiveReply | undefined, event: ChatEvent): LiveReply {
@@ -208,6 +217,7 @@ export default function AssistantPage() {
 }
 
 function Answer({ reply, onAsk }: { reply: LiveReply; onAsk: (q: string) => void }) {
+  const health = useHealth();
   const source =
     reply.mode === "guardrail" || reply.guardrail
       ? "Not answered: this is outside what the assistant can share"
@@ -221,16 +231,28 @@ function Answer({ reply, onAsk }: { reply: LiveReply; onAsk: (q: string) => void
         {reply.notice ? `. ${reply.notice}` : ""}
       </p>
       {reply.pending && (
-        <p className={styles.pending} aria-live="polite">
-          {PENDING[reply.pending] ?? "Working"}&hellip;
-        </p>
+        <>
+          <p className={styles.pending} aria-live="polite">
+            {PENDING[reply.pending] ?? "Working"}&hellip;
+          </p>
+          {WAREHOUSE_WAIT[reply.pending] && readsWarehouse(health) && (
+            <SlowNote key={reply.pending}>{WAREHOUSE_WAIT[reply.pending]}</SlowNote>
+          )}
+        </>
       )}
       {reply.answer ? (
         <div className={styles.markdown}>
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{reply.answer}</ReactMarkdown>
         </div>
       ) : (
-        !reply.pending && reply.streaming && <p className="muted">Thinking&hellip;</p>
+        !reply.pending &&
+        reply.streaming && (
+          <>
+            <p className="muted">Thinking&hellip;</p>
+            {/* no first event yet means the API hasn't answered: it is waking up */}
+            {!reply.model && <WakeNotice />}
+          </>
+        )
       )}
 
       {reply.suggestions && reply.suggestions.length > 0 && (

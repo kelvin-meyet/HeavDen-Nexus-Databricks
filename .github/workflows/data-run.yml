@@ -57,7 +57,7 @@ on:
 
 jobs:
   run:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 100 # ~45 min of data jobs + the monitor's refresh (~15-25 min)
     environment: ${{ inputs.environment }}
     permissions:
@@ -186,7 +186,7 @@ jobs:
   request-retrain:
     needs: run
     if: needs.run.outputs.drift_status == 'act'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: write # start retrain.yml, and cancel a request it replaces, with this run's own token

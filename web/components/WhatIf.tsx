@@ -6,7 +6,7 @@ import { postJson } from "@/lib/api";
 import { num, riskPct } from "@/lib/format";
 import type { SeriesRow, WhatIfChanges, WhatIfResult } from "@/lib/types";
 
-import { BandTag, FactorList } from "./bits";
+import { BandTag, FactorList, WakeNotice } from "./bits";
 import styles from "./WhatIf.module.css";
 
 type VitalKey = "resp_rate" | "spo2" | "heart_rate" | "sbp" | "temp_c";
@@ -124,6 +124,7 @@ export function WhatIf({ encounterId, latest }: { encounterId: string; latest: S
             Reset to measured
           </button>
         </div>
+        {busy && <WakeNotice />}
       </form>
 
       {error && (

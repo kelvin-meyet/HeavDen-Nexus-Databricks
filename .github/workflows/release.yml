@@ -29,7 +29,7 @@ concurrency:
 
 jobs:
   deploy-prod:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40 # deploy ~5 min; the assistant's publish ~8 min, after a pipeline update the first time
     environment: prod-deploy
     permissions:
@@ -114,7 +114,7 @@ jobs:
   assistant-prod:
     needs: [deploy-prod]
     if: needs.deploy-prod.outputs.assistant == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: prod-deploy
     permissions:
@@ -158,7 +158,7 @@ jobs:
   # GitHub asks for a prod-deploy approval here too.
   website:
     needs: [deploy-prod]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment: prod-deploy
     permissions:

@@ -7,16 +7,20 @@ router = APIRouter(tags=["health"])
 
 @router.get("/health")
 def health(s: AppState = Depends(state)) -> dict:
-    """Liveness plus what is being served. The web app calls this on page load to wake Render.
-    In live mode "now" comes from prod (the first call may wake the SQL warehouse) and the row
-    counts, which describe the snapshot's tables, are left out."""
+    """Liveness plus what is being served. Every page calls this (its header shows "now"), so it
+    never wakes the SQL warehouse: in live mode "now" is prod's last answer, or the snapshot's
+    hour before any page has asked prod. The row counts, which describe the snapshot's tables,
+    are left out in live mode. `live_data`: the pages read prod live right now (false in demo
+    mode, and in live mode once the day's warehouse allowance is used up)."""
     m = s.snapshot.manifest
+    as_of, data_start = s.known_now()
     return {
         "status": "ok",
         "mode": s.settings.mode,
+        "live_data": s.live_data(),
         "synthetic": m.synthetic,
-        "as_of": s.as_of.isoformat(),
-        "data_start": s.data_start.isoformat(),
+        "as_of": as_of.isoformat(),
+        "data_start": data_start.isoformat(),
         "model": {"name": m.model_name, "version": m.model_version, "type": m.model_type},
         "risk_bands": m.bands,
         "documents": s.documents_dir is not None,

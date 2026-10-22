@@ -39,7 +39,7 @@ concurrency:
 
 jobs:
   rollback:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     # waits here for Kelvin
     environment: ${{ inputs.target == 'staging' && 'staging-approval' || 'production-approval' }}
