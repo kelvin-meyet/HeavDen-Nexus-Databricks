@@ -1,6 +1,6 @@
 # HeavDen Nexus end to end: where Phase 5 leaves it
 
-This guide walks through the whole system as it runs at the end of **Phase 5, the live website (21 October 2026)**. It goes in the order the data travels: from the synthetic hospital to a visitor's screen. Each step says **where** the step runs, **how** it works and **why** it was built that way, then hands over to the next step. After the steps come the known limitations (and why each is accepted for now) and a scene-by-scene guide for a demo video.
+This guide walks through the whole system as it runs at the end of **Phase 5, the live website (21 October 2026)**. It goes in the order the data travels: from the synthetic hospital to a visitor's screen. Each step says **where** the step runs, **how** it works and **why** it was built that way, then hands over to the next step. Before the steps, the [tech stack](#tech-stack) lists every tool and service with the step that explains it. After the steps come the known limitations (and why each is accepted for now) and a scene-by-scene guide for a demo video.
 
 > **Synthetic data only.** Every patient, hospital and document is invented. This is a portfolio project, not a medical device.
 
@@ -113,6 +113,161 @@ flowchart TB
 - **`prod`** is what the website shows. Its Databricks jobs and the API are deployed only from a release tag, after approval.
 
 There is **one website**: it reads `prod`. No staging website or staging API exists.
+
+---
+
+## Tech stack
+
+Every tool and service used up to the end of Phase 5, with what it is used for here. The steps below explain each one in context. Exact versions are pinned in `uv.lock`, `web/package-lock.json`, `infra/terraform/.terraform.lock.hcl` and `backend/Dockerfile`.
+
+### Cloud and infrastructure
+
+| Tool | Used for |
+|---|---|
+| Microsoft Azure | The cloud everything runs on (Central US) |
+| Terraform | Infrastructure as code: Azure, Entra ID and Databricks |
+| Microsoft Entra ID | Identities: CI service principals, the website's managed identity |
+| Azure Key Vault | Secrets (the Azure SQL login) |
+| Azure Databricks | The data, ML and AI platform (serverless only) |
+| Azure SQL Database | The hospital's records system: the source data |
+| Azure Data Lake Storage Gen2 | Landing files, lakehouse tables, the website's snapshot |
+| Azure Table Storage | The website's daily caps (durable counters) |
+| Azure OpenAI (Microsoft Foundry) | The LLM: gpt-5-mini |
+| Azure Container Apps | Hosting the API, scaled to zero when idle |
+| Azure Monitor Log Analytics | The API's logs |
+| Azure Cost Management | Monthly budget and spend alerts |
+
+### Data engineering
+
+| Tool | Used for |
+|---|---|
+| Unity Catalog | Governance: catalogs per environment, permissions, volumes, functions, models |
+| Delta Lake | Table format: reliable writes, history, merges |
+| Lakeflow Spark Declarative Pipelines | The medallion pipeline: Bronze → Silver → Gold |
+| Auto Loader | Incremental file ingestion (each file once) |
+| Change Tracking + `remote_query` | Incremental reads from Azure SQL |
+| AUTO CDC | Change data capture into SCD type 1 and 2 tables |
+| Expectations | Data quality rules and quarantine |
+| Apache Spark (PySpark, Spark SQL) | Distributed data processing |
+| Lakeflow Jobs | Orchestrating the batch jobs (serverless) |
+| Databricks Asset Bundles | Jobs, pipelines and dashboards as code, per environment |
+| Databricks SQL warehouse | SQL for dashboards, Genie and the website |
+| AI/BI dashboards | Clinical Ops and Model & Drift dashboards |
+
+### Machine learning and MLOps
+
+| Tool | Used for |
+|---|---|
+| scikit-learn | Logistic regression, isotonic calibration |
+| LightGBM | Gradient-boosted trees: the production model |
+| pandas, NumPy, PyArrow | Features, metrics, Spark ↔ pandas transfer |
+| MLflow | Experiment tracking, model registry (champion/challenger aliases), tracing, LLM evaluation |
+| Lakehouse Monitoring | Data profiling and drift history (cross-check) |
+| GitHub environments | Human approval of every retrain and promotion |
+
+### AI and LLMs
+
+| Tool | Used for |
+|---|---|
+| Genie | Text-to-SQL: questions about numbers, answered from Gold |
+| Unity Catalog SQL function | "Why is this patient flagged?" tool |
+| Mosaic AI Agent Framework | Packaging, deploying and reviewing the Databricks assistant |
+| Model Serving | Hosting the Databricks assistant (private, scale to zero) |
+| AI Gateway | Governed access to external LLMs (Azure OpenAI, OpenAI) |
+| Foundation Model APIs | Databricks-hosted comparison LLM (GPT-OSS 120B) |
+| gpt-5-mini | The assistants' language model |
+| OpenAI Python SDK | LLM calls, tool calling, streaming |
+| FAISS | Vector search over the documents |
+| fastembed + bge-small | Text embeddings on CPU (ONNX, no PyTorch) |
+| BM25 | Keyword search |
+| Reciprocal rank fusion | Hybrid search: merging vector and keyword results |
+| DuckDB | In-process SQL on the snapshot; sandbox for model-written SQL |
+
+### Website
+
+| Tool | Used for |
+|---|---|
+| Next.js | Web framework for the pages (React, server routes) |
+| React | UI components |
+| TypeScript | Typed front-end code |
+| Recharts | Charts |
+| react-markdown | Formatting the chat's answers |
+| Vercel | Front-end hosting, global CDN, caching |
+| FastAPI | The Python API: ward data, what-if, chat |
+| Uvicorn | Server that runs FastAPI |
+| Databricks SDK for Python | Live SQL and Genie calls from the API |
+| azure-identity | Managed-identity sign-in (no secrets) |
+
+### Containers and CI/CD
+
+| Tool | Used for |
+|---|---|
+| Docker | Multi-stage container build |
+| GitHub Container Registry | Storing the image |
+| uv | Python packaging, locked dependencies |
+| GitHub Actions | CI/CD: checks, staging on merge, prod on tag |
+| GitHub rulesets and environments | Required checks, production approvals |
+| Databricks CLI | Deploying and running bundles from CI |
+
+### Security
+
+| Tool | Used for |
+|---|---|
+| OpenID Connect | Secretless CI sign-in to Azure |
+| Managed identity | Secretless sign-in for the website's API |
+| Unity Catalog grants + Azure RBAC | Least-privilege access |
+| Origin secret | Only the website can call the API |
+| Guardrails (screen, system prompt, canary leak check) | Prompt-injection and leak protection |
+| SQL guard + sandbox | Safe model-written SQL |
+| Rate limits and daily caps | Protecting the LLM and warehouse budget |
+
+### Developer tooling
+
+| Tool | Used for |
+|---|---|
+| Python 3.12 | Main language |
+| hatchling | Building the package (the wheel Databricks jobs install) |
+| pytest | Tests (about 600) |
+| Ruff | Linting and formatting |
+| actionlint | Linting workflow files |
+| Jupyter + nbstripout | Notebooks, committed without outputs |
+| Synthea | Synthetic patients |
+| mssql-python | Loading Azure SQL |
+| Mermaid | Diagrams |
+
+### Techniques
+
+| Technique | Used for |
+|---|---|
+| Medallion architecture | Layered data: raw, validated, business-ready |
+| Incremental ingestion with watermarks | Moving only new data |
+| Point-in-time features | No future data leaking into training |
+| Time-based splits | Testing on later days, as in real use |
+| Isotonic calibration | Scores that mean real probabilities |
+| Alert-budget threshold | At most ~2 alerts per nurse per shift |
+| NEWS2 baseline | The clinical score to beat |
+| Paired bootstrap gates | Champion vs challenger at the same alert budget |
+| Exact SHAP (TreeSHAP, linear SHAP) | Explaining each score |
+| PSI and Jensen-Shannon divergence | Drift detection |
+| Human-in-the-loop MLOps | Approved retrain, promotion, rollback |
+| Tool-calling agent | One assistant, three tools |
+| RAG with hybrid search | Grounded, cited answers from documents |
+| LLM evaluation + red-teaming | Quality gate and attack testing in CI |
+| Snapshot rollout by pointer | Safe data releases, one-step rollback |
+| Scale to zero + CDN caching | Near-zero cost when idle |
+
+### Considered and not used
+
+| Option | Why not |
+|---|---|
+| Lakeflow Connect | Not offered in this workspace; needs always-on compute |
+| Feature store | One batch model; features are a Gold view |
+| Model Serving for the risk model | Hourly batch scoring is enough |
+| Vector Search | Bills every hour it exists; FAISS is free (a short trial is planned) |
+| Agent Bricks | The project's own assistant reuses the website's loop and guardrails |
+| Databricks Apps | Can't host a public website |
+| Render | Too little memory (512 MB) |
+| Postgres for the snapshot | Always-on cost; Blob Storage is enough |
 
 ---
 
@@ -285,6 +440,10 @@ There is **one website**: it reads `prod`. No staging website or staging API exi
   - **Gated in CI:**
     - a red-team of 19 attack prompts must not leak anything;
     - a quality test of 23 questions checks the right tool, numbers against a reference query, citations and grounding.
+  - **Each deploy keeps the endpoint small and runs once.** Before adding a version, it takes that model's idle versions off the endpoint (they stay in the registry), so the endpoint holds the version serving and its rollback. The deploy task also has Databricks' automatic retries switched off.
+    - Learned on 22 Oct: staging's endpoint had collected five versions, and every update rebuilds all of them, so adding a sixth went over the workspace's serving quota.
+    - Serverless retried the failed task three times on its own, and each attempt registered another unused version.
+    - Staging kept serving throughout. The next run took four idle versions off and deployed cleanly.
 - **Why it isn't behind the website:**
   - A sleeping endpoint takes minutes to wake, and an answer takes 25-30 s.
   - Keeping it awake would cost about $57 a month.
@@ -492,7 +651,7 @@ flowchart TB
   - **For Databricks and the API, merge = staging and tag = prod.** Deploying code and running on prod data are separate decisions, each with its own approval and audit trail in GitHub.
   - **The website's pages are continuously deployed on merge** instead. That's a deliberate exception, explained in Known limitations, item 1.
   - **GitHub is the master copy**; nothing in Databricks or Azure is edited by hand.
-  - **Releases so far:** v0.6.0 (Databricks assistant in prod), v0.6.1 (stopped safely), v0.6.2 (first image), v0.6.3 (origin lock + CDN cache).
+  - **Releases so far:** v0.6.0 (Databricks assistant in prod), v0.6.1 (stopped safely), v0.6.2 (first image), v0.6.3 (origin lock + CDN cache), v0.6.4 (the warehouse allowance; all three approvals: deploy-prod, assistant-prod, website).
 
 ---
 
@@ -559,6 +718,7 @@ flowchart TB
 | 21 Oct | v0.6.3: origin lock + CDN cache, deployed and smoke-tested on the live URL |
 | 21 Oct | Live-site red-team 0 of 19; per-visitor limit confirmed with two networks |
 | 22 Oct | All six CI checks required to merge; CI pinned to `ubuntu-24.04` and Java 17 after `ubuntu-latest` moved to 26.04; v0.6.4: a shared warehouse allowance of 2 hours a day for pages and chat, waking-up notes |
+| 22 Oct | The Databricks assistant's deploy keeps each endpoint small and runs once, after staging hit the serving quota; v0.6.4 released (prod assistant red-team 0 of 19, live-site red-team 0 of 19) |
 
 ## How Phase 5 changed the original plan
 
@@ -751,7 +911,7 @@ Each scene says what to **show**, what to **say** (in your own words) and what t
 
 - **Show:**
   - the "How code reaches each environment" diagram;
-  - GitHub Actions → release → the v0.6.3 run, with its approval gates and the website job's steps.
+  - GitHub Actions → release → the v0.6.4 run, with its three approval gates and the website job's steps.
 - **Say:** "For Databricks and the API, merging deploys to staging and a release tag deploys to production, after my approval. The release tests the new image on the new data before anything goes live, and rolling back means pointing at the previous snapshot. The website's pages are the exception: Vercel publishes them on merge, which is normal for a front end. A failed build never goes live and rollback is one click, but 'tag = prod' isn't true for the pages, and the guide says so."
 - **Watch out:** say the pages exception yourself. A reviewer who spots it will respect that you named it.
 
