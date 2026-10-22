@@ -285,7 +285,7 @@ Every tool and service used up to the end of Phase 5, with what it is used for h
   - **JSON files → `bronze.vitals_raw` and `bronze.outcomes_raw`:** **Auto Loader** picks up each new file exactly once (streaming tables). Lineage columns record which file each row came from.
 - **Why:**
   - **Incremental, not full copies:** each run moves only the new data, which is cheaper and how real pipelines run.
-  - A small serverless job instead of Lakeflow Connect: Lakeflow Connect's query-based connector isn't offered in this workspace, and its database gateway needs always-on compute. The job sends its Change Tracking queries to Azure SQL with `remote_query` through the Unity Catalog connection `heavden_sql` (Lakehouse Federation), so the SQL login stays in Unity Catalog and never appears in code or job settings.
+  - A small serverless job instead of Lakeflow Connect: Lakeflow Connect's query-based connector isn't offered in this workspace, and its database gateway needs always-on compute. The job sends its Change Tracking queries to Azure SQL with `remote_query` through the Unity Catalog connection `heavden_sql` (Lakehouse Federation). The connection holds the SQL login, so the job's code and settings never contain it (where the login is kept: Step 16).
   - Bronze keeps the raw data untouched, so anything downstream can be rebuilt from it.
 
 **Next:** raw data has to be checked, linked and shaped.
@@ -329,7 +329,7 @@ Every tool and service used up to the end of Phase 5, with what it is used for h
     - isotonic calibration keeps the probabilities honest, which reweighting would inflate;
     - regularisation (`C = 0.1`; at least 100 hours per LightGBM leaf, subsampling) keeps the few hundred positives from being memorised.
     - **Why no extra weight on positive examples:** the alerts come from a fixed budget, so what matters is the order of the patients, and weighting doesn't improve it. It inflates the probabilities, which calibration then has to undo, and with few positives each one counts many times over, so LightGBM overfits them.
-    - **Measured (22 Oct, on the Phase 0 rehearsal data, not prod's; production training code, only the weight changed; 372 positive hours (62 escalations) in training; 28 escalations in the 70-hour test block, 1-3 Oct):** prod's version 3 also met 28 escalations in its own test block (48 hours, 11-13 Oct). That's a coincidence, checked on 22 Oct: one count comes straight from the rehearsal table, the other from version 3's MLflow run (`test_escalations`).
+    - **Measured (22 Oct, on the Phase 0 rehearsal data, not prod's; production training code, only the weight changed; 372 positive hours (62 escalations) in training; 28 escalations in the 70-hour test block, 1-3 Oct):** prod's version 3 also had 28 escalations in its own test block (48 hours, 11-13 Oct). That's a coincidence, checked on 22 Oct: one count comes straight from the rehearsal table, the other from version 3's MLflow run (`test_escalations`).
 
       | Weight on positives | 1 (used) | 3 | 10 | 30 | 153 (balanced) |
       |---|---|---|---|---|---|
@@ -400,7 +400,7 @@ Every tool and service used up to the end of Phase 5, with what it is used for h
 - **What happened in prod, episode by episode:**
   1. **A faulty sensor (Site B SpO2 reading low).** The check acted on data drift. The retrain was **rejected**, because a model must not learn a broken sensor, and those hours were excluded from training and from the drift reference.
   2. **A new escalation protocol (6 Oct).** The old model's accuracy fell, and the check acted on performance. The request was **held**: only about a day of data under the new protocol existed. It was then **approved by mistake** (a click meant for another run). Version 2 trained, passed its automatic gates (judged on old-protocol days), and reached the second gate. There its **promotion was rejected**, because it had never seen the new protocol. **The second approval caught the first one's mistake.**
-  3. **The protocol settled (8-14 Oct).** The check acted again, the retrain was approved, and **version 3** learned 6 days of the new protocol. It passed its gates and was promoted on 16 Oct.
+  3. **The protocol settled (8-14 Oct).** The check acted again, the retrain was approved, and **version 3** trained on 20 Sep to 9 Oct 11:00 (the faulty sensor's hours left out), which included about 3 days of the new protocol (from 6 Oct 12:00). It was validated on 9-11 Oct and tested on 11-13 Oct, both entirely under the new protocol. It passed its gates and was promoted on 16 Oct.
   4. **A settled week (14-19 Oct)** gave the model in use more data to score.
 
 **Next:** the data is trusted. Now people can ask questions about it.
@@ -644,7 +644,9 @@ flowchart TB
 
 - **The secrets that exist, and where they live:**
   - **The origin secret** is held by the container app, Vercel (as a Secret-type variable) and GitHub's `prod-deploy` environment. GitHub needs it for the release's smoke test of the live URL.
-  - **The Azure SQL admin login** is in Key Vault. Databricks' connection to Azure SQL uses it.
+  - **The Azure SQL admin login** is generated by Terraform and kept in two places:
+    - **Key Vault:** the generator on Kelvin's laptop reads it from there to load the source data.
+    - **The Unity Catalog connection `heavden_sql`,** encrypted by Unity Catalog: the ingestion job uses it through `remote_query` (Step 3).
   - **The LLM keys** of the Databricks assistant's AI Gateway endpoints are in Databricks secret scope `heavden-llm`, entered by Kelvin.
   - **Terraform's state** holds the SQL password and the origin secret. It stays on Kelvin's laptop, git-ignored.
 - **The chat's defences:**
