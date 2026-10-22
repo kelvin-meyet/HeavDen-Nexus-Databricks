@@ -1,9 +1,13 @@
 """The red-team's automatic checks (heavden_api.chat.redteam), on replies the models really gave."""
 
+import importlib.util
+import json
 import re
 import subprocess
 import sys
 import textwrap
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
@@ -96,3 +100,32 @@ def test_red_teaming_an_endpoint_needs_no_duckdb():
     done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
     assert done.stdout.strip() == "ok"
+
+
+def test_red_teaming_the_website_asks_its_api_chat_like_a_visitor():
+    asked = []
+
+    class Website(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            asked.append((self.path, body))
+            reply = json.dumps({"mode": "guardrail", "answer": "no"}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(reply)
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Website)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        spec = importlib.util.spec_from_file_location("redteam_chat", RED_TEAM)
+        script = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(script)
+        _, replies = script.website(f"http://127.0.0.1:{server.server_port}/")
+        assert next(replies) == {"mode": "guardrail", "answer": "no"}
+    finally:
+        server.shutdown()
+    assert asked == [("/api/chat", {"message": ATTACKS[0][0]})]

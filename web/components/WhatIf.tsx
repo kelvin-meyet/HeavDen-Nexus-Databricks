@@ -4,9 +4,10 @@ import { useState } from "react";
 
 import { postJson } from "@/lib/api";
 import { num, riskPct } from "@/lib/format";
+import { useHealth } from "@/lib/health";
 import type { SeriesRow, WhatIfChanges, WhatIfResult } from "@/lib/types";
 
-import { BandTag, FactorList } from "./bits";
+import { BandTag, FactorList, SlowNote, wakingMessage } from "./bits";
 import styles from "./WhatIf.module.css";
 
 type VitalKey = "resp_rate" | "spo2" | "heart_rate" | "sbp" | "temp_c";
@@ -44,6 +45,7 @@ export function WhatIf({ encounterId, latest }: { encounterId: string; latest: S
   const [result, setResult] = useState<WhatIfResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const health = useHealth();
 
   const changes: WhatIfChanges = {};
   for (const s of SLIDERS) if (values[s.key] !== start[s.key]) changes[s.key] = values[s.key];
@@ -124,6 +126,7 @@ export function WhatIf({ encounterId, latest }: { encounterId: string; latest: S
             Reset to measured
           </button>
         </div>
+        {busy && <SlowNote>{wakingMessage(health)}</SlowNote>}
       </form>
 
       {error && (

@@ -5,7 +5,8 @@ Routes run the **same SQL** (from `queries.py`) in both modes, against tables na
 
 * `DemoSource`: DuckDB views over the snapshot's Parquet files.
 * `LiveSource`: the Databricks SQL warehouse (Statement Execution API) as the backend's own
-  identity, with `gold` resolving to `<catalog>.gold` (`heavden_prod`).
+  identity, with `gold` resolving to `<catalog>.gold` (`heavden_prod`). Once the day's warehouse
+  allowance is used up (`chat/limits.py`), it answers from the snapshot instead.
 
 Each also says what "now" is: the snapshot's hour in demo mode, the latest scored hour in live
 mode (the hour the Genie space also calls now).
@@ -24,6 +25,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 
+from heavden_api.chat.limits import AllowanceUsed
 from heavden_api.snapshot import GOLD_TABLES, Snapshot
 
 if TYPE_CHECKING:
@@ -37,6 +39,10 @@ class DataSource(Protocol):
 
     def now(self) -> tuple[pd.Timestamp, pd.Timestamp]:
         """("now", first hour) of the data, in UTC."""
+        ...
+
+    def known_now(self) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+        """`now()` if it is known without a query (None if not)."""
         ...
 
 
@@ -64,6 +70,9 @@ class DemoSource:
     def now(self) -> tuple[pd.Timestamp, pd.Timestamp]:
         m = self.snapshot.manifest
         return m.as_of_ts, pd.Timestamp(m.data_start)
+
+    def known_now(self) -> tuple[pd.Timestamp, pd.Timestamp]:
+        return self.now()
 
 
 def _parameter(name: str, value) -> dict:
@@ -106,7 +115,11 @@ class LiveSource:
     """The SQL warehouse. Answers are kept per query and parameters: every page query names
     the hour it is about (`:as_of`), so a cached answer stays right until "now" moves, which only
     a data run does. That spares the warehouse (billed while awake) repeat page views. `max_age`
-    bounds it anyway (labels can arrive later for the same hours)."""
+    bounds it anyway (labels can arrive later for the same hours).
+
+    When the warehouse refuses because the day's allowance is used up (`AllowanceUsed`), the
+    same SQL runs on `fallback`, the snapshot (prod's Gold as of its export), about the
+    snapshot's own hour, so its rows stay consistent even if prod has moved on since."""
 
     NOW_SQL = (
         "SELECT min(prediction_ts) AS first, max(prediction_ts) AS latest FROM gold.risk_scores"
@@ -118,8 +131,9 @@ class LiveSource:
         now_seconds: float = 1800,
         max_age: float = 3600,
         size: int = 256,
+        fallback: DemoSource | None = None,
     ):
-        self.warehouse = warehouse
+        self.warehouse, self.fallback = warehouse, fallback
         self.now_seconds, self.max_age, self.size = now_seconds, max_age, size
         self._cache: OrderedDict[tuple, tuple[float, pd.DataFrame]] = OrderedDict()
         self._now: tuple[float, tuple[pd.Timestamp, pd.Timestamp]] | None = None
@@ -135,7 +149,14 @@ class LiveSource:
                 return hit[1].copy()
         used = set(_PARAM.findall(sql))  # routes pass a shared dict; send what this query names
         parameters = [_parameter(k, v) for k, v in params.items() if k in used]
-        frame = _frame(self.warehouse.execute(sql, parameters))
+        try:
+            frame = _frame(self.warehouse.execute(sql, parameters))
+        except AllowanceUsed:
+            if self.fallback is None:
+                raise
+            if "as_of" in params:
+                params = params | {"as_of": self.fallback.now()[0]}
+            return self.fallback.query(sql, params)
         with self._lock:
             self._cache[key] = (time.monotonic(), frame)
             while len(self._cache) > self.size:
@@ -148,9 +169,22 @@ class LiveSource:
         with self._lock:
             if self._now and time.monotonic() - self._now[0] < self.now_seconds:
                 return self._now[1]
-        row = _frame(self.warehouse.execute(self.NOW_SQL)).iloc[0]
+        try:
+            row = _frame(self.warehouse.execute(self.NOW_SQL)).iloc[0]
+        except AllowanceUsed:
+            if self.fallback is None:
+                raise
+            return self.fallback.now()
         if pd.isna(row["latest"]):
             raise RuntimeError("gold.risk_scores has no scored hours")
         with self._lock:
             self._now = (time.monotonic(), (row["latest"], row["first"]))
             return self._now[1]
+
+    def known_now(self) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+        """ "Now" without a query: the warehouse's last answer however old (it only moves with a
+        data run), else the snapshot's hour."""
+        with self._lock:
+            if self._now:
+                return self._now[1]
+        return self.fallback.now() if self.fallback else None

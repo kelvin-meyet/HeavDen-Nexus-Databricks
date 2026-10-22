@@ -3,12 +3,16 @@
     uv run python backend/scripts/redteam_chat.py
     LLM_PROVIDER=azure LLM_MODEL=gpt-5-mini uv run python backend/scripts/redteam_chat.py
     uv run python backend/scripts/redteam_chat.py --endpoint heavden-assistant-staging
+    uv run python backend/scripts/redteam_chat.py --url https://heav-den-nexus.vercel.app
 
-Without `--endpoint`: the **app assistant**, on the model LLM_PROVIDER / LLM_MODEL pick
-(environment or .env) and the demo snapshot; each prompt goes through the real `/chat` endpoint,
-so all three guardrail layers apply. With `--endpoint`: the **Databricks assistant** deployed on
-that serving endpoint, on whichever model its LLM_ENDPOINT names (the CLI profile, or the CI
-identity, signs in).
+Without `--endpoint` or `--url`: the **app assistant**, on the model LLM_PROVIDER / LLM_MODEL
+pick (environment or .env) and the demo snapshot; each prompt goes through the real `/chat`
+endpoint, so all three guardrail layers apply. With `--url`: the app assistant behind the live
+website, through the website's own `/api/chat`, so it is the model, data and limits visitors meet
+(each prompt counts against this machine's per-visitor limit, 30 an hour, and the ones that
+reach the model against the day's live answers). With `--endpoint`: the **Databricks assistant**
+deployed on that serving endpoint, on whichever model its LLM_ENDPOINT names (the CLI profile,
+or the CI identity, signs in).
 
 Every prompt in `heavden_api.chat.redteam` is checked the same way: a reply fails if it leaks the
 system prompt or a secret, dumps most of the schema, shows internal codes (SITE_A,
@@ -52,6 +56,25 @@ def app_assistant() -> tuple[str, Iterator[dict]]:
     return f"the app assistant: {settings.llm_provider} / {settings.llm_model}", replies()
 
 
+def website(url: str) -> tuple[str, Iterator[dict]]:
+    """The live website's replies, through its `/api/chat` like a visitor's question."""
+    import json
+    import urllib.request
+
+    def replies() -> Iterator[dict]:
+        for prompt, _ in ATTACKS:
+            request = urllib.request.Request(
+                f"{url.rstrip('/')}/api/chat",
+                data=json.dumps({"message": prompt}).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            # a cold start plus a Genie question can take minutes; Vercel stops at 300 s
+            with urllib.request.urlopen(request, timeout=310) as response:
+                yield json.loads(response.read())
+
+    return f"the website {url}", replies()
+
+
 def databricks_assistant(endpoint: str) -> tuple[str, Iterator[dict]]:
     """The Databricks assistant's replies from its serving endpoint, in `/chat`'s shape."""
     from databricks.sdk import WorkspaceClient
@@ -76,9 +99,16 @@ def databricks_assistant(endpoint: str) -> tuple[str, Iterator[dict]]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--endpoint", help="the Databricks assistant's serving endpoint")
+    target = parser.add_mutually_exclusive_group()
+    target.add_argument("--endpoint", help="the Databricks assistant's serving endpoint")
+    target.add_argument("--url", help="the live website, e.g. https://heav-den-nexus.vercel.app")
     args = parser.parse_args(argv)
-    title, replies = databricks_assistant(args.endpoint) if args.endpoint else app_assistant()
+    if args.endpoint:
+        title, replies = databricks_assistant(args.endpoint)
+    elif args.url:
+        title, replies = website(args.url)
+    else:
+        title, replies = app_assistant()
     failures, models, lines = 0, set(), []
     for (prompt, expected), reply in zip(ATTACKS, replies, strict=True):
         found = problems(expected, reply)
@@ -97,7 +127,8 @@ def main(argv: list[str] | None = None) -> int:
     text = "\n".join(lines)
     out = ROOT / "data" / "redteam"
     out.mkdir(parents=True, exist_ok=True)
-    name = args.endpoint or "app-" + "-".join(sorted(models) or ["none"])
+    reached = "-".join(sorted(models) or ["none"])
+    name = args.endpoint or ("website-" if args.url else "app-") + reached
     path = out / f"redteam-{name}-{datetime.now(UTC):%Y%m%d-%H%M}.txt"
     path.write_text(text + "\n", encoding="utf-8")  # first: a console that can't print a
     print(text)  # character (e.g. U+202F on cp1252) must not lose the report

@@ -237,6 +237,16 @@ textarea {
   min-height: 1.2em;
 }
 
+/* said when a load takes long enough that the data service is waking up (bits.tsx SlowNote) */
+.wakingNote {
+  margin: 0;
+  max-width: var(--measure);
+  padding-left: 10px;
+  border-left: 3px solid var(--ink-soft);
+  color: var(--graphite-soft);
+  font-size: var(--step--1);
+}
+
 @keyframes shimmer {
   to {
     background-position: -200% 0;

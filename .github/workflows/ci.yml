@@ -107,7 +107,7 @@ jobs:
           tests/test_website_export.py tests/test_table_budget.py tests/test_chat.py
           tests/test_guardrails.py tests/test_memory.py tests/test_llm_provider.py
           tests/test_scoring_gold.py tests/test_rag.py tests/test_databricks_tools.py
-          tests/test_dockerfile.py
+          tests/test_dockerfile.py tests/test_warehouse_allowance.py
 
   # The website's image, built as a release builds it (release.yml pushes and deploys it, after a
   # smoke test on prod's snapshot): a broken Dockerfile or lock shows here, not at the release.

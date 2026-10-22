@@ -190,11 +190,18 @@ class Settings:
     chat_live_answers_per_day: int = field(
         default_factory=lambda: int(os.environ.get("CHAT_LIVE_ANSWERS_PER_DAY", "100"))
     )
-    # Container Apps: the Azure Table that keeps that count across restarts, written as the
-    # managed identity, e.g. https://<account>.table.core.windows.net/websitecounters. Unset
-    # (locally): counted in memory.
+    # Container Apps: the Azure Table that keeps the website's daily counts across restarts (that
+    # one and the warehouse time below), written as the managed identity, e.g.
+    # https://<account>.table.core.windows.net/websitecounters. Unset (locally): in memory.
     chat_budget_table_url: str | None = field(
         default_factory=lambda: os.environ.get("CHAT_BUDGET_TABLE_URL") or None
+    )
+    # live mode: SQL warehouse time per UTC day for the whole website, pages and chat and every
+    # visitor together; past it, pages come from the snapshot and the chat answers from the
+    # documents (numbers and patient details paused until midnight UTC).
+    # 7200 (22 Oct): 2 hours, at most ~$5.60 a day at the warehouse's $2.80 an hour
+    warehouse_seconds_per_day: int = field(
+        default_factory=lambda: int(os.environ.get("WAREHOUSE_SECONDS_PER_DAY", "7200"))
     )
     # proxies we control in front of the API: 0 local, 1 Container Apps' ingress alone,
     # 2 Vercel -> Container Apps. The visitor's address is that many entries from the right of
@@ -230,6 +237,17 @@ class Settings:
             return DailyBudget(self.chat_live_answers_per_day)
         token = managed_identity_token(self.managed_identity, STORAGE_SCOPE)
         return TableBudget(self.chat_live_answers_per_day, self.chat_budget_table_url, token)
+
+    def warehouse_allowance(self):
+        """The day's SQL warehouse time (live mode): in the Azure Table on Container Apps, else
+        in memory."""
+        from heavden_api.chat.limits import AzureTable, MemoryTable, WarehouseAllowance
+
+        if not self.chat_budget_table_url:
+            return WarehouseAllowance(self.warehouse_seconds_per_day, MemoryTable())
+        token = managed_identity_token(self.managed_identity, STORAGE_SCOPE)
+        table = AzureTable(self.chat_budget_table_url, token)
+        return WarehouseAllowance(self.warehouse_seconds_per_day, table)
 
     def snapshot_reader(self) -> Callable[[str], bytes]:
         """Reads the published snapshot's files from Blob Storage as the managed identity."""

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -17,6 +18,14 @@ from heavden_api.snapshot import to_records
 router = APIRouter(prefix="/risk", tags=["risk"])
 
 Band = Literal["Low", "High"]
+# the generator's encounter ids (E-100000, ...): anything else is refused without a query, so
+# made-up ids don't wake the SQL warehouse in live mode
+ENCOUNTER_ID = re.compile(r"E-\d{1,9}")
+
+
+def _known_form(encounter_id: str) -> None:
+    if not ENCOUNTER_ID.fullmatch(encounter_id):
+        raise HTTPException(404, f"unknown encounter {encounter_id}")
 
 
 def _with_factors(rows: list[dict]) -> list[dict]:
@@ -46,6 +55,7 @@ def patient(
     s: AppState = Depends(state),
 ) -> dict:
     """One stay: who and where, current risk and reasons, hourly history and past alerts."""
+    _known_form(encounter_id)
     params = {"as_of": s.as_of, "encounter_id": encounter_id}
     found = to_records(s.source.query(queries.PATIENT, params))
     if not found:
@@ -78,6 +88,7 @@ class WhatIfRequest(BaseModel):
 @router.post("/score")
 def score(body: WhatIfRequest, s: AppState = Depends(state)) -> dict:
     """What-if: re-score a patient's latest hour with some vitals or observations changed."""
+    _known_form(body.encounter_id)
     params = {"as_of": s.as_of, "encounter_id": body.encounter_id}
     rows = s.source.query(queries.FEATURE_ROW, params)
     if rows.empty:

@@ -1,11 +1,48 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 import { num, riskPct } from "@/lib/format";
-import type { Band, Factor } from "@/lib/types";
+import { readsWarehouse, useHealth } from "@/lib/health";
+import type { Band, Factor, Health } from "@/lib/types";
+
+// A warm load takes a second or two, so one still running after this is almost always the API,
+// or in live mode Databricks' SQL warehouse, waking up.
+const SLOW_MS = 4000;
+
+/** `children`, shown only once `after` milliseconds have passed. */
+export function SlowNote({
+  after = SLOW_MS,
+  className = "wakingNote",
+  children,
+}: {
+  after?: number;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setShown(true), after);
+    return () => clearTimeout(timer);
+  }, [after]);
+  return shown ? (
+    <p className={className} role="status">
+      {children}
+    </p>
+  ) : null;
+}
+
+export function wakingMessage(health: Health | null): string {
+  return readsWarehouse(health)
+    ? "Waking up the API and Databricks’ SQL warehouse: they sleep when nobody is visiting, to keep costs near zero (up to about 40 seconds)."
+    : "Waking up the data service: it sleeps when nobody is visiting, to keep costs near zero (up to about 40 seconds).";
+}
 
 export function Loading({ lines = 3 }: { lines?: number }) {
+  const health = useHealth();
   return (
     <div aria-busy="true" aria-label="Loading" style={{ display: "grid", gap: 8 }}>
+      <SlowNote>{wakingMessage(health)}</SlowNote>
       {Array.from({ length: lines }, (_, i) => (
         <div key={i} className="skeleton" style={{ width: `${90 - i * 15}%` }} />
       ))}

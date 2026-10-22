@@ -7,7 +7,9 @@ through the same checks, in this order:
 1. per-visitor rate limit (429)
 2. guardrail screen: obvious extraction or override attempts get a fixed refusal, no LLM call
 3. no LLM key, or today's live budget used up: replay a recorded answer
-4. live answer, with every answer (and stream) checked for leaks
+4. live answer, with every answer (and stream) checked for leaks. In live mode, once today's
+   warehouse allowance is used up, the data and patient tools refuse without touching the
+   warehouse, and the answer comes from the documents (chat/databricks_tools.py)
 
 Follow-ups: live answers carry a `conversation_id`. Sending it back continues the conversation,
 which the server remembers (chat/memory.py); the client never sends history itself, so history
@@ -208,8 +210,13 @@ def _recorded(s: AppState, message: str) -> dict:
     return {
         "mode": "recorded",
         "model": s.recordings.model,
-        "answer": "Live answers aren't switched on for this demo. Try one of the recorded "
-        "questions below.",
+        # with a model configured, a recorded answer means live answers are paused for now
+        "answer": (
+            "Live answers aren't switched on for this demo."
+            if s.llm is None
+            else "There's no live answer right now."
+        )
+        + " Try one of the recorded questions below.",
         "steps": [],
         "citations": [],
         "suggestions": s.recordings.questions(),
