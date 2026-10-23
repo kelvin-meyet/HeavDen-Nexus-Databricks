@@ -3,7 +3,7 @@
 export const BUILDER = {
   // the degree after a comma, without full stops, and never with "Dr" as well
   name: "Kelvin Ofori-Minta, PhD",
-  title: "ML & Data Platform Engineer",
+  title: "Data, ML & AI Engineer",
   brand: "HeavDen",
   email: "kelvinmeyet@gmail.com",
   linkedin: "https://www.linkedin.com/in/kelvin-ofori-minta-ph-d-9a5692b8",
