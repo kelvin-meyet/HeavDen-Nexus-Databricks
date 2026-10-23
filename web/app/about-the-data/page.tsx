@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { PageHero } from "@/components/PageHero";
+
 import styles from "./about.module.css";
 
 export const metadata: Metadata = {
@@ -81,14 +83,13 @@ const LEFT_OUT = [
 export default function AboutTheDataPage() {
   return (
     <div className="page">
-      <header className="pageHead">
-        <h1>The hospital and its data</h1>
+      <PageHero title="The hospital and its data">
         <p className="lede">
           Everything in this app comes from a simulation. This page describes the fictional hospital network, what
           its staff need, and how each piece of data is made, so you can read the charts and numbers with the right
           expectations.
         </p>
-      </header>
+      </PageHero>
 
       <nav aria-label="On this page" className={styles.toc}>
         <a href="#hospital">The hospital</a>

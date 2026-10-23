@@ -6,6 +6,7 @@ import { Suspense, useState } from "react";
 
 import { BandTag, ErrorBox, Loading, RiskWithTrend } from "@/components/bits";
 import { useApi } from "@/lib/api";
+import { PageHero } from "@/components/PageHero";
 import { conditions, num, SITE_IDS, SITES, unitName, when } from "@/lib/format";
 import type { Band, Board, SiteId } from "@/lib/types";
 
@@ -29,13 +30,12 @@ function PatientsList() {
 
   return (
     <div className="page">
-      <header className="pageHead">
-        <h1>Patients</h1>
+      <PageHero title="Patients">
         <p className="lede">
           Everyone on the wards{board.data ? ` at ${when(board.data.as_of)}` : ""}, highest risk first. Risk is
           the chance of needing the rapid response team or intensive care within six hours.
         </p>
-      </header>
+      </PageHero>
 
       <div className="filters">
         <label>

@@ -1,0 +1,45 @@
+/* The band reaches up over the page's top padding, so it meets the strip under the top bar. */
+.hero {
+  --band-top: -36px;
+  display: grid;
+  gap: 32px 3vw;
+  align-items: center;
+  padding: 36px 0 52px;
+  margin-bottom: 40px;
+}
+
+/* Title and introduction about 70% of the screen, the panel about 20%, 5% margins either side. */
+.withAside {
+  grid-template-columns: minmax(0, 7fr) minmax(0, 2fr);
+}
+
+.text {
+  display: grid;
+  gap: 18px;
+  align-content: center;
+}
+
+.text h1 {
+  max-width: 26ch;
+  font-size: clamp(2.2rem, 1.2rem + 2.6vw, 4.2rem);
+  line-height: 1.03;
+  letter-spacing: -0.03em;
+}
+
+.text :global(.lede) {
+  max-width: 72ch;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 22px;
+  margin-top: 4px;
+}
+
+@media (max-width: 1200px) {
+  .withAside {
+    grid-template-columns: 1fr;
+  }
+}

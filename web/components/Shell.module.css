@@ -225,20 +225,25 @@
   text-align: center;
 }
 
-/* A quiet strip under the bar: what this data is, every page. */
+/* A quiet strip under the bar: what this data is, every page. Dark, so the bar, the strip and each
+   page's dark hero read as one block. */
 .synthetic {
   max-width: none;
   margin: 0;
   padding: 7px var(--gutter);
-  background: var(--ink-wash);
-  border-bottom: 1px solid var(--rule);
+  background: #13225c;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   font-size: var(--step--1);
-  color: var(--graphite-soft);
+  color: #aab6ea;
   text-align: center;
 }
 
 .synthetic strong {
-  color: var(--graphite);
+  color: var(--zone-1);
+}
+
+.synthetic a {
+  color: #fff;
 }
 
 .content {
@@ -265,6 +270,14 @@
 .credit {
   display: block;
   margin-top: 6px;
+}
+
+/* Between the Menu breakpoint and here, the links, the button and the full pill don't fit on one
+   row: the pill keeps the time and drops its label. */
+@media (max-width: 1360px) {
+  .statusLabel {
+    display: none;
+  }
 }
 
 /* Below this width the six links no longer fit: they move behind a Menu button. */

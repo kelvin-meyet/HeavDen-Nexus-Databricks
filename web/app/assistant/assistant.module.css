@@ -1,7 +1,7 @@
 .thread {
   display: grid;
   gap: 28px;
-  max-width: 1080px;
+  max-width: 1200px;
 }
 
 .turn {
@@ -116,49 +116,108 @@
   font-size: var(--step-1);
 }
 
+/* Suggested questions, as cards to click. */
 .examples {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 12px;
 }
 
 .example {
   appearance: none;
+  width: 100%;
+  height: 100%;
   border: 1.5px solid var(--rule);
   background: var(--sheet);
-  border-radius: var(--radius);
-  padding: 8px 12px;
+  border-radius: 12px;
+  padding: 14px 16px;
+  font: inherit;
+  line-height: 1.4;
   text-align: left;
+  color: var(--graphite);
   cursor: pointer;
+  box-shadow: var(--shadow);
+  transition: border-color 0.15s, color 0.15s, transform 0.15s;
 }
 
-.example:hover {
+.example:hover:not(:disabled) {
   border-color: var(--ink);
   color: var(--ink);
+  transform: translateY(-1px);
 }
 
+/* The question box: a card that stays at the bottom of the screen while the thread scrolls. */
 .ask {
   position: sticky;
-  bottom: 0;
+  bottom: 12px;
   display: flex;
   gap: 10px;
   align-items: end;
-  max-width: 1080px;
-  margin-top: 28px;
-  padding: 12px 0;
-  background: var(--paper);
+  max-width: 1200px;
+  margin-top: 32px;
+  padding: 10px 10px 10px 16px;
+  border: 1.5px solid var(--rule);
+  border-radius: 18px;
+  background: var(--sheet);
+  box-shadow: 0 10px 34px -14px rgba(15, 28, 77, 0.45);
+}
+
+.ask:focus-within {
+  border-color: var(--ink);
 }
 
 .input {
   flex: 1;
-  border: 1.5px solid var(--graphite-soft);
-  border-radius: var(--radius);
-  padding: 10px 12px;
-  background: var(--sheet);
-  resize: vertical;
+  border: 0;
+  padding: 8px 0;
+  background: transparent;
+  font: inherit;
+  resize: none;
+}
+
+.input:focus-visible {
+  outline: none; /* the whole card shows focus instead */
+}
+
+/* What Nexus AI can use: a glass card in the hero's right-hand panel. */
+.tools {
+  padding: 22px 22px 18px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 3px 0 var(--zone-1);
+}
+
+.tools h2 {
+  margin-bottom: 14px;
+  font-size: var(--step-1);
+}
+
+.tools ul {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tools h3 {
+  font-size: var(--step-0);
+}
+
+.tools p {
+  margin: 2px 0 0;
+  font-size: var(--step--1);
+  line-height: 1.45;
+  color: #c7d0f5;
+}
+
+.tools .toolsNote {
+  margin-top: 14px;
+  color: #8f9cd6;
 }
 
 .pending {
@@ -187,13 +246,4 @@
   .pending::after {
     animation: none;
   }
-}
-
-.titleRow {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-  max-width: 1080px;
 }

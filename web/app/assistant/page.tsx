@@ -5,7 +5,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { ErrorBox, SlowNote, WakeNotice } from "@/components/bits";
-import { useApi } from "@/lib/api";
+import { PageHero } from "@/components/PageHero";
+import { ApiError, useApi } from "@/lib/api";
 import { readsWarehouse, useHealth } from "@/lib/health";
 import { type ChatEvent, streamChat } from "@/lib/stream";
 import type { ChatReply, ChatStep } from "@/lib/types";
@@ -23,6 +24,8 @@ interface Turn {
   question: string;
   reply?: LiveReply;
   error?: string;
+  // the API refused the question: this visitor's hourly limit (429, chat/limits.py)
+  limited?: boolean;
 }
 
 const PENDING: Record<string, string> = {
@@ -109,22 +112,28 @@ export default function AssistantPage() {
       }
       update((t) => (t.reply ? { ...t, reply: { ...t.reply, streaming: false, pending: null } } : t));
     } catch (e) {
-      update((t) => ({ ...t, error: (e as Error).message }));
+      if (e instanceof ApiError && e.status === 429) update((t) => ({ ...t, limited: true }));
+      else update((t) => ({ ...t, error: (e as Error).message }));
     } finally {
       setBusy(false);
     }
   }
 
   const live = examples.data?.live;
+  // A model is configured but a reply came back recorded: today's live answers are used up, or the
+  // model failed. Either way, say so and offer the recorded questions again.
+  const paused = live && turns.some((t) => t.reply?.mode === "recorded");
+  const health = useHealth();
 
   return (
     <div className="page">
-      <header className="pageHead">
-        <div className={styles.titleRow}>
-          <h1>Assistant</h1>
-          {turns.length > 0 && (
+      <PageHero
+        title="Chat with Nexus AI"
+        aside={<Tools liveData={health?.mode === "live"} />}
+        actions={
+          turns.length > 0 && (
             <button
-              className="buttonQuiet"
+              className="buttonGhost"
               type="button"
               disabled={busy}
               onClick={() => {
@@ -134,21 +143,24 @@ export default function AssistantPage() {
             >
               New conversation
             </button>
-          )}
-        </div>
+          )
+        }
+      >
         <p className="lede">
           Ask about the wards&rsquo; numbers, the hospital&rsquo;s protocols and documents, or why a patient is
           flagged. Each answer shows the queries and sources behind it.
         </p>
         {examples.data && (
           <p className="muted small">
-            {live
-              ? "Answers are written live by a language model, using the tools shown with each answer."
-              : "Live answers are switched off in this demo, so the questions below replay answers recorded earlier."}{" "}
-            The assistant can be wrong; check its working, and never use it for real clinical decisions.
+            {paused
+              ? "Live answers are paused for now, so the questions below replay answers recorded earlier."
+              : live
+                ? "Answers are written live by a language model, using the tools shown with each answer."
+                : "Live answers are switched off in this demo, so the questions below replay answers recorded earlier."}{" "}
+            Nexus AI can be wrong; check its working, and never use it for real clinical decisions.
           </p>
         )}
-      </header>
+      </PageHero>
 
       <div className={styles.thread}>
         {turns.map((turn, i) => (
@@ -160,13 +172,18 @@ export default function AssistantPage() {
               </p>
             )}
             {turn.error && <ErrorBox what="an answer" message={turn.error} />}
+            {turn.limited && (
+              <p className="notice" role="status">
+                You&rsquo;ve asked as many questions as one visitor can in an hour. Please try again a little later.
+              </p>
+            )}
             {turn.reply && <Answer reply={turn.reply} onAsk={ask} />}
           </article>
         ))}
         <div ref={endRef} />
       </div>
 
-      {(turns.length === 0 || !live) && examples.data && (
+      {(turns.length === 0 || !live || paused) && examples.data && (
         <section className="section" aria-labelledby="try-title">
           <h2 id="try-title" className={styles.tryTitle}>
             {turns.length === 0 ? "Try one of these" : "Other questions to try"}
@@ -198,7 +215,9 @@ export default function AssistantPage() {
           className={styles.input}
           rows={2}
           maxLength={1000}
-          placeholder={live ? "Ask a question about the wards, documents or a patient" : "Choose a question above"}
+          placeholder={
+            live && !paused ? "Ask a question about the wards, documents or a patient" : "Choose a question above"
+          }
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -213,6 +232,35 @@ export default function AssistantPage() {
         </button>
       </form>
     </div>
+  );
+}
+
+/** What Nexus AI can use, in the hero's right-hand panel. The numbers tool depends on the mode: Genie
+ *  on production in live mode, the model's own SQL on a locked copy of the snapshot otherwise. */
+function Tools({ liveData }: { liveData: boolean }) {
+  const tools = [
+    {
+      name: "Ward numbers",
+      body: liveData
+        ? "Databricks Genie writes and runs the SQL on production's gold tables."
+        : "It writes SQL that runs on a locked, read-only copy of the gold tables.",
+    },
+    { name: "Hospital documents", body: "Protocols, the device manual, runbooks and the model card, searched and cited." },
+    { name: "Patient explanations", body: "The top reasons behind a patient's latest risk score." },
+  ];
+  return (
+    <section className={styles.tools} aria-labelledby="tools-title">
+      <h2 id="tools-title">What Nexus AI can use</h2>
+      <ul>
+        {tools.map((t) => (
+          <li key={t.name}>
+            <h3>{t.name}</h3>
+            <p>{t.body}</p>
+          </li>
+        ))}
+      </ul>
+      <p className={styles.toolsNote}>Each visitor can ask up to 30 questions an hour.</p>
+    </section>
   );
 }
 

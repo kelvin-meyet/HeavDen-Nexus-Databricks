@@ -1,54 +1,61 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { BUILDER, MAILTO } from "@/lib/site";
+import { PageHero } from "@/components/PageHero";
+import { TechStack } from "@/components/TechStack";
+import { BUILDER, CODE_REQUEST, MAILTO } from "@/lib/site";
+import { EXPERIENCE_STACK } from "@/lib/stack";
 
 import styles from "./work.module.css";
 
 export const metadata: Metadata = {
-  title: `Work with me · ${BUILDER.name}`,
-  description: `${BUILDER.name}, ${BUILDER.title}: data platforms on Databricks and beyond, predictive models and MLOps, and AI assistants, for teams in any industry.`,
+  title: `About me · ${BUILDER.name}`,
+  description: `${BUILDER.name}, ${BUILDER.title}: data engineering, analytics engineering, full-stack data science, MLOps and AI engineering. The engineer who built HeavDen Nexus.`,
 };
 
-// Proof figures come from this project's own measurements (README results, the dev pipeline run
-// of 9 Oct 2026, the assistant's red-team run). Keep them true: update them when those change.
-const PROOF = [
-  { figure: "25 of 28", label: "escalations flagged in advance by the model, against 21 for the clinical standard" },
-  { figure: "153,311", label: "readings checked and reconciled through the data platform, none lost" },
-  { figure: "19 of 19", label: "adversarial tests passed by the AI assistant" },
-  { figure: "< $25", label: "a month to keep the whole platform running, by design" },
+// A personal page: what I do, what I've built and how to reach me. It offers no services (Vercel's
+// Hobby plan is for non-commercial personal use). The project's own results and stack are on Behind
+// the scenes; this page is about the person.
+
+const GLANCE = [
+  { label: "Platforms", items: ["Azure", "Databricks", "AWS", "Google Cloud"] },
+  { label: "Languages", items: ["Python", "SQL", "R"] },
+  {
+    label: "Focus",
+    items: ["Data engineering", "Analytics engineering", "Data science", "MLOps", "AI engineering"],
+  },
 ];
 
-const SERVICES = [
+const SKILLS = [
   {
-    name: "Data platforms and pipelines",
+    name: "Data engineering and pipelines",
     body: "Ingestion from databases and files, change data capture, medallion pipelines with data-quality checks, governance with Unity Catalog, infrastructure as code. On Databricks, or with plain SQL, Python and DuckDB when that fits better.",
     proof: "Azure SQL and device files into bronze, silver and gold, every reading reconciled.",
     href: "/about-the-data",
   },
   {
-    name: "Predictive models that earn their place",
-    body: "Framing the decision first, a baseline to beat, time-based splits, calibrated probabilities, explanations people can act on, and evaluation that shows uncertainty rather than hiding it.",
-    proof: "A risk model compared with NEWS2 at the same alert budget, with bootstrap intervals.",
-    href: "/behind-the-scenes",
+    name: "Analytics engineering and dashboards",
+    body: "Modelled, governed data layers with metric definitions people agree on, and enterprise-scale dashboards that stay fast, accurate and access-controlled as the questions and the users grow.",
+    proof: "Clinical Ops and Model & Drift dashboards on Databricks AI/BI, over the gold tables; the Analytics page here.",
+    href: "/analytics",
+  },
+  {
+    name: "Full-stack data science",
+    body: "From the question to a model people use: framing the decision, a baseline to beat, features, time-based validation, calibrated probabilities, explanations people can act on, and the API and app that put it in front of them.",
+    proof: "A risk model that beats NEWS2 at the same alert budget, served here with a what-if panel.",
+    href: "/patients",
   },
   {
     name: "MLOps and monitoring",
     body: "Experiment tracking and a model registry with MLflow, CI/CD, drift detection, and retraining and promotion behind human approval, so models stay trustworthy after launch.",
-    proof: "Tests on every change; drift monitoring and approval-gated retraining being built now.",
+    proof: "Drift monitoring and approval-gated retraining, proven on three drift episodes in production.",
     href: "/behind-the-scenes",
   },
   {
-    name: "AI assistants on your data",
-    body: "Tool-calling assistants that combine text-to-SQL, document search (RAG) and your own functions, with guardrails, citations, and evaluation and red-teaming before anyone relies on them.",
+    name: "AI assistants grounded in data",
+    body: "Tool-calling assistants that combine text-to-SQL, document search (RAG) and custom functions, with guardrails, citations, and evaluation and red-teaming before anyone relies on them.",
     proof: "The ward assistant: queries, cited documents and patient explanations.",
     href: "/assistant",
-  },
-  {
-    name: "Data products people use",
-    body: "APIs and web apps that put data and models in front of the people who decide: FastAPI, Next.js, clear charts and plain-language explanations.",
-    proof: "This app: ward board, patient charts with a what-if panel, analytics.",
-    href: "/patients",
   },
   {
     name: "Cloud cost and governance",
@@ -56,6 +63,34 @@ const SERVICES = [
     proof: "Built on a $200 credit; designed to run for under $25 a month.",
     href: "/behind-the-scenes",
   },
+];
+
+// Credentials. Paste each one's verification link into `url` and its "View credential" link appears;
+// until then the card shows without one, so there is never a dead link.
+const CERTIFICATIONS: { name: string; issuer: string; url?: string }[] = [
+  { name: "End-to-end MLOps with Databricks", issuer: "Maven", url: "https://maven.com/certificate/WgcEcOVq" },
+  {
+    name: "Machine Learning in the Enterprise",
+    issuer: "Google Cloud",
+    url: "https://www.coursera.org/account/accomplishments/verify/PLQF9JSJ63GH",
+  },
+  {
+    name: "Production Machine Learning Systems",
+    issuer: "Google Cloud",
+    url: "https://www.coursera.org/account/accomplishments/verify/BN6QJKJ9RM5Y",
+  },
+  {
+    name: "AWS Certified Solutions Architect – Associate (SAA)",
+    issuer: "Amazon Web Services",
+    url: "https://www.credly.com/badges/976f8472-d3ea-4c32-ad8c-3f394949417e/public_url",
+  },
+  {
+    name: "AWS Certified Cloud Practitioner (CCP)",
+    issuer: "Amazon Web Services",
+    url: "https://www.credly.com/badges/35f0d01a-abc7-4848-8407-8e54f8b4cd9c/public_url",
+  },
+  { name: "Python for Data Science, AI & Development", issuer: "IBM" },
+  { name: "Microsoft Azure AI Fundamentals", issuer: "Opsgility" },
 ];
 
 const PRINCIPLES = [
@@ -77,98 +112,134 @@ const PRINCIPLES = [
   },
   {
     name: "Leave it understandable",
-    body: "Decisions written down, tests in place, and documentation your team can pick up without me.",
+    body: "Decisions written down, tests in place, and documentation a team can pick up without me.",
   },
 ];
 
-export default function WorkWithMePage() {
+export default function AboutMePage() {
   return (
     <div className="page">
-      <header className={`pageHead paperBand ${styles.head}`}>
-        <p className="lockup">
-          <span className="lockupName">{BUILDER.name}</span>
-          <span className="lockupLine">{BUILDER.title}</span>
-        </p>
-        <h1>I build data platforms, predictive models and AI assistants that people can trust.</h1>
+      <PageHero
+        lockup={
+          <p className={styles.lockup}>
+            <span className={styles.name}>{BUILDER.name}</span>
+            <span className={styles.role}>{BUILDER.title}</span>
+          </p>
+        }
+        title="I build data platforms, predictive models and AI assistants that people can trust."
+        actions={
+          <>
+            <a href="#contact" className="buttonBright">
+              Get in touch
+            </a>
+            <a href="#code" className={styles.codeLink}>
+              Request the code
+            </a>
+          </>
+        }
+        aside={
+          <section className={styles.glance} aria-labelledby="glance-title">
+            <h2 id="glance-title">At a glance</h2>
+            <dl>
+              {GLANCE.map((row) => (
+                <div key={row.label}>
+                  <dt>{row.label}</dt>
+                  <dd>
+                    <ul>
+                      {row.items.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        }
+      >
         <p className="lede">
-          I&rsquo;m the developer behind {BUILDER.brand}. HeavDen Nexus, this app, is my worked example: synthetic
-          hospital data, a cloud data platform, a model that has to beat the clinical standard, an AI assistant and
-          this web app, built and tested end to end. I work with teams in any industry, as a hands-on engineer on
-          Databricks or anywhere else.
+          My work spans the whole data lifecycle: data engineering, analytics engineering with enterprise-scale
+          dashboards, full-stack data science from the first question to a model in production, MLOps and AI
+          engineering, across Azure, AWS and Google Cloud. HeavDen Nexus, this app, is my worked example, built and
+          tested end to end.
         </p>
-        <div className={styles.actions}>
-          <a href={MAILTO} className="button">
-            Email me
-          </a>
-          <a href={BUILDER.linkedin} className="buttonQuiet" rel="noopener noreferrer" target="_blank">
-            LinkedIn<span className="visually-hidden"> (opens in a new tab)</span>
-          </a>
-          <a href={BUILDER.github} className="buttonQuiet" rel="noopener noreferrer" target="_blank">
-            GitHub<span className="visually-hidden"> (opens in a new tab)</span>
-          </a>
-        </div>
-      </header>
+      </PageHero>
 
-      <section className="section" aria-labelledby="proof-title">
-        <h2 id="proof-title" className="visually-hidden">
-          Proof from this project
-        </h2>
-        <dl className={styles.proof}>
-          {PROOF.map((p) => (
-            <div key={p.figure}>
-              <dt>{p.label}</dt>
-              <dd>{p.figure}</dd>
-            </div>
-          ))}
-        </dl>
-        <p className="muted small">Measured on this project&rsquo;s synthetic data; details on each linked page.</p>
+      <div className={styles.builtAndHow}>
+        <section className={styles.built} aria-labelledby="built-title">
+          <h2 id="built-title">What I&rsquo;ve built</h2>
+          <ul className={styles.skills}>
+            {SKILLS.map((s) => (
+              <li key={s.name}>
+                <h3>{s.name}</h3>
+                <p>{s.body}</p>
+                <p className={styles.skillProof}>
+                  <span className={styles.proofLabel}>In this app:</span> {s.proof} <Link href={s.href}>See it</Link>
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <aside className={styles.how} aria-labelledby="how-title">
+          <h2 id="how-title">How I work</h2>
+          <ol className={styles.principles}>
+            {PRINCIPLES.map((p) => (
+              <li key={p.name}>
+                <h3>{p.name}</h3>
+                <p>{p.body}</p>
+              </li>
+            ))}
+          </ol>
+        </aside>
+      </div>
+
+      <section className={`whiteBand ${styles.stackBand}`} aria-labelledby="stack-title">
+        <div className={styles.stackHead}>
+          <h2 id="stack-title">Tech stack</h2>
+          <p className="muted">The tools and techniques I work with, across projects and clouds.</p>
+        </div>
+        <TechStack groups={EXPERIENCE_STACK} />
       </section>
 
-      <section className="section" aria-labelledby="services-title">
-        <h2 id="services-title">What I can build for you</h2>
-        <ul className={styles.services}>
-          {SERVICES.map((s) => (
-            <li key={s.name}>
-              <h3>{s.name}</h3>
-              <p>{s.body}</p>
-              <p className={styles.serviceProof}>
-                <span className={styles.proofLabel}>In this app:</span> {s.proof}{" "}
-                <Link href={s.href}>See it</Link>
-              </p>
+      <section className={`section ${styles.certs}`} aria-labelledby="certs-title">
+        <h2 id="certs-title">Certifications and training</h2>
+        <ul className={styles.certList}>
+          {CERTIFICATIONS.map((c) => (
+            <li key={c.name}>
+              <span className={styles.certIssuer}>{c.issuer}</span>
+              <span className={styles.certName}>{c.name}</span>
+              {c.url && (
+                <a href={c.url} className={styles.certLink} rel="noopener noreferrer" target="_blank">
+                  View credential<span className="visually-hidden"> (opens in a new tab)</span>
+                </a>
+              )}
             </li>
           ))}
         </ul>
       </section>
 
-      <section className="section" aria-labelledby="how-title">
-        <h2 id="how-title">How I work</h2>
-        <ol className={styles.principles}>
-          {PRINCIPLES.map((p) => (
-            <li key={p.name}>
-              <h3>{p.name}</h3>
-              <p>{p.body}</p>
-            </li>
-          ))}
-        </ol>
-      </section>
-
-      <section className={`section ${styles.contact}`} aria-labelledby="contact-title">
-        <h2 id="contact-title">Let&rsquo;s talk</h2>
+      <section id="contact" className={`nightBand ${styles.contact}`} aria-labelledby="contact-title">
+        <h2 id="contact-title">Get in touch</h2>
         <p>
-          Open to full-time roles, contracts and consulting projects. Tell me about the decision your data should
-          support, and I&rsquo;ll tell you how I&rsquo;d approach it.
+          Open to full-time, contract and freelance opportunities in data platform, analytics, ML and AI
+          engineering. If you&rsquo;re hiring, I&rsquo;d like to hear from you.
         </p>
-        <div className={styles.actions}>
-          <a href={MAILTO} className="button">
-            {BUILDER.email}
+        <div className={styles.contactActions}>
+          <a href={MAILTO} className="buttonBright">
+            Email me
           </a>
-          <a href={BUILDER.linkedin} className="buttonQuiet" rel="noopener noreferrer" target="_blank">
+          <a href={BUILDER.linkedin} className="buttonGhost" rel="noopener noreferrer" target="_blank">
             LinkedIn<span className="visually-hidden"> (opens in a new tab)</span>
           </a>
-          <a href={BUILDER.repo} className="buttonQuiet" rel="noopener noreferrer" target="_blank">
-            This project&rsquo;s code<span className="visually-hidden"> (opens in a new tab)</span>
+          <a href={CODE_REQUEST} className="buttonGhost">
+            Request the code
           </a>
         </div>
+        <p id="code" className={styles.codeNote}>
+          The full source code, from the data platform and the model to Nexus AI and this site, is shared on
+          request with recruiters and hiring teams.
+        </p>
       </section>
     </div>
   );

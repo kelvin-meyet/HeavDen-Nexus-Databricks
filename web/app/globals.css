@@ -32,9 +32,10 @@
   --step-3: 2.1rem;
   --step-4: clamp(2.2rem, 1.6rem + 2.2vw, 3.4rem);
 
-  --gutter: clamp(16px, 3vw, 44px);
+  /* Content runs to 5% from each edge of the screen; text keeps its readable measure inside. */
+  --gutter: max(16px, 5vw);
   --topbar-h: 60px;
-  --page-max: 1640px;
+  --page-max: none;
   --measure: 72ch;
   --radius: 10px;
   --shadow: 0 1px 2px rgba(15, 28, 77, 0.06), 0 6px 18px -8px rgba(15, 28, 77, 0.18);
@@ -88,9 +89,9 @@ h1 {
 }
 
 h2 {
-  font-size: var(--step-2);
+  font-size: clamp(1.6rem, 1.2rem + 0.9vw, 2.2rem);
   font-weight: 700;
-  letter-spacing: -0.015em;
+  letter-spacing: -0.02em;
 }
 
 h3 {
@@ -208,10 +209,119 @@ textarea {
 }
 
 .section {
-  margin-top: 40px;
+  margin-top: 56px;
   display: grid;
   gap: 14px;
   align-content: start;
+}
+
+/* ---------- Bands ---------- */
+
+/* A full-width dark band: the top bar's chart paper at night. Every page opens with one (PageHero);
+   --band-top and --band-bottom stretch it over the page's own padding. */
+.nightBand {
+  position: relative;
+  isolation: isolate;
+  color: #c7d0f5;
+}
+
+.nightBand::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: var(--band-top, 0) calc(50% - 50vw) var(--band-bottom, 0);
+  background-color: var(--night);
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(160deg, var(--night) 0%, var(--night-2) 100%);
+  background-size: 28px 28px, 28px 28px, 100% 100%;
+}
+
+.nightBand h1,
+.nightBand h2,
+.nightBand h3 {
+  color: #fff;
+}
+
+.nightBand .lede {
+  color: #c7d0f5;
+}
+
+.nightBand .muted {
+  color: #aab6ea;
+}
+
+.nightBand a:not([class]) {
+  color: var(--zone-1);
+}
+
+.nightBand :focus-visible {
+  outline-color: var(--zone-1);
+}
+
+/* What follows a page's hero starts close under it. */
+.nightBand + .section {
+  margin-top: 0;
+}
+
+/* A full-width white band between light sections. */
+.whiteBand {
+  position: relative;
+  isolation: isolate;
+  padding-block: 56px 64px;
+}
+
+.whiteBand::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 calc(50% - 50vw);
+  background: var(--sheet);
+  border-block: 1px solid var(--rule);
+}
+
+/* Buttons on a dark band: the bright one leads, the ghost ones follow. */
+.buttonBright,
+.buttonGhost {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 46px;
+  padding: 10px 24px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.buttonBright:disabled,
+.buttonGhost:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.buttonBright {
+  background: var(--zone-1);
+  color: var(--night);
+}
+
+.buttonBright:hover {
+  background: #fff;
+}
+
+.buttonGhost {
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  color: #fff;
+}
+
+.buttonGhost:hover {
+  border-color: #fff;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 /* ---------- Controls ---------- */
@@ -536,6 +646,7 @@ textarea {
 /* ---------- Observation chart (the signature) ---------- */
 
 .obsChart {
+  color: var(--graphite); /* its own text colour, also on a dark band */
   background-color: var(--sheet);
   background-image:
     linear-gradient(var(--grid) 1px, transparent 1px),

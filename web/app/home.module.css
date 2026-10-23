@@ -1,13 +1,33 @@
+/* The hero sits on the dark band (globals .nightBand), reaching up over the page's top padding. */
 .hero {
+  --band-top: -36px;
   display: grid;
   grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-  gap: 28px clamp(24px, 3vw, 56px);
+  gap: 28px 3vw;
   align-items: center;
-  padding: 8px 0 40px;
+  padding: 28px 0 48px;
 }
 
 .lockup {
   grid-column: 1 / -1;
+}
+
+/* On the dark band: the name in white, the mark lifted off the background. */
+.lockup :global(.lockupName) {
+  color: #fff;
+}
+
+.lockup :global(.lockupLine) {
+  color: #aab6ea;
+  border-left-color: rgba(255, 255, 255, 0.22);
+}
+
+.lockup :global(.lockupMark) {
+  background: var(--ink);
+}
+
+.heroChart :global(.zoneKey) {
+  color: #c7d0f5;
 }
 
 /* The live figures run under both columns, so neither column leaves a hole. */
@@ -15,6 +35,11 @@
   grid-column: 1 / -1;
   display: grid;
   gap: 10px;
+}
+
+/* One line on wide screens, so the sections below move up; it wraps on narrow ones. */
+.figuresNote {
+  max-width: none;
 }
 
 .heroText {
@@ -85,7 +110,7 @@
 }
 
 .chartCaption {
-  color: var(--graphite-soft);
+  color: #c7d0f5;
 }
 
 .chartPair {
@@ -242,28 +267,38 @@
 }
 
 /* The builder: who made this, and how to reach him. */
+/* The closing band: who built it, after the product (globals .nightBand). */
 .builder {
+  --band-bottom: -72px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 20px 40px;
-  align-items: center;
-  margin: 0 0 40px;
-  padding: 24px 28px;
-  border-radius: var(--radius);
-  background: var(--ink-wash);
-  border: 1.5px solid var(--rule);
+  gap: 16px;
+  justify-items: start;
+  margin-top: 72px;
+  padding: 64px 0 8px;
+}
+
+.builder h2 {
+  font-size: clamp(2rem, 1.3rem + 1.8vw, 3.2rem);
+  letter-spacing: -0.03em;
 }
 
 .builder p {
-  max-width: 75ch;
-  margin: 6px 0 0;
+  max-width: 70ch;
+  margin: 0;
+  font-size: var(--step-1);
+  line-height: 1.5;
+}
+
+.builder strong {
+  color: #fff;
 }
 
 .builderActions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
+  margin-top: 6px;
 }
 
 .builderActions a {

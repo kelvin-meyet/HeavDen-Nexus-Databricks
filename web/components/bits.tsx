@@ -141,8 +141,8 @@ export function Loading({ lines = 3 }: { lines?: number }) {
 export function ErrorBox({ message, what }: { message: string; what: string }) {
   return (
     <div className="errorBox" role="alert">
-      <strong>Couldn&rsquo;t load {what}.</strong> {message}. If the data service was asleep, reload in a few
-      seconds.
+      <strong>Couldn&rsquo;t load {what}.</strong> {message.replace(/\.+$/, "")}. If the data service was asleep,
+      reload in a few seconds.
     </div>
   );
 }

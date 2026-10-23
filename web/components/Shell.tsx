@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { useApi } from "@/lib/api";
-import { BUILDER } from "@/lib/site";
+import { BUILDER, CODE_PAGE } from "@/lib/site";
 import { whenFull } from "@/lib/format";
 import { HealthContext } from "@/lib/health";
 import type { Health } from "@/lib/types";
@@ -17,11 +17,11 @@ const NAV = [
   { href: "/", label: "Overview", exact: true },
   { href: "/patients", label: "Patients" },
   { href: "/analytics", label: "Analytics" },
-  { href: "/assistant", label: "Assistant" },
+  { href: "/assistant", label: "Nexus AI" },
   { href: "/behind-the-scenes", label: "Behind the scenes" },
 ];
 
-const CTA = { href: "/work-with-me", label: "Work with me" };
+const CTA = { href: "/work-with-me", label: "About me" };
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
@@ -148,9 +148,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               LinkedIn
             </a>{" "}
             ·{" "}
-            <a href={BUILDER.github} rel="noopener noreferrer" target="_blank">
-              GitHub
-            </a>
+            <Link href={CODE_PAGE}>Code on request</Link>
           </span>
         </footer>
       </div>
