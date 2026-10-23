@@ -4,7 +4,7 @@
 
 HeavDen Nexus watches every inpatient across three fictional hospitals, hour by hour. It estimates each patient's chance of needing an emergency team within the next six hours, raises a limited number of alerts a nurse can act on, explains each score in clinical terms, and answers questions about the wards in plain English, showing the queries and sources behind every answer.
 
-**Built end to end by [Kelvin Ofori-Minta, PhD](https://www.linkedin.com/in/kelvin-ofori-minta-ph-d-9a5692b8), Data, ML & AI Engineer and the developer behind HeavDen.** Available for roles, contracts and projects in any industry: data platforms on Databricks and beyond, predictive models and MLOps, and AI assistants. See [Work with me](#work-with-me).
+**Built end to end by [Kelvin Ofori-Minta, PhD](https://www.linkedin.com/in/kelvin-ofori-minta-ph-d-9a5692b8), Data, ML & AI Engineer and the developer behind HeavDen.** See it live at **[heav-den-nexus.vercel.app](https://heav-den-nexus.vercel.app)**; more about me [below](#about-me).
 
 > **Synthetic data only.** Every patient, hospital and document is invented. This is a portfolio project, not a medical device, and must not be used for real patient care.
 
@@ -45,17 +45,18 @@ The project is built in phases. **Phases 0–5 are complete.** The data platform
 
 **An assistant that shows its working** (`backend/heavden_api/chat/`)
 - One tool-calling loop with three tools: the ward's numbers, search over the hospital's documents (protocols, device manual, runbooks, model card) with citations, and a patient-risk lookup. On Databricks the numbers come from **Genie** and the patient lookup is a Unity Catalog function.
-- Two deployments of the same loop: the **Databricks assistant** on Model Serving (private, traced in MLflow, red-teamed and quality-gated in CI), and the website's assistant inside its API.
+- Two deployments of the same loop: the **Databricks assistant** on Model Serving (private, traced in MLflow, red-teamed and quality-gated in CI), and the website's assistant, **Nexus AI**, inside its API.
 - Prompt-injection and data-leak defences sit before, inside and after the model. When the model writes SQL itself (snapshot mode), the SQL is parsed, allow-listed and run in a locked, read-only sandbox. Answers stream as they are written and remember the conversation for follow-ups.
 
 **A public website** (`web/`, `backend/`)
 - Next.js on Vercel, and FastAPI in one container on Azure Container Apps that scales to zero. Until 31 October the API reads production's Gold tables live, through the SQL warehouse and Genie. After that it serves a weekly snapshot from Azure Blob Storage, so visitors never wake the cloud.
 - Only the website can reach the API: it adds a secret header, and Vercel's CDN keeps page data for 5 minutes. Chat has a per-visitor limit and a daily cap, and the website may keep Databricks' SQL warehouse on for at most 2 hours a day (pages and chat together).
+- Seven pages ([live](https://heav-den-nexus.vercel.app)): the **Overview**, **Patients** (each with a 24-hour chart, the reasons behind the score and a what-if panel), **Analytics**, **Nexus AI** (the chat), **Behind the scenes** (results against NEWS2, how each part was built, the tech stack), **The hospital and its data**, and **About me**.
 
 | | |
 |---|---|
 | ![A patient's last 24 hours, the reasons behind the score, and a what-if panel](docs/images/patient.png) | ![Analytics: census, alert load, escalations flagged in advance and device health](docs/images/analytics.png) |
-| ![The assistant answering with the patient's risk factors and the escalation protocol, with citations](docs/images/assistant.png) | |
+| ![Nexus AI answering with the patient's risk factors and the escalation protocol, with citations](docs/images/assistant.png) | |
 
 ## Results on Databricks (production model, synthetic test period)
 
@@ -247,17 +248,17 @@ tests/                  unit tests
 .github/workflows/      ci.yml (checks + staging), release.yml (prod + website), data runs, retrain, promote, rollback
 ```
 
-## Work with me
+## About me
 
-I'm Kelvin Ofori-Minta, PhD, a Data, ML & AI Engineer and the developer behind HeavDen. HeavDen Nexus is my worked example: I designed and built every part of it. I help teams in any industry, as a hands-on engineer on Databricks or anywhere else, with:
+I'm Kelvin Ofori-Minta, PhD, a Data, ML & AI Engineer and the developer behind HeavDen. HeavDen Nexus is my worked example: I designed and built every part of it. My work spans the whole data lifecycle, across Azure, AWS and Google Cloud:
 
-- **data platforms and pipelines**: ingestion, change data capture, medallion pipelines, data quality, governance, infrastructure as code;
-- **predictive models that earn their place**: baselines, honest evaluation, calibration, explanations;
-- **MLOps and monitoring**: MLflow, CI/CD, drift detection, approval-gated retraining;
-- **AI assistants on your data**: text-to-SQL, document search (RAG), guardrails, evaluation and red-teaming;
-- **data products and cloud cost**: FastAPI and Next.js apps, serverless designs that stay affordable.
+- **data engineering**: ingestion, change data capture, medallion pipelines, data quality, governance, infrastructure as code;
+- **analytics engineering**: governed data models and enterprise-scale dashboards (Power BI, Tableau, Databricks AI/BI);
+- **full-stack data science**: from the first question to a model in production, with honest evaluation, calibration and explanations;
+- **MLOps**: MLflow, CI/CD, drift detection, approval-gated retraining and promotion;
+- **AI engineering**: tool-calling assistants, text-to-SQL, document search (RAG), guardrails, evaluation and red-teaming.
 
-Open to full-time roles, contracts and consulting projects: [email](mailto:kelvinmeyet@gmail.com) · [LinkedIn](https://www.linkedin.com/in/kelvin-ofori-minta-ph-d-9a5692b8) · [GitHub](https://github.com/kelvin-meyet)
+My full tech stack and certifications are on the site's [About me](https://heav-den-nexus.vercel.app/work-with-me) page. Open to full-time, contract and freelance opportunities in data platform, analytics, ML and AI engineering: [email](mailto:kelvinmeyet@gmail.com) · [LinkedIn](https://www.linkedin.com/in/kelvin-ofori-minta-ph-d-9a5692b8)
 
 ## License
 

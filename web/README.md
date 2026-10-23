@@ -1,6 +1,6 @@
 # HeavDen Nexus web app (Next.js)
 
-The public interface (Plan.md §13): **Patients** (ward list, patient charts, reasons, what-if), **Analytics**, **Assistant** and **Behind the scenes**. All data is synthetic.
+The public website: the **Overview**, **Patients** (ward list, patient charts, reasons, what-if), **Analytics**, **Nexus AI** (the chat), **Behind the scenes**, **The hospital and its data** and **About me**. All data is synthetic.
 
 ## Run it locally
 
@@ -42,14 +42,19 @@ CI runs both on every pull request.
 
 The visual language is a **NEWS2 observation chart**, made lively: values plotted as ink-blue dots on chart paper over the NEWS2 scoring zones (yellow, amber, red), which appear only where they mean a score.
 
-- **Layout:** a sticky deep-ink top bar (brand, navigation, a highlighted "Work with me" link, the simulated ward time) over a thin synthetic-data strip; pages are centred at up to 1640 px, and the Overview and Work with me heroes sit on a full-width white sheet (`.paperBand` in `globals.css`) so wide screens don't show bare margins. Brand and name lines use `.lockup` (name plus a sentence-case descriptor), not an all-caps eyebrow. Below 1180 px the links move behind a Menu button (closes on Escape or when a link is chosen).
+- **Layout:** a sticky deep-ink top bar (brand, navigation, a highlighted "About me" button, the simulated ward time) over a dark synthetic-data strip. Every page opens with a full-width dark hero (`components/PageHero.tsx`: the title and introduction take about 70% of the width, an optional panel about 20%), and content runs to 5% from each edge of the screen (`--gutter` in `globals.css`). Full-width bands: `.nightBand` (dark) and `.whiteBand` in `globals.css`. Brand and name lines use `.lockup` (name plus a sentence-case descriptor), not an all-caps eyebrow. Below 1180 px the links move behind a Menu button (closes on Escape or when a link is chosen).
+- **Wording:** a personal portfolio for a job search. The About page shows what I've built and the roles I'm open to and offers no services (Vercel's Hobby plan is for non-commercial use). The code is shared on request: no page links to the repository (`CODE_PAGE` in `lib/site.ts`).
 - **Colour carries meaning:** ink blue for data, red only for the High band and the alert threshold, amber for alert load, green for things going well (escalations flagged in advance). Headline figures carry the colour of what they measure.
 - **Type:** Schibsted Grotesk for headings and big figures (a newsroom grotesk made for confident headlines), with proportional figures so full stops and commas don't take a digit's width; Atkinson Hyperlegible for text and numbers, designed so characters can't be confused (0/O, 1/l), which matters when a number is a vital sign.
-- **Motion:** used once, with purpose: the hero charts draw themselves in, and a live dot pulses beside the ward time. Everything respects "reduce motion".
+- **Motion:** used sparingly, with purpose: the hero charts draw themselves in, a live dot pulses beside the ward time, a heartbeat trace shows what is waking up while the API or the SQL warehouse is cold (`WakeNotice` in `components/bits.tsx`), and the tech stack's cards cascade in once. Everything respects "reduce motion".
 
 Code:
 
 - `components/Shell.tsx`: the top-bar app shell
+- `components/PageHero.tsx`: every page's full-width dark hero
+- `components/ProofTiles.tsx`: the project's measured results (Behind the scenes)
+- `components/TechStack.tsx` and `lib/stack.ts`: the tech stacks (this project's, and the About page's)
+- `lib/site.ts`: name, title, contact and the code-on-request links
 - `components/ObsChart.tsx`: the observation chart used for every time series
 - `components/SizedChart.tsx`: measures its own width, so charts size reliably in any layout
 - `lib/news2.ts`: the NEWS2 zones per vital sign

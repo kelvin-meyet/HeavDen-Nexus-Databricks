@@ -200,7 +200,7 @@ export default function BehindPage() {
           {h && (
             <p className="small muted">
               Serving model: {h.model.name} version {h.model.version} (
-              {h.model.type === "Pipeline" ? "logistic regression" : h.model.type === "LGBM" ? "LightGBM" : h.model.type}).
+              {h.model.type === "Pipeline" ? "logistic regression" : h.model.type.startsWith("LGBM") ? "LightGBM" : h.model.type}).
               Alert threshold: risk of {riskPct(h.risk_bands.high)} or more. Data as of {when(h.as_of)}.
             </p>
           )}
