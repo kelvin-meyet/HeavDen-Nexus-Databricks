@@ -4,6 +4,8 @@
 
 HeavDen Nexus watches every inpatient across three fictional hospitals, hour by hour. It estimates each patient's chance of needing an emergency team within the next six hours, raises a limited number of alerts a nurse can act on, explains each score in clinical terms, and answers questions about the wards in plain English, showing the queries and sources behind every answer.
 
+**Built end to end by [Kelvin Ofori-Minta](https://www.linkedin.com/in/kelvin-ofori-minta-ph-d-9a5692b8), ML & Data Platform Engineer and the developer behind HeavDen.** Available for roles, contracts and projects in any industry: data platforms on Databricks and beyond, predictive models and MLOps, and AI assistants. See [Work with me](#work-with-me).
+
 > **Synthetic data only.** Every patient, hospital and document is invented. This is a portfolio project, not a medical device, and must not be used for real patient care.
 
 ![Overview: the ward's highest-risk patients, plotted on a NEWS2-style observation chart](docs/images/overview.png)
@@ -244,6 +246,18 @@ notebooks/              learning notebooks (local/, free) and Databricks noteboo
 tests/                  unit tests
 .github/workflows/      ci.yml (checks + staging), release.yml (prod + website), data runs, retrain, promote, rollback
 ```
+
+## Work with me
+
+I'm Kelvin Ofori-Minta, an ML & Data Platform Engineer and the developer behind HeavDen. HeavDen Nexus is my worked example: I designed and built every part of it. I help teams in any industry, as a hands-on engineer on Databricks or anywhere else, with:
+
+- **data platforms and pipelines**: ingestion, change data capture, medallion pipelines, data quality, governance, infrastructure as code;
+- **predictive models that earn their place**: baselines, honest evaluation, calibration, explanations;
+- **MLOps and monitoring**: MLflow, CI/CD, drift detection, approval-gated retraining;
+- **AI assistants on your data**: text-to-SQL, document search (RAG), guardrails, evaluation and red-teaming;
+- **data products and cloud cost**: FastAPI and Next.js apps, serverless designs that stay affordable.
+
+Open to full-time roles, contracts and consulting projects: [email](mailto:kelvinmeyet@gmail.com) · [LinkedIn](https://www.linkedin.com/in/kelvin-ofori-minta-ph-d-9a5692b8) · [GitHub](https://github.com/kelvin-meyet)
 
 ## License
 

@@ -1,22 +1,17 @@
-.head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 24px;
-  align-items: end;
-  padding-bottom: 20px;
-  margin-bottom: 24px;
-  border-bottom: 1.5px solid var(--graphite);
-}
-
-.head h1 {
-  margin: 4px 0 8px;
-}
-
+/* Risk now: a white card in the hero's right-hand panel. */
 .riskNow {
   display: grid;
-  justify-items: end;
-  gap: 4px;
-  text-align: right;
+  justify-items: start;
+  gap: 6px;
+  padding: 20px 22px;
+  border-radius: 14px;
+  background: var(--sheet);
+  color: var(--graphite);
+  box-shadow: var(--shadow);
+}
+
+.riskNow :global(span.muted) {
+  color: var(--graphite-soft);
 }
 
 .riskValue {

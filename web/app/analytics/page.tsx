@@ -15,6 +15,7 @@ import {
 import { ErrorBox, Loading } from "@/components/bits";
 import { legendText, SizedChart } from "@/components/SizedChart";
 import { useApi } from "@/lib/api";
+import { PageHero } from "@/components/PageHero";
 import { dayLabel, hourLabel, num, pct, SITE_IDS, SITES, siteName, when } from "@/lib/format";
 import type { AlertsDayRow, CensusRow, DevicesDayRow, SiteId, Summary } from "@/lib/types";
 
@@ -42,10 +43,9 @@ export default function AnalyticsPage() {
 
   return (
     <div className="page">
-      <header className="pageHead">
-        <h1>Analytics</h1>
+      <PageHero title="Analytics">
         <p className="lede">How the wards and the early-warning system are doing{s ? `, as of ${when(s.as_of)}` : ""}.</p>
-      </header>
+      </PageHero>
 
       <div className="filters" role="group" aria-label="Hospital">
         <button className="buttonQuiet" aria-pressed={site === null} onClick={() => setSite(null)}>

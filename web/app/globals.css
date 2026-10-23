@@ -1,5 +1,5 @@
 /* HeavDen Nexus: the visual language of a NEWS2 observation chart, turned up.
-   Ink blue on chart paper, a deep-ink sidebar, and NEWS2 zone colours that appear only where
+   Ink blue on chart paper, a deep-ink top bar, and NEWS2 zone colours that appear only where
    they mean a score. Red is kept for the High band and the alert threshold. */
 
 :root {
@@ -9,7 +9,7 @@
   --ink-strong: #1a2f99;
   --ink-soft: #7d8fe0;
   --ink-wash: #e8edff;
-  --night: #0f1c4d; /* sidebar */
+  --night: #0f1c4d; /* top bar */
   --night-2: #182a6b;
   --graphite: #1c2633; /* text */
   --graphite-soft: #556170;
@@ -32,7 +32,10 @@
   --step-3: 2.1rem;
   --step-4: clamp(2.2rem, 1.6rem + 2.2vw, 3.4rem);
 
-  --gutter: clamp(16px, 3vw, 44px);
+  /* Content runs to 5% from each edge of the screen; text keeps its readable measure inside. */
+  --gutter: max(16px, 5vw);
+  --topbar-h: 60px;
+  --page-max: none;
   --measure: 72ch;
   --radius: 10px;
   --shadow: 0 1px 2px rgba(15, 28, 77, 0.06), 0 6px 18px -8px rgba(15, 28, 77, 0.18);
@@ -40,6 +43,11 @@
 
 * {
   box-sizing: border-box;
+}
+
+html {
+  /* Anchors and skip links land below the sticky top bar. */
+  scroll-padding-top: calc(var(--topbar-h) + 16px);
 }
 
 html,
@@ -53,6 +61,8 @@ body {
   font-family: var(--font-body), system-ui, sans-serif;
   font-size: var(--step-0);
   line-height: 1.5;
+  /* Tabular digits keep table columns aligned. Headings and big figures (display font) switch
+     to proportional, or full stops and commas get a digit's width ("2 . 1"). */
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
 }
@@ -66,6 +76,7 @@ h1,
 h2,
 h3 {
   font-family: var(--font-display), var(--font-body), sans-serif;
+  font-variant-numeric: proportional-nums;
   color: var(--graphite);
   line-height: 1.1;
   margin: 0;
@@ -74,13 +85,13 @@ h3 {
 h1 {
   font-size: var(--step-4);
   font-weight: 800;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.02em;
 }
 
 h2 {
-  font-size: var(--step-2);
+  font-size: clamp(1.6rem, 1.2rem + 0.9vw, 2.2rem);
   font-weight: 700;
-  letter-spacing: -0.015em;
+  letter-spacing: -0.02em;
 }
 
 h3 {
@@ -117,11 +128,64 @@ textarea {
 
 /* ---------- Page frame ---------- */
 
-/* Pages fill the space beside the sidebar; text keeps a readable measure inside. */
+/* Pages sit centred under the top bar; text keeps a readable measure inside. */
 .page {
   width: 100%;
-  max-width: 1760px;
+  max-width: var(--page-max);
+  margin-inline: auto;
   padding: 36px var(--gutter) 72px;
+}
+
+/* A plain white sheet under the hero, full width, like a chart sheet on the ward's paper.
+   It fills wide screens without decoration competing with the charts. */
+.paperBand::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: -36px calc(50% - 50vw) 0;
+  background: var(--sheet);
+  border-bottom: 1px solid var(--rule);
+}
+
+.paperBand {
+  position: relative;
+  isolation: isolate;
+}
+
+/* Brand lockup: who or what this page is about, set as a name rather than a label. */
+.lockup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin: 0;
+  max-width: none;
+}
+
+.lockupMark {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--night);
+  color: var(--zone-1);
+}
+
+.lockupName {
+  font-family: var(--font-display), sans-serif;
+  font-variant-numeric: proportional-nums;
+  font-size: var(--step-2);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--graphite);
+}
+
+.lockupLine {
+  padding-left: 14px;
+  border-left: 2px solid var(--rule);
+  font-size: var(--step-1);
+  color: var(--graphite-soft);
 }
 
 .pageHead {
@@ -145,10 +209,119 @@ textarea {
 }
 
 .section {
-  margin-top: 40px;
+  margin-top: 56px;
   display: grid;
   gap: 14px;
   align-content: start;
+}
+
+/* ---------- Bands ---------- */
+
+/* A full-width dark band: the top bar's chart paper at night. Every page opens with one (PageHero);
+   --band-top and --band-bottom stretch it over the page's own padding. */
+.nightBand {
+  position: relative;
+  isolation: isolate;
+  color: #c7d0f5;
+}
+
+.nightBand::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: var(--band-top, 0) calc(50% - 50vw) var(--band-bottom, 0);
+  background-color: var(--night);
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(160deg, var(--night) 0%, var(--night-2) 100%);
+  background-size: 28px 28px, 28px 28px, 100% 100%;
+}
+
+.nightBand h1,
+.nightBand h2,
+.nightBand h3 {
+  color: #fff;
+}
+
+.nightBand .lede {
+  color: #c7d0f5;
+}
+
+.nightBand .muted {
+  color: #aab6ea;
+}
+
+.nightBand a:not([class]) {
+  color: var(--zone-1);
+}
+
+.nightBand :focus-visible {
+  outline-color: var(--zone-1);
+}
+
+/* What follows a page's hero starts close under it. */
+.nightBand + .section {
+  margin-top: 0;
+}
+
+/* A full-width white band between light sections. */
+.whiteBand {
+  position: relative;
+  isolation: isolate;
+  padding-block: 56px 64px;
+}
+
+.whiteBand::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 calc(50% - 50vw);
+  background: var(--sheet);
+  border-block: 1px solid var(--rule);
+}
+
+/* Buttons on a dark band: the bright one leads, the ghost ones follow. */
+.buttonBright,
+.buttonGhost {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 46px;
+  padding: 10px 24px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.buttonBright:disabled,
+.buttonGhost:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.buttonBright {
+  background: var(--zone-1);
+  color: var(--night);
+}
+
+.buttonBright:hover {
+  background: #fff;
+}
+
+.buttonGhost {
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  color: #fff;
+}
+
+.buttonGhost:hover {
+  border-color: #fff;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 /* ---------- Controls ---------- */
@@ -325,7 +498,7 @@ textarea {
   fill: var(--graphite-soft);
 }
 
-/* on the dark sidebar: the trace and one line, in the sidebar's colours */
+/* on the dark top bar: the trace and one line, in the bar's colours */
 .wake.wakeCompact {
   --wake-on: #ffffff;
   --wake-off: rgba(255, 255, 255, 0.3);
@@ -473,6 +646,7 @@ textarea {
 /* ---------- Observation chart (the signature) ---------- */
 
 .obsChart {
+  color: var(--graphite); /* its own text colour, also on a dark band */
   background-color: var(--sheet);
   background-image:
     linear-gradient(var(--grid) 1px, transparent 1px),
@@ -495,6 +669,7 @@ textarea {
 
 .obsLatest {
   font-family: var(--font-display), sans-serif;
+  font-variant-numeric: proportional-nums;
   color: var(--ink);
   font-size: var(--step-2);
   font-weight: 800;

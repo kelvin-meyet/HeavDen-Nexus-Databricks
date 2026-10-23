@@ -1,0 +1,83 @@
+/* Cards in columns: four on a wide screen, down to one on a phone. */
+.stack {
+  columns: 4 280px;
+  column-gap: 18px;
+}
+
+.group {
+  break-inside: avoid;
+  margin: 0 0 18px;
+  padding: 18px 18px 20px;
+  border-radius: 14px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+}
+
+.group h3 {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0 0 12px;
+  font-size: var(--step-0);
+}
+
+.count {
+  font-family: var(--font-body), sans-serif;
+  font-size: var(--step--1);
+  font-weight: 400;
+  color: var(--graphite-soft);
+}
+
+.group ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.group li {
+  padding: 5px 11px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--sheet);
+  font-size: var(--step--1);
+}
+
+/* The cascade (TechStack.tsx): hidden until the stack is on screen, then cards and chips in turn. */
+.stack[data-reveal="pending"] .group,
+.stack[data-reveal="pending"] li {
+  opacity: 0;
+}
+
+.stack[data-reveal="shown"] .group {
+  animation: card-in 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) var(--delay) both;
+}
+
+.stack[data-reveal="shown"] li {
+  animation: chip-in 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) var(--delay) both;
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes chip-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 
 import { BandTag, ErrorBox, FactorList, Loading } from "@/components/bits";
 import { ObsChart, ZoneKey } from "@/components/ObsChart";
+import { PageHero } from "@/components/PageHero";
 import { WhatIf } from "@/components/WhatIf";
 import { useApi } from "@/lib/api";
 import { conditions, num, riskPct, unitName, when } from "@/lib/format";
@@ -25,26 +26,16 @@ export default function PatientPage() {
 
   return (
     <div className="page">
-      <p className="small">
-        <Link href="/patients">Back to all patients</Link>
-      </p>
-      {detail.error && <ErrorBox what="this patient" message={detail.error} />}
-      {!d && !detail.error && <Loading lines={6} />}
-      {p && d && (
-        <>
-          <header className={styles.head}>
-            <div>
-              <h1>{p.patient_label}</h1>
-              <p className="lede">
-                {p.age}
-                {p.sex}, {unitName(p.unit_id)}, bed {p.bed_id.split("-").at(-1)}.{" "}
-                {p.conditions === "none" ? "No long-term conditions." : `Long-term conditions: ${conditions(p.conditions)}.`}
-              </p>
-              <p className="muted small">
-                Admitted {when(p.admit_ts)}
-                {p.discharge_ts ? `, leaves ${when(p.discharge_ts)}` : ""}.
-              </p>
-            </div>
+      <PageHero
+        lockup={
+          <p className="small">
+            <Link href="/patients">Back to all patients</Link>
+          </p>
+        }
+        title={p ? p.patient_label : "Patient"}
+        aside={
+          p &&
+          d && (
             <div className={styles.riskNow}>
               {p.risk != null ? (
                 <>
@@ -57,7 +48,27 @@ export default function PatientPage() {
                 <span className="muted">No score at {when(d.as_of)}: the patient has left the ward.</span>
               )}
             </div>
-          </header>
+          )
+        }
+      >
+        {p && (
+          <>
+            <p className="lede">
+              {p.age}
+              {p.sex}, {unitName(p.unit_id)}, bed {p.bed_id.split("-").at(-1)}.{" "}
+              {p.conditions === "none" ? "No long-term conditions." : `Long-term conditions: ${conditions(p.conditions)}.`}
+            </p>
+            <p className="muted small">
+              Admitted {when(p.admit_ts)}
+              {p.discharge_ts ? `, leaves ${when(p.discharge_ts)}` : ""}.
+            </p>
+          </>
+        )}
+      </PageHero>
+      {detail.error && <ErrorBox what="this patient" message={detail.error} />}
+      {!d && !detail.error && <Loading lines={6} />}
+      {p && d && (
+        <>
 
           <div className={styles.layout}>
             <section className="section" aria-labelledby="chart-title" style={{ marginTop: 0 }}>

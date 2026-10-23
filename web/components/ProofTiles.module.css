@@ -1,0 +1,49 @@
+.panel {
+  display: grid;
+  gap: 10px;
+}
+
+/* Two columns in the hero's narrow panel, four across when the hero stacks; one on a phone. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.tiles div {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 18px 16px 16px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 3px 0 var(--zone-1);
+}
+
+.tiles dt {
+  font-size: var(--step--1);
+  line-height: 1.4;
+  color: #c7d0f5;
+}
+
+/* The figure scales with its tile, so "2,263,754" always fits. */
+.tiles dd {
+  margin: 0;
+  font-family: var(--font-display), sans-serif;
+  font-variant-numeric: proportional-nums;
+  font-size: clamp(1.3rem, 15cqi, 2.4rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: #fff;
+}
+
+.note {
+  margin: 0;
+  font-size: var(--step--1);
+  color: #8f9cd6;
+}

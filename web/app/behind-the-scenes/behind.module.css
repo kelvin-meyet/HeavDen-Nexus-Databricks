@@ -50,6 +50,89 @@
   margin-bottom: 4px;
 }
 
+/* On wide screens the line runs across, four steps a row. */
+@media (min-width: 1200px) {
+  .flow {
+    max-width: none;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 30px 28px;
+  }
+
+  .flow li {
+    padding: 46px 0 0;
+  }
+
+  .flow li::after {
+    left: 38px;
+    right: 6px;
+    top: 15px;
+    bottom: auto;
+    width: auto;
+    height: 2px;
+  }
+
+  .flow li:nth-child(4n)::after {
+    display: none;
+  }
+}
+
+/* The results beside how each part was built. */
+.resultsAndParts {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  gap: 0 3vw;
+  align-items: start;
+}
+
+.news2 {
+  display: grid;
+  gap: 10px;
+  padding: 18px 22px;
+  border-radius: 14px;
+  background: var(--ink-wash);
+  border-left: 4px solid var(--ink);
+}
+
+.news2 p {
+  max-width: none;
+  line-height: 1.55;
+}
+
+.parts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.parts article {
+  padding: 20px 22px 22px;
+  border-radius: 14px;
+  background: var(--sheet);
+  box-shadow: var(--shadow);
+  border-top: 3px solid var(--ink);
+}
+
+.parts h3 {
+  margin-bottom: 8px;
+}
+
+.parts p {
+  max-width: none;
+  line-height: 1.55;
+}
+
+@media (max-width: 1300px) {
+  .resultsAndParts {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .parts {
+    grid-template-columns: 1fr;
+  }
+}
+
 .lessons {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -65,4 +148,21 @@
 .lessons h3 {
   font-size: var(--step-1);
   margin-bottom: 6px;
+}
+
+/* The project's tech stack, in a white band (components/TechStack). */
+.stackBand {
+  margin-top: 64px;
+}
+
+.stackHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 20px;
+  margin-bottom: 26px;
+}
+
+.stackHead p {
+  margin: 0;
 }

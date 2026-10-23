@@ -42,14 +42,14 @@ CI runs both on every pull request.
 
 The visual language is a **NEWS2 observation chart**, made lively: values plotted as ink-blue dots on chart paper over the NEWS2 scoring zones (yellow, amber, red), which appear only where they mean a score.
 
-- **Layout:** an app shell with a deep-ink sidebar (brand, navigation, live ward time) and content that fills the rest of the screen; on phones the sidebar becomes a top bar.
+- **Layout:** a sticky deep-ink top bar (brand, navigation, a highlighted "Work with me" link, the simulated ward time) over a thin synthetic-data strip; pages are centred at up to 1640 px, and the Overview and Work with me heroes sit on a full-width white sheet (`.paperBand` in `globals.css`) so wide screens don't show bare margins. Brand and name lines use `.lockup` (name plus a sentence-case descriptor), not an all-caps eyebrow. Below 1180 px the links move behind a Menu button (closes on Escape or when a link is chosen).
 - **Colour carries meaning:** ink blue for data, red only for the High band and the alert threshold, amber for alert load, green for things going well (escalations flagged in advance). Headline figures carry the colour of what they measure.
-- **Type:** Bricolage Grotesque for headings and figures; Atkinson Hyperlegible for text and numbers, designed so characters can't be confused (0/O, 1/l), which matters when a number is a vital sign.
+- **Type:** Schibsted Grotesk for headings and big figures (a newsroom grotesk made for confident headlines), with proportional figures so full stops and commas don't take a digit's width; Atkinson Hyperlegible for text and numbers, designed so characters can't be confused (0/O, 1/l), which matters when a number is a vital sign.
 - **Motion:** used once, with purpose: the hero charts draw themselves in, and a live dot pulses beside the ward time. Everything respects "reduce motion".
 
 Code:
 
-- `components/Shell.tsx`: the sidebar app shell
+- `components/Shell.tsx`: the top-bar app shell
 - `components/ObsChart.tsx`: the observation chart used for every time series
 - `components/SizedChart.tsx`: measures its own width, so charts size reliably in any layout
 - `lib/news2.ts`: the NEWS2 zones per vital sign

@@ -102,23 +102,21 @@ function Trace({ stops, labels }: { stops: string[]; labels: boolean }) {
 }
 
 /** Said when a load is still running after a few seconds: the API, and in live mode Databricks'
- *  SQL warehouse, are waking up. `compact`: the trace and one line, for the dark sidebar. */
+ *  SQL warehouse, are waking up. `compact`: the trace and one line, for the dark top bar. */
 export function WakeNotice({ compact = false, className = "" }: { compact?: boolean; className?: string }) {
   const health = useHealth();
   const seconds = useSecondsWaiting();
   if (seconds * 1000 < SLOW_MS) return null;
   const warehouse = readsWarehouse(health);
   const stops = warehouse ? ["Website", "API", "SQL warehouse"] : ["Website", "API"];
+  const title = warehouse ? "Waking up the API and Databricks’ SQL warehouse" : "Waking up the API";
   return (
     <div className={`wake ${compact ? "wakeCompact" : ""} ${className}`} role="status">
       <Trace stops={stops} labels={!compact} />
       <div className="wakeText">
-        {!compact && (
-          <p className="wakeTitle">
-            {warehouse ? "Waking up the API and Databricks’ SQL warehouse" : "Waking up the API"}
-          </p>
-        )}
+        {!compact && <p className="wakeTitle">{title}</p>}
         <p className="wakeDetail">
+          {compact && <strong>{title}. </strong>}
           Cold starts take 30–40 seconds, saving compute cost.
           <span className="wakeTime" aria-hidden="true">
             {seconds} s so far
@@ -143,8 +141,8 @@ export function Loading({ lines = 3 }: { lines?: number }) {
 export function ErrorBox({ message, what }: { message: string; what: string }) {
   return (
     <div className="errorBox" role="alert">
-      <strong>Couldn&rsquo;t load {what}.</strong> {message}. If the data service was asleep, reload in a few
-      seconds.
+      <strong>Couldn&rsquo;t load {what}.</strong> {message.replace(/\.+$/, "")}. If the data service was asleep,
+      reload in a few seconds.
     </div>
   );
 }
