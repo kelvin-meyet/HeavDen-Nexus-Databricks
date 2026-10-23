@@ -257,14 +257,31 @@ jobs:
       - name: Score every patient-hour with the newest model
         run: databricks bundle run score -t staging
 
-      # The sign-in at the start gives tokens that last about an hour, and the run can be longer
-      # with the monitor's refresh: sign in again so the drift step can follow its job to the end.
+      # The first sign-in's Databricks token lasts about an hour, and the run can be longer with
+      # the monitor's refresh. Signing in again alone doesn't help: the CLI keeps using the cached
+      # token until it expires, and by then the new sign-in's proof (valid for 5 minutes) has
+      # expired too (main run 39888406720: AADSTS700024 at the alias check, 61 minutes in).
+      # So clear the cache, sign in again and fetch the token at once: it then lasts about an
+      # hour from here, and the step fails if it wasn't refreshed.
+      - name: Clear the cached Azure sign-in before the drift check
+        run: az account clear
+
       - name: Sign in to Azure again before the drift check
         uses: azure/login@v3.1.0
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           allow-no-subscriptions: true
+
+      - name: Get a fresh Databricks token while the new sign-in is valid
+        run: |
+          expires=$(az account get-access-token --resource 2ff814a6-3304-4ab8-85cb-cd0e6f879c1d --query expires_on -o tsv)
+          left=$(( (expires - $(date +%s)) / 60 ))
+          echo "The Databricks token is valid for another $left minutes."
+          if [ "$left" -lt 45 ]; then
+            echo "::error::The Databricks token wasn't refreshed ($left minutes left)."
+            exit 1
+          fi
 
       - name: Check for drift against the newest model's data
         run: databricks bundle run drift_check -t staging
