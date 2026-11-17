@@ -1,0 +1,9 @@
+# Findings checked by hand and found not to be secrets, one fingerprint each (commit:file:rule:line).
+# Add a line here only after looking at the finding; a real key is rotated, never listed here.
+
+# generic-api-key on a test's setting name, not a key. The test's variable named keyed holds the
+# word "key", and the comma after it reads as an assignment, so the next argument's name (the
+# reasoning-effort setting) was taken for the secret. Not quoted here: the quote would match too.
+# Checked 17 Nov 2026.
+db0d2aafb904f653437db37b12872c7fa790eb0a:tests/test_llm_provider.py:generic-api-key:120
+db0d2aafb904f653437db37b12872c7fa790eb0a:tests/test_llm_provider.py:generic-api-key:121

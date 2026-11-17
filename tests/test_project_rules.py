@@ -20,6 +20,28 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = sorted((ROOT / ".github" / "workflows").glob("*.y*ml"))
 PINNED_ACTION = re.compile(r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}$")  # owner/repo@<full commit hash>
 SKIP_MARKERS = ("mark." + "skip", "mark." + "xfail", "pytest." + "skip(")  # split: not a match here
+IGNORED_FINDING = re.compile(r"[0-9a-f]{40}:[^:]+:[\w.-]+:\d+")  # commit:file:rule:line
+SECRET_SCAN = re.compile(r"\bgitleaks\b.*\sgit(\s|$)")  # the gitleaks binary reading the history
+FULL_REDACTION = re.compile(r"\s--redact(=100)?(\s|$)")  # --redact=N shows part of each secret
+NEVER_FAILS = re.compile(r"\|\||--exit-code[= ]+0\b|--log-opts")  # or reads only some commits
+WHOLE_HISTORY = re.compile(r"\s*fetch-depth:\s*['\"]?0['\"]?")
+
+
+def commands(path: Path) -> list[str]:
+    """The file's lines with comments removed and `\\` continuations joined.
+
+    YAML folded blocks (`run: >`) are not joined: keep the scan on one shell line.
+    """
+    lines, pending = [], ""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        code = re.sub(r"(^|\s)#.*", "", line).rstrip()  # a comment naming a command is not one
+        if code.endswith("\\"):
+            pending += code[:-1] + " "
+            continue
+        if (pending + code).strip():
+            lines.append(pending + code)
+        pending = ""
+    return lines
 
 
 def test_workflows_exist() -> None:
@@ -84,12 +106,42 @@ def test_every_workflow_is_listed_as_a_deploy_path_or_not() -> None:
 
 
 def test_secrets_are_scanned_before_commit_and_in_ci() -> None:
+    """Not checked: `continue-on-error` on the scan's step, or a depth-0 checkout in
+    another job of the same workflow."""
     config = ROOT / ".pre-commit-config.yaml"
     assert config.is_file(), "add .pre-commit-config.yaml with gitleaks"
-    assert "gitleaks" in config.read_text(encoding="utf-8"), "pre-commit does not run gitleaks"
-    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    assert re.search(r"gitleaks.* git ", ci), "ci.yml does not scan the history for secrets"
-    assert "fetch-depth: 0" in ci, "the secret scan needs the whole history (fetch-depth: 0)"
+    assert any(re.search(r"\bid:\s*gitleaks\b", line) for line in commands(config)), (
+        "pre-commit does not run gitleaks (a commented-out hook does not)"
+    )
+    scans = 0
+    for workflow in WORKFLOWS:
+        lines = commands(workflow)
+        found = [line for line in lines if SECRET_SCAN.search(line)]
+        scans += len(found)
+        for scan in found:
+            assert FULL_REDACTION.search(scan), (
+                f"{workflow.name}: the scan prints to a public log; use --redact (all of it)"
+            )
+            assert not NEVER_FAILS.search(scan), (
+                f"{workflow.name}: the scan must fail the job on a finding and read every "
+                "commit: no `||`, `--exit-code 0` or `--log-opts`"
+            )
+        if found:
+            assert any(WHOLE_HISTORY.fullmatch(line) for line in lines), (
+                f"{workflow.name}: the secret scan needs the whole history (fetch-depth: 0)"
+            )
+    assert scans, "no workflow runs the gitleaks binary on the history (`gitleaks git --redact`)"
+
+
+def test_each_ignored_secret_finding_names_its_commit() -> None:
+    """An entry without its commit (file:rule:line) would hide that line in every later commit."""
+    ignore = ROOT / ".gitleaksignore"
+    entries = ignore.read_text(encoding="utf-8-sig").splitlines() if ignore.is_file() else []
+    for entry in (line.strip() for line in entries):
+        if entry and not entry.startswith("#"):
+            assert IGNORED_FINDING.fullmatch(entry), (
+                f".gitleaksignore: `{entry}` is not commit:file:rule:line; list each finding alone"
+            )
 
 
 def test_no_test_file_skips_its_own_tests() -> None:
