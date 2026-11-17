@@ -3,6 +3,7 @@ import json
 import numpy as np
 import pandas as pd
 import pytest
+from conftest import needs_delta
 from sklearn.metrics import average_precision_score, brier_score_loss
 
 from heavden.monitoring import drift_check as dc
@@ -105,13 +106,10 @@ def test_a_dropped_field_and_quarantined_readings_are_flagged():
     assert rows.loc[("missing_rate_change", "etco2"), "level"] == "act"
 
 
+@needs_delta
 def test_the_readings_of_known_faults_are_left_out_of_the_reference(spark):
     # 14 Oct, staging: v21's days held a firmware update's readings (etco2, no motion), so a
     # normal day read as a dropped field and an added one
-    from conftest import DELTA
-
-    if not DELTA:
-        pytest.skip("Delta Lake runs on Linux (CI), not Windows")
     from pyspark.sql import functions as F
 
     from heavden.ml.batch_scoring import to_spark

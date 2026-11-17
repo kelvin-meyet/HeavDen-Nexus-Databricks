@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 import pytest
+from conftest import needs_delta
 from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
 
 from heavden.ml import evaluate
@@ -394,11 +395,7 @@ def test_shadow_rows_never_change_the_status_or_the_kinds_of_drift():
 # --- On Delta Lake (Linux / CI): the score job's writes and the reader of the monitor's tables
 
 
-def _delta_tables(spark):
-    from conftest import DELTA
-
-    if not DELTA:
-        pytest.skip("Delta Lake runs on Linux (CI), not Windows")
+def _delta_tables(spark):  # for tests marked needs_delta
     spark.sql("CREATE DATABASE IF NOT EXISTS monitoring")
     return pf.MonitorSpec("spark_catalog", "")
 
@@ -407,6 +404,7 @@ def _version(spark, table: str) -> int:
     return spark.sql(f"DESCRIBE HISTORY {table}").agg({"version": "max"}).first()[0]
 
 
+@needs_delta
 def test_the_inference_log_takes_new_hours_late_labels_and_a_rescore(spark):
     spec = _delta_tables(spark)
     loaded = []
@@ -474,6 +472,7 @@ def test_the_inference_log_takes_new_hours_late_labels_and_a_rescore(spark):
     assert set(baseline["model_version"]) == {"18", "19", "21"}
 
 
+@needs_delta
 def test_the_monitor_tables_are_read_by_their_window_columns(spark):
     spec = _delta_tables(spark)
     profile, drift = _monitor_output(days=7)
