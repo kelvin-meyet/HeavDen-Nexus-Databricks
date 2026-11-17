@@ -5,6 +5,7 @@ import json
 
 import pandas as pd
 import pytest
+from conftest import needs_delta
 
 from heavden.agent import publish
 from heavden.agent.corpus import chunk_corpus, load_corpus
@@ -131,11 +132,8 @@ def test_the_function_returns_the_columns_it_declares(spark):
     assert "heavden_staging.gold.encounters" in sql and "{" not in sql
 
 
+@needs_delta
 def test_republishing_updates_only_what_changed(spark, rows):
-    from conftest import DELTA
-
-    if not DELTA:
-        pytest.skip("Delta Lake runs on Linux (CI), not Windows")
     spark.sql("CREATE DATABASE IF NOT EXISTS ml")
     table = "ml.corpus_chunks"
     spark.sql(f"DROP TABLE IF EXISTS {table}")

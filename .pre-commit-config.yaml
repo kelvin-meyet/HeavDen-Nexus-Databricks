@@ -1,0 +1,9 @@
+# Checks that run before every commit, with or without Claude. Install once per clone:
+#   uvx pre-commit@4.7.0 install
+# (uvx runs pre-commit without adding it to the project's dependencies.)
+# CI runs the same secret scan over the whole history: ci.yml, job lint-and-test.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks

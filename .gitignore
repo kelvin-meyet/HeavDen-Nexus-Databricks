@@ -102,11 +102,6 @@ logs*
 # Local MLflow model downloads
 downloaded_artifacts/
 
-# Personal Stuff
-CLAUDE.md
-Plan.md
-ml_model.md
-
 
 # Generated data (Synthea output, simulator output) - reproducible from seeds, never committed
 data/

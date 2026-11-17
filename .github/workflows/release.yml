@@ -43,21 +43,23 @@ jobs:
       run:
         working-directory: databricks
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0 # the tags, to compare with the previous release
 
-      - uses: azure/login@v3.1.0
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           allow-no-subscriptions: true
 
-      - uses: databricks/setup-cli@v1.17.0
+      - uses: databricks/setup-cli@d76f84cea9893ce68311a1f33fb0c95af6c963b7 # v1.17.0
         with:
           version: 1.17.0
 
-      - uses: astral-sh/setup-uv@v6 # bundle deploy builds the wheel with uv
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0; bundle deploy builds the wheel with uv
+        with:
+          version: "0.13.6" # uv itself: setup-uv installs the latest unless told
 
       - name: Validate
         run: databricks bundle validate --strict -t prod
@@ -124,20 +126,21 @@ jobs:
       DATABRICKS_AUTH_TYPE: azure-cli
       DATABRICKS_HOST: https://adb-7405604448133690.10.azuredatabricks.net
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: azure/login@v3.1.0
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           allow-no-subscriptions: true
 
-      - uses: databricks/setup-cli@v1.17.0
+      - uses: databricks/setup-cli@d76f84cea9893ce68311a1f33fb0c95af6c963b7 # v1.17.0
         with:
           version: 1.17.0
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
+          version: "0.13.6" # uv itself: setup-uv installs the latest unless told
           python-version: "3.12"
           enable-cache: true
 
@@ -171,20 +174,21 @@ jobs:
       IMAGE: ghcr.io/${{ github.repository_owner }}/heavden-api
       VOLUME: /Volumes/heavden_prod/ml/website
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: azure/login@v3.1.0
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           allow-no-subscriptions: true
 
-      - uses: databricks/setup-cli@v1.17.0
+      - uses: databricks/setup-cli@d76f84cea9893ce68311a1f33fb0c95af6c963b7 # v1.17.0
         with:
           version: 1.17.0
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
+          version: "0.13.6" # uv itself: setup-uv installs the latest unless told
           python-version: "3.12"
           enable-cache: true
 
